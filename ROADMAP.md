@@ -2,7 +2,7 @@
 
 This is the implementation plan for cave-vm v1. It breaks the six phases in [docs/design.md](docs/design.md) into tasks that agents and contributors pick up one at a time.
 
-**The design wins.** This file only orders and sizes the work. If this plan and `docs/design.md` disagree, the design is right and this file is the bug. Nothing here changes a decided item. Anything the design leaves open is listed under [Needs Ivan's decision](#needs-ivans-decision) with a recommendation, and stays open until Ivan answers. Do not build on an open decision; pick another task.
+**The design wins.** This file only orders and sizes the work. If this plan and `docs/design.md` disagree, the design is right and this file is the bug. Nothing here changes a decided item. Anything the design leaves open goes under [Needs Ivan's decision](#needs-ivans-decision) with a recommendation, and stays open until Ivan answers. Do not build on an open decision; pick another task. Answered items move to [Decisions](#decisions).
 
 ## How to use this file
 
@@ -10,7 +10,7 @@ This is the implementation plan for cave-vm v1. It breaks the six phases in [doc
 - Each task is sized as one small PR. Task IDs (`P3.4`) go in the PR title or description so progress can be traced. If a task turns out bigger than one PR, split it and say so in the PR.
 - Each phase becomes a GitHub milestone, and its gate is the closing criterion (design, "How Claude Code works in this repo", item 6).
 - `[A3]` marks a claim that depends on an assumption from the [assumptions register](#assumptions-to-verify). Treat these as unverified until the phase that checks them records the result.
-- `[D4]` marks a task blocked or shaped by an open decision.
+- `[D4]` marks a task shaped by a decision in the [Decisions](#decisions) table.
 - Before starting a task: read the design section it names, write a short plan, and write tests first where practical (AGENTS.md workflow).
 
 ## Phases and gates
@@ -39,7 +39,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | ID | Task | Tests / check |
 | --- | --- | --- |
 | P1.1 | `docs/cli.md`: every command in the design's CLI table, with its flags, defaults, output and exit codes, and each error message with its fix. Flags the design names (`--net off`, `--net lan`, `-p 3000`, `cave agent --in-vm`, `cave rm` confirmation) are written as specified. Any flag or output format the design does not name is marked "proposed" in the PR for Ivan to accept or cut. | Every command in the design table appears; the quickstart is still two commands. |
-| P1.2 | `docs/config.md`: the `cave.toml` reference. The keys in the design example (`[vm] image cpus memory`, `[storage] mode`, `[network] mode`) are fixed. Key names for things the design says are configurable but does not name (idle auto-suspend time, automatic snapshots and deletion, optional TTL, turning off the update detector) are proposals [D10]. | Example file parses as TOML (checked once the workspace exists). |
+| P1.2 | `docs/config.md`: the `cave.toml` reference. The keys in the design example (`[vm] image cpus memory`, `[storage] mode`, `[network] mode`) are fixed. Key names for things the design says are configurable but does not name (idle auto-suspend time, automatic snapshots and deletion, optional TTL, turning off the update detector) are proposed here and approved in this PR [D10]. | Example file parses as TOML (checked once the workspace exists). |
 | P1.3 | `docs/protocol.md`: the guest agent protocol and daemon API. Length-prefixed JSON, versioned from day one, streamed output, a pseudo-terminal for `cave shell`, and the same format on the daemon socket (design, "Interfaces, defaults and process"). Framing width, maximum frame size and the version handshake are proposed in the PR. Message list: exec, stream chunk, exit status, pty open/resize/data, file read, file write, port forward, snapshot/restore notifications, error. | Reviewed by Ivan; becomes the source for `proto` in P3.1. |
 | P1.4 | `CHANGELOG.md` in Keep a Changelog format with an Unreleased section, since the definition of done requires changelog updates. | File exists and is linked from CONTRIBUTING.md. |
 | P1.5 | `.claude/settings.json`: allow cargo commands, deny force-push and destructive deletes (design, "How Claude Code works in this repo", item 5). | No `CLAUDE.md` or `CLAUDE.local.md` is added (item 1). |
@@ -157,7 +157,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | --- | --- | --- |
 | P5.1 | Rust `sdk` over the daemon socket: `Sandbox::open(".")`, `exec`, `snapshot`, `fork`, `restore`, `destroy`. Built before the MCP server, which uses it. | Tests against a fake daemon. |
 | P5.2 | `mcp` server: tools for exec, read file, write file, snapshot, fork, restore and destroy, resolving the VM from the working directory [D4]. | Tool tests against a fake daemon. |
-| P5.3 | Credentials: a call names a credential (for example `API_KEY`), the host resolves it from `.env` or a similar source, and the value is injected into the command being run and never returned to the agent. The audit log records the name only. Snapshot metadata records which credentials were injected, and forking or exporting such a snapshot shows a warning. What happens when the command itself prints the value is open [D9]. | Tests that the value never appears in MCP responses, the audit log or snapshot metadata; warning tests. |
+| P5.3 | Credentials: a call names a credential (for example `API_KEY`), the host resolves it from `.env` or a similar source, and the value is injected into the command being run and never returned to the agent. The audit log records the name only. Snapshot metadata records which credentials were injected, and forking or exporting such a snapshot shows a warning. If the command prints the value, the exact value is redacted, best effort, from streamed output and MCP responses, and the docs state that a command can still leak it through files or the network [D9]. | Tests that the value never appears in MCP responses, the audit log or snapshot metadata; redaction tests for output split across chunks; warning tests. |
 | P5.4 | Audit log in `.cave/`: exec calls, file writes and network connections (from the NAT stack). | Tests per event type; no credential values. |
 | P5.5 | `cave inspect`: policy, resources and audit log. Optional TTL for disposable VMs. | CLI tests. |
 | P5.6 | One skill source in the repo, used both by `cave init` and as the bootstrap skill on the website. | Test that `cave init` writes exactly that text. |
@@ -199,7 +199,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 
 - **Testing.** Device models are tested against the mock backend, with no network in any test. Hardware and end-to-end tests run on the self-hosted Mac and are kept out of the default `cargo test` run.
 - **unsafe.** Only in `hvf` and the guest-memory code, each block with a `// SAFETY:` comment. Every other crate has `#![deny(unsafe_code)]`.
-- **Dependencies.** None added without asking first, with the reason. [D4] lists the ones this plan expects to request.
+- **Dependencies.** None added without asking first, with the reason. [D4] lists the ones this plan expects to request, asked for once per phase.
 - **Off limits to agents.** Signing, release and CI secrets, branch protection, and publishing images or releases.
 - **Changelog.** Every user-visible change adds a line under Unreleased in `CHANGELOG.md`.
 
@@ -223,12 +223,17 @@ None of these are established. Each is checked in the task listed, and the resul
 
 ## Needs Ivan's decision
 
-Decided so far: D1 (phases and gates, [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md)), D2 (`cave agent` runs on the Mac, `--in-vm` for inside the VM, [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md)) and D3 (a phase for each unplaced item, also in decision 0001). The open items keep their numbers.
+None open. When a task hits something the design and the decisions below do not cover, add it here with a recommendation and stop work that depends on it.
 
-Each item has a recommendation. None of them is chosen until Ivan answers; tasks marked with the item wait for it.
+## Decisions
 
-| ID | Question | Recommendation |
+Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), and D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md).
+
+| ID | Question | Decision |
 | --- | --- | --- |
+| D1 | Phases and gates, since the design's roadmap diagram was lost in the export. | Redrawn in `docs/design.md`; gate N closes phase N for phases 1 to 5, and phase 6 ends at the v1 release. |
+| D2 | What `cave agent claude` does. | Runs the agent on the Mac through the MCP server; `--in-vm` runs it inside the VM. |
+| D3 | Phases for decided items the README phases did not place. | Sandbox profile in phase 3; Rust SDK, remote editing and synced mode in phase 5; Python and TypeScript SDKs and the Ubuntu image in phase 6. |
 | D4 | Dependencies this plan expects to ask for. Each still needs its own request with a reason. | Ask per phase, not per crate: phase 2 `vm-fdt` (device tree) and `serde`/`serde_json`; phase 3 `vm-memory` and `virtio-queue` (rust-vmm, used by Firecracker-style VMMs), `smoltcp` (userspace TCP/IP for the NAT), `clap`, `sha2`; phase 5 an MCP server library or a small hand-written one. Prefer writing small pieces ourselves over pulling in large frameworks. |
 | D5 | Where the guest-memory code lives. `unsafe` is allowed "in the guest-memory code" but the crate map has no memory crate. | A single `memory` module inside `vmm`, the only module in that crate allowed to use `unsafe`, rather than a new crate (the layout is decided). |
 | D6 | Where the kernel, the base image and the musl guest agent are built. Building Linux artifacts on a Mac needs a cross toolchain or a Linux build environment. | Release builds in CI on Linux runners (release automation set up by Ivan); local builds inside a cave VM once gate 3 passes; before that, a documented cross toolchain for the agent and a container for the kernel. |

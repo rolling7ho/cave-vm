@@ -35,7 +35,7 @@ The workspace does not exist yet. Until it does, treat these as the intended com
 
 ## Rules
 
-- `unsafe` is allowed only in `hvf` and the guest-memory code. Every `unsafe` block has a `// SAFETY:` comment.
+- `unsafe` is allowed only in `hvf` and the guest-memory code (the `memory` module in `vmm`). Every `unsafe` block has a `// SAFETY:` comment.
 - No new dependencies without asking, and say why when you ask.
 - No network access in tests. Test device models against the mock backend.
 - Do not touch signing, release or CI secrets.
