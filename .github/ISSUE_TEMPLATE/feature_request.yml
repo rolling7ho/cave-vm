@@ -1,0 +1,69 @@
+name: Feature request
+description: Suggest a change or addition to cave-vm
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Read `docs/design.md` first: decisions marked as decided there are not changed through a feature request. If your idea conflicts with one, say so and explain why it should change.
+
+        For anything larger than a small change, this issue is the design note that CONTRIBUTING.md asks for, so please be specific.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that cave-vm does not let you do, or does badly?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Your proposal
+      description: What should change? Include the commands, flags or config you would expect to use.
+      placeholder: |
+        cave snapshot --keep 5
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part does it touch?
+      multiple: true
+      options:
+        - CLI
+        - Daemon
+        - VMM and device models
+        - Guest agent
+        - Snapshots and forks
+        - Storage and sync (sealed, synced, cave pull)
+        - Network and policy
+        - Credentials
+        - MCP server and agent integration
+        - SDKs
+        - Image and kernel
+        - Install and first run
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Effect on safety
+      description: Does this widen what a VM can reach, or change how credentials, snapshots or the network are handled? Say how, or write "none".
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to implement it?
+      options:
+        - "Yes"
+        - "Maybe, with guidance"
+        - "No"
+    validations:
+      required: true

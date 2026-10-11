@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 cave-vm is an open-source (Apache 2.0) microVM runtime for macOS, built for coding agents. The command is `cave`. Each project directory gets its own disposable Linux VM that starts fast, can be snapshotted and forked, and shows what it can reach. Hardware virtualization comes from Apple's Hypervisor.framework. Guests are ARM64 Linux. Host: macOS 26 or later, Apple Silicon only.
 
