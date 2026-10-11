@@ -214,7 +214,7 @@ The approach is Firecracker's, ported to macOS: a minimal virtio-mmio device mod
 | Process model | One VMM process per VM. The daemon supervises them. |
 | Host requirements | macOS 26 (Tahoe) or later, Apple Silicon only. |
 | Daemon socket | Local Unix socket with user-only permissions. |
-| Credentials | Forwarded into the VM on demand through MCP: the call names a credential (for example API\_KEY) and the host side resolves it from a source such as .env. Anything delivered into the VM is frozen into memory snapshots taken afterwards, and into forks of them. The value is injected into the command being run and never returned to the agent. The audit log records the credential's name, not its value. Snapshot metadata records which credentials were injected, and forking or exporting such a snapshot shows a warning. |
+| Credentials | Forwarded into the VM on demand through MCP: the call names a credential (for example API\_KEY) and the host side resolves it from a source such as .env. Anything delivered into the VM is frozen into memory snapshots taken afterwards, and into forks of them. The value is injected into the command being run and never returned to the agent. If the command prints the value, it is redacted, best effort, from streamed output and MCP responses; a command can still leak it through files or the network, and the docs say so. The audit log records the credential's name, not its value. Snapshot metadata records which credentials were injected, and forking or exporting such a snapshot shows a warning. |
 | Base image | The user chooses Debian or Ubuntu. Debian is the recommended default. |
 | Preinstalled | git, node, npm, python, curl, vim, openssh-server. |
 | Image hosting | Hosted in the project's GitHub releases. |
@@ -351,6 +351,7 @@ cave-vm/
 - [x] Guest agent protocol, daemon API, VM lifecycle, disk and defaults: see the decisions tables under Architecture.
 - [x] `cave agent <name>`: the agent runs on the Mac and uses the VM through MCP; `--in-vm` runs it inside the VM instead. See `docs/decisions/0002-cave-agent-runs-on-the-mac.md`.
 - [x] Roadmap: six phases, each of the first five closed by a gate, and phase 6 ending at the v1 release. See `docs/decisions/0001-roadmap-phases-and-gates.md`.
+- [x] Roadmap open items (dependencies, guest-memory location, Linux build environment, toolchain pin, interrupt-controller contingency, printed credentials, config key names, hardware CI, README fork wording). See `docs/decisions/0003-roadmap-open-items.md`.
 - [x] Success targets: the headline is a fork in well under a second; exact numbers are set after the spike measures a baseline.
 - [x] Telemetry (none), security (sandbox profile), testing (self-hosted Mac and a mock backend), repo and process (one Cargo workspace, DCO sign-off).
 
