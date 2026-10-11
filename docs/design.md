@@ -114,14 +114,14 @@ The skill is the cheapest, highest-leverage piece of the project, but a skill is
 
 - An MCP server exposes `exec`, read file, write file, snapshot, fork, restore and destroy. The agent gets a VM through MCP and no host shell.
 - Where the agent supports it, `cave init` also writes a permissions config that denies host Bash, so the skill is guidance and the config is the guardrail.
-- `cave agent claude` starts an agent already running against a fresh VM for the current project.
+- `cave agent claude` starts the agent on the Mac, already connected to this project's VM through the MCP server, with host Bash denied where the agent supports it.
 - Snapshot before each agent run, `cave restore` after, for cheap rollback.
 
 The docs should state the limit honestly: a confused or prompt-injected agent that still has a host shell can step outside the VM. "Visible safety" must not overclaim.
 
 **Where the agent runs**
 
-Both are supported. The default is the agent on the Mac, using the VM only through the MCP server, so the model API key never enters the VM. `cave agent <name>` runs the agent inside the VM instead, which needs network access to reach the model API.
+Both are supported. The default is the agent on the Mac, using the VM only through the MCP server, so the model API key never enters the VM. `cave agent <name> --in-vm` runs the agent inside the VM instead, which needs network access to reach the model API.
 
 **Bootstrap skill (set up by paste)**
 
@@ -174,7 +174,7 @@ The first run fetches the kernel and base image and does all setup. The CLI is a
 | `cave inspect` | show the policy, resources and audit log |
 | `cave sync` / `cave pull` | update the Mac mirror / bring Mac edits in (synced mode) |
 | `cave cp` / `cave export` | move files in and out |
-| `cave agent <name>` | start an agent against this VM |
+| `cave agent <name>` | start an agent on the Mac against this VM through MCP; `--in-vm` runs it inside the VM |
 | `cave images` | list base images |
 | `cave doctor` | check entitlements, macOS version, disk space and image state |
 
@@ -184,7 +184,24 @@ The first run fetches the kernel and base image and does all setup. The CLI is a
 
 ## Architecture
 
-&#91;embedded content: architecture - 3 clients, daemon, VMM, guest\]
+```mermaid
+flowchart TD
+    subgraph Clients
+        CLI["cave CLI"]
+        SDK["SDKs<br/>Rust, Python, TypeScript"]
+        MCP["MCP server"]
+    end
+    CLI & SDK & MCP -->|"length-prefixed JSON<br/>over a Unix socket"| D["Daemon<br/>lifecycle, policy, audit log, sync"]
+    D -->|"supervises one per VM"| V1["VMM process<br/>virtio-mmio devices, userspace NAT, snapshots"]
+    D -.-> V2["VMM process<br/>(another project)"]
+    V1 --> B["Backend trait"] --> HVF["Hypervisor.framework"]
+    subgraph Guest["Guest: ARM64 Linux"]
+        K["Our minimal kernel"]
+        A["Guest agent<br/>exec, shell, files, port forwarding"]
+    end
+    V1 -->|"vsock"| A
+    HVF --> Guest
+```
 
 The CLI, SDK and MCP server all talk to one daemon, which owns lifecycle, policy and the audit log and supervises one VMM process per VM. The VMM runs the guest on Apple's Hypervisor.framework behind a backend trait, so KVM or another backend can be added later. The guest agent is the only in-guest control path, reached over vsock.
 
@@ -235,7 +252,26 @@ Interfaces, defaults and process:
 
 ## Milestones and planning phases
 
-&#91;embedded content: roadmap - 6 phases, 5 gates\]
+```mermaid
+flowchart TD
+    P1["Phase 1: Spec<br/>quickstart, CLI, config and protocol docs"] --> G1{{"Gate 1: surface approved"}}
+    G1 --> P2["Phase 2: Spike<br/>boot to a shell on Hypervisor.framework"] --> G2{{"Gate 2: signing, snapshot state, baseline numbers"}}
+    G2 --> P3["Phase 3: Core VM<br/>devices, NAT, guest agent, daemon, CLI"] --> G3{{"Gate 3: usable project VM"}}
+    G3 --> P4["Phase 4: Snapshot and fork"] --> G4{{"Gate 4: headline demo"}}
+    G4 --> P5["Phase 5: Agent layer<br/>MCP, skill, credentials, audit, sync"] --> G5{{"Gate 5: agent works through MCP only"}}
+    G5 --> P6["Phase 6: Density and polish"] --> R(["v1 release"])
+```
+
+Each gate closes the phase before it. The tasks behind each phase are in `ROADMAP.md`.
+
+| Phase | Contents | Closes with |
+| --- | --- | --- |
+| 1. Spec | README quickstart, CLI reference, `cave.toml` reference and protocol spec, written before any code | **Gate 1:** the CLI, config and protocol docs are approved, and the quickstart is still two commands |
+| 2. Spike | Boot a Linux kernel to a shell through Hypervisor.framework; confirm signing, vmnet and interrupt-controller assumptions; measure a baseline | **Gate 2:** ad hoc signing works, a snapshot of a running guest restores in a new process, and baseline numbers and gate 4 targets are recorded |
+| 3. Core VM | Block, network (userspace NAT with LAN ranges denied) and vsock devices, the guest agent, the daemon, the basic CLI, the base image and the VMM sandbox profile | **Gate 3:** `cave init`, `run`, `shell` and `exec` work on a real Mac, outbound network works, LAN ranges are blocked, Docker runs inside the VM, and the daemon recovers a crashed VMM |
+| 4. Snapshot and fork | Versioned snapshots, restore, fork, lifecycle (suspend, sleep, reboot), `cave gc` and `cave export` | **Gate 4:** the headline demo, with snapshot, restore with processes intact, and forks in well under a second against the spike's targets |
+| 5. Agent layer | Rust SDK, MCP server, credentials, audit log, `cave inspect`, `cave init` skill files, `cave agent`, remote editing over vsock, synced mode | **Gate 5:** an agent completes a task through the MCP server with host Bash denied, the audit log shows what it did, and an injected credential never reaches the agent or the log |
+| 6. Density and polish | Ballooning, `cave doctor`, first-run setup, Python and TypeScript SDKs, Homebrew formula and install script, bootstrap skill, update detector, Ubuntu image | **v1 release:** gate 5 still holds, phase 6 is complete, and the quickstart works as written on a clean Mac |
 
 Phases are ordered, not dated. Gate 2 can change the plan: if saving and restoring interrupt-controller state proves unworkable on Hypervisor.framework, snapshot and fork need a different approach before anything is built on them. Gate 4 is the headline demo and the point of the project.
 
@@ -313,6 +349,8 @@ cave-vm/
 - [x] Sync: the VM is the source, the sync waits if the VM is not running, and `cave pull` compares SHA-256 hashes of the Mac copy against the VM.
 - [x] Sync conflicts: per-file rules for changes on one side or both, an automatic snapshot before a pull, and dependency and build folders excluded.
 - [x] Guest agent protocol, daemon API, VM lifecycle, disk and defaults: see the decisions tables under Architecture.
+- [x] `cave agent <name>`: the agent runs on the Mac and uses the VM through MCP; `--in-vm` runs it inside the VM instead. See `docs/decisions/0002-cave-agent-runs-on-the-mac.md`.
+- [x] Roadmap: six phases, each of the first five closed by a gate, and phase 6 ending at the v1 release. See `docs/decisions/0001-roadmap-phases-and-gates.md`.
 - [x] Success targets: the headline is a fork in well under a second; exact numbers are set after the spike measures a baseline.
 - [x] Telemetry (none), security (sandbox profile), testing (self-hosted Mac and a mock backend), repo and process (one Cargo workspace, DCO sign-off).
 

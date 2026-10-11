@@ -10,6 +10,8 @@ cave-vm is an open-source (Apache 2.0) microVM runtime for macOS, built for codi
 - A real design change gets a short decision record in `docs/decisions/` before the code changes.
 - Things the design leaves to the spike (signing, vmnet, interrupt-controller state, performance numbers) must be measured, not assumed.
 
+`ROADMAP.md` is the implementation plan: phases, gates and tasks sized as small PRs. Pick work from it, put the task ID in your PR, and do not build on anything in its "Needs Ivan's decision" list until it is answered. If it disagrees with the design, the design wins.
+
 ## Commands
 
 The workspace does not exist yet. Until it does, treat these as the intended commands.
