@@ -1,6 +1,6 @@
 # CAVE: Coding Agent Virtual Environment (Planning Doc)
 
-Oct 11, 2026
+Oct 11, 2026 · @Ivan
 
 ## Pitch
 
@@ -10,7 +10,7 @@ Agents are most useful when you stop approving every command, and most risky at 
 
 The VMM itself is a mostly solved problem (Firecracker, libkrun). CAVE's edge is the experience around it: zero-setup install, a VM per project directory, visible safety, and first-class agent integration.
 
-The name CAVE (Coding Agent Virtual Environment) is provisional. The CLI is written as `cave` throughout, so a rename is a find-and-replace.
+CAVE stands for Coding Agent Virtual Environment. The name is decided: packages, the repo and crates use `cave-vm`, and the command is `cave`.
 
 ## Goals and non-goals
 
@@ -32,6 +32,7 @@ v1 is a developer tool whose edge is low setup friction, not renamed vocabulary.
 - App Store distribution (the hypervisor entitlement and sandboxing make it awkward).
 - OCI image support. v1 ships one curated base image.
 - Live two-way file sync.
+- A virtiofs-style host folder mount.
 
 ## Audience and design principles
 
@@ -74,7 +75,7 @@ memory  = "2G"
 mode    = "sealed"      # or "synced"
 
 [network]
-mode    = "nat"        # off | nat | allowlist (post-v1)
+mode    = "nat"        # off | nat
 ```
 
 ## Storage modes and sync rules
@@ -138,7 +139,7 @@ Safety is visible: every VM has an explicit, inspectable policy. `cave run` prin
 | Policy item | Default | How it widens |
 | --- | --- | --- |
 | Host files reachable | none (sealed) | `synced` adds a one-way mirror written by the daemon, never the agent |
-| Network | NAT, outbound only, LAN ranges denied | `--net off` to block; allowlist is post-v1 |
+| Network | NAT, outbound only, LAN ranges denied | `--net off` to block, `--net lan` to allow LAN ranges; allowlist is post-v1 |
 | CPU and memory | capped in `cave.toml` | edit config |
 | Lifetime | no TTL | optional TTL for disposable VMs |
 | Ports exposed to the Mac | none | `-p 3000` style forwarding |
@@ -154,7 +155,7 @@ Safety is visible: every VM has an explicit, inspectable policy. `cave run` prin
 The README quickstart is the design target: two commands from install to a working agent sandbox.
 
 ```sh
-brew install cave        # or: curl -fsSL <install-url> | sh
+brew install cave-vm     # or: curl -fsSL <install-url> | sh
 cd my-project && cave agent claude
 ```
 
