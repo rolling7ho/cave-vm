@@ -49,6 +49,7 @@ The workspace does not exist yet. Until it does, treat these as the intended com
 3. Write tests first where practical.
 4. Implement one crate at a time.
 5. Open a small PR. Commits use Conventional Commits (`feat:`, `fix:`) and DCO sign-off (`git commit -s`).
+6. Request a review from @rolling7ho on every PR (`gh pr edit <n> --add-reviewer rolling7ho`).
 
 ## Definition of done
 
