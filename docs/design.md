@@ -184,7 +184,24 @@ The first run fetches the kernel and base image and does all setup. The CLI is a
 
 ## Architecture
 
-&#91;embedded content: architecture - 3 clients, daemon, VMM, guest\]
+```mermaid
+flowchart TD
+    subgraph Clients
+        CLI["cave CLI"]
+        SDK["SDKs<br/>Rust, Python, TypeScript"]
+        MCP["MCP server"]
+    end
+    CLI & SDK & MCP -->|"length-prefixed JSON<br/>over a Unix socket"| D["Daemon<br/>lifecycle, policy, audit log, sync"]
+    D -->|"supervises one per VM"| V1["VMM process<br/>virtio-mmio devices, userspace NAT, snapshots"]
+    D -.-> V2["VMM process<br/>(another project)"]
+    V1 --> B["Backend trait"] --> HVF["Hypervisor.framework"]
+    subgraph Guest["Guest: ARM64 Linux"]
+        K["Our minimal kernel"]
+        A["Guest agent<br/>exec, shell, files, port forwarding"]
+    end
+    V1 -->|"vsock"| A
+    HVF --> Guest
+```
 
 The CLI, SDK and MCP server all talk to one daemon, which owns lifecycle, policy and the audit log and supervises one VMM process per VM. The VMM runs the guest on Apple's Hypervisor.framework behind a backend trait, so KVM or another backend can be added later. The guest agent is the only in-guest control path, reached over vsock.
 
