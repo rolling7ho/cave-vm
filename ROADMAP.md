@@ -223,11 +223,15 @@ None of these are established. Each is checked in the task listed, and the resul
 
 ## Needs Ivan's decision
 
-None open. When a task hits something the design and the decisions below do not cover, add it here with a recommendation and stop work that depends on it.
+When a task hits something the design and the decisions below do not cover, add it here with a recommendation and stop work that depends on it.
+
+| ID | Question | Recommendation | Blocks |
+| --- | --- | --- | --- |
+| Q1 | Some host and guest calls have no safe std API: vsock sockets, ptys with resize and `setsid` in the agent; `clonefile` and hole punching in the VMM. AGENTS.md allows `unsafe` only in `hvf` and the `memory` module. | Add `libc`, and allow `unsafe` in two more places only: a `sys` module in `agent` and a `host` module in `vmm`, each block with a `// SAFETY:` comment. Record it as a decision and update AGENTS.md. The alternative, `nix` or `rustix`, is bigger and still needs `unsafe` for pty resize and the controlling terminal. | Discard in P3.3, P3.4, P3.5 host sockets if they need it, P3.6 |
 
 ## Decisions
 
-Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), and D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md).
+Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md), and D23 in [decision 0006](docs/decisions/0006-phase-3-dependencies.md).
 
 | ID | Question | Decision |
 | --- | --- | --- |
@@ -253,3 +257,4 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D20 | There is no command to suspend a VM now, which `--net` changes and freeing memory need. | Add `cave stop`, which suspends to a snapshot. |
 | D21 | What happens when a TTL runs out. | Off by default. When set and it runs out, the VM is stopped and removed like `cave rm --yes`, and startup prints when that happens. |
 | D22 | Where the base-image digest pin is stored. The design says `cave.toml` plus the pin rebuilds the environment anywhere, but `.cave/` is gitignored. | On first run, the digest is written into `cave.toml` as `image = "base@sha256:..."`. |
+| D23 | Phase 3 dependencies, asked per D4. | Add `serde`/`serde_json` (P3.1), `clap` (P3.11), `sha2` (P3.6, P3.12) and `smoltcp` with minimal features (P3.7b to d). Do not add `vm-memory`, `virtio-queue` or an async runtime. |
