@@ -5,7 +5,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use super::{Backend, BackendVcpu, Error, Exit, IrqChip, Reg, Result, SysReg};
+use super::{Backend, BackendVcpu, Error, Exit, IrqChip, Kick, Reg, Result, SysReg};
 use crate::memory::GuestMemory;
 
 /// Something the VMM did to the mock backend.
@@ -235,5 +235,10 @@ impl BackendVcpu for MockVcpu {
             pending,
         });
         Ok(())
+    }
+
+    /// Does nothing: scripted runs never block.
+    fn kicker(&self) -> Kick {
+        Box::new(|| {})
     }
 }

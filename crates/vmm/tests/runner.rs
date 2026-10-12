@@ -199,3 +199,32 @@ fn unknown_trap_is_an_error_with_the_pc() {
     let err = runner::run(&mock, &mut vcpu, &mut machine).unwrap_err();
     assert!(err.to_string().contains("0x40000000"), "{err}");
 }
+
+#[test]
+fn a_kick_without_the_stop_flag_keeps_running() {
+    let mock = MockBackend::new();
+    mock.script(
+        0,
+        [
+            Step::exit(Exit::Canceled),
+            Step::exit(hvc()).with_reg(x(0), 0x8400_0008),
+        ],
+    );
+    let mut vcpu = start(&mock);
+    let mut machine = Machine::new(Vec::new(), None, 1);
+    let stop = runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+    assert_eq!(stop, Stop::PowerOff);
+}
+
+#[test]
+fn a_kick_with_the_stop_flag_stops() {
+    let mock = MockBackend::new();
+    mock.script(0, [Step::exit(Exit::Canceled)]);
+    let mut vcpu = start(&mock);
+    let mut machine = Machine::new(Vec::new(), None, 1);
+    machine
+        .stop_flag()
+        .store(true, std::sync::atomic::Ordering::Release);
+    let stop = runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+    assert_eq!(stop, Stop::Canceled);
+}

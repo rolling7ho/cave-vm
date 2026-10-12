@@ -40,6 +40,17 @@ pub struct Vcpu<'vm> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VcpuHandle(pub(crate) ffi::hv_vcpu_t);
 
+impl VcpuHandle {
+    /// Makes the vCPU's current or next [`Vcpu::run`] return
+    /// [`Exit::Canceled`]. Callable from any thread. Fails harmlessly once
+    /// the vCPU is gone.
+    pub fn exit(self) -> Result<()> {
+        // SAFETY: points at one vCPU ID for the length of the call; the
+        // framework rejects IDs that are not live.
+        Error::check(unsafe { ffi::hv_vcpus_exit(&self.0, 1) })
+    }
+}
+
 impl<'vm> Vcpu<'vm> {
     pub(crate) fn new(_vm: &'vm Vm) -> Result<Vcpu<'vm>> {
         let mut id = 0;
