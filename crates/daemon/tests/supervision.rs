@@ -87,10 +87,11 @@ impl VmSource for Source {
     fn prepare(
         &self,
         vm: &VmId,
-        net: NetMode,
+        net: Option<NetMode>,
         ports: &[PortMap],
     ) -> Result<Prepared, ErrorMessage> {
         self.prepared.fetch_add(1, Ordering::SeqCst);
+        let net = net.unwrap_or(NetMode::Nat);
         Ok(Prepared {
             config: VmmConfig {
                 kernel: "/fake/Image".into(),
@@ -171,7 +172,7 @@ impl Rig {
     fn start(&self) -> Reply {
         self.request(Request::Start {
             vm: vm(),
-            net: NetMode::Nat,
+            net: None,
             ports: Vec::new(),
         })
     }

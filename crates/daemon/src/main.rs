@@ -17,7 +17,12 @@ use cave_vm_proto::{ErrorCode, ErrorMessage};
 struct NotYet;
 
 impl VmSource for NotYet {
-    fn prepare(&self, _: &VmId, _: NetMode, _: &[PortMap]) -> Result<Prepared, ErrorMessage> {
+    fn prepare(
+        &self,
+        _: &VmId,
+        _: Option<NetMode>,
+        _: &[PortMap],
+    ) -> Result<Prepared, ErrorMessage> {
         Err(ErrorMessage::new(
             ErrorCode::Internal,
             "this build of the daemon cannot read cave.toml yet",

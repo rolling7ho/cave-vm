@@ -42,8 +42,12 @@ pub struct Prepared {
 
 /// Prepares VMs to boot.
 pub trait VmSource: Send + Sync {
-    fn prepare(&self, vm: &VmId, net: NetMode, ports: &[PortMap])
-    -> Result<Prepared, ErrorMessage>;
+    fn prepare(
+        &self,
+        vm: &VmId,
+        net: Option<NetMode>,
+        ports: &[PortMap],
+    ) -> Result<Prepared, ErrorMessage>;
 }
 
 enum Slot {
@@ -144,7 +148,7 @@ impl Vms {
     pub fn start(
         &self,
         id: &VmId,
-        net: NetMode,
+        net: Option<NetMode>,
         ports: &[PortMap],
     ) -> Result<Policy, ErrorMessage> {
         let vm = self.vm(id)?;
@@ -171,7 +175,7 @@ impl Vms {
     fn launch(
         &self,
         vm: &Arc<Vm>,
-        net: NetMode,
+        net: Option<NetMode>,
         ports: &[PortMap],
     ) -> Result<Running, ErrorMessage> {
         let prepared = self.source.prepare(&vm.id, net, ports)?;
