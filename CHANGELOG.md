@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- Project disks in `cave-vm-vmm`: a 20 GB sparse `.cave/disk.img` created as an APFS clone of the base image, growable but never shrunk, with no absolute paths stored (P3.4). A `host` module wraps `clonefile` and `statfs` (D24).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
