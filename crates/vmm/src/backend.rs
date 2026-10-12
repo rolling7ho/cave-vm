@@ -74,8 +74,26 @@ pub trait Backend {
     /// Creates vCPU number `index`, on the calling thread.
     fn create_vcpu(&self, index: u32) -> Result<Self::Vcpu<'_>>;
 
+    /// Creates the GICv3 at [`crate::layout::GIC_DIST_BASE`] and
+    /// [`crate::layout::GIC_REDIST_BASE`]. Must come before any vCPU.
+    fn create_irqchip(&mut self) -> Result<IrqChip>;
+
     /// Raises or lowers a shared peripheral interrupt line.
     fn set_irq_line(&self, intid: u32, level: bool) -> Result<()>;
+
+    /// The host clock the guest's virtual counter derives from, in ticks.
+    fn now_ticks(&self) -> u64;
+
+    /// Converts host clock ticks to a duration.
+    fn ticks_to_duration(&self, ticks: u64) -> std::time::Duration;
+}
+
+/// Sizes of the interrupt controller's MMIO regions, for the device tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IrqChip {
+    pub dist_size: u64,
+    /// Size of one vCPU's redistributor.
+    pub redist_size: u64,
 }
 
 /// A vCPU as the VMM sees it.
@@ -94,4 +112,17 @@ pub trait BackendVcpu {
 
     /// Writes a system register.
     fn set_sys_reg(&mut self, reg: SysReg, value: u64) -> Result<()>;
+
+    /// Whether the virtual timer is masked from exiting.
+    fn vtimer_masked(&self) -> Result<bool>;
+
+    /// Masks or unmasks virtual timer exits.
+    fn set_vtimer_masked(&mut self, masked: bool) -> Result<()>;
+
+    /// Host ticks minus guest virtual counter.
+    fn vtimer_offset(&self) -> Result<u64>;
+
+    /// Marks a private peripheral interrupt (interrupt ID below 32) of this
+    /// vCPU pending or not.
+    fn set_ppi_pending(&mut self, intid: u32, pending: bool) -> Result<()>;
 }
