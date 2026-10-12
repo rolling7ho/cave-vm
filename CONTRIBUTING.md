@@ -31,7 +31,7 @@ Tests must not use the network. Device models are tested against the mock hyperv
 1. Fork the repo and branch from `main`.
 2. Make one focused change. Small pull requests get reviewed faster and merged sooner.
 3. Add or update tests, and write them first where practical.
-4. Update docs and the changelog if behavior changes.
+4. Update docs if behavior changes, and add a line under Unreleased in [CHANGELOG.md](CHANGELOG.md) for any user-visible change.
 5. Open a pull request against `main`.
 
 `main` is protected. Pull requests need the required CI check to pass and are squash-merged.

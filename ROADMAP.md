@@ -227,7 +227,7 @@ None open. When a task hits something the design and the decisions below do not 
 
 ## Decisions
 
-Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), and D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md).
+Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), and D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md).
 
 | ID | Question | Decision |
 | --- | --- | --- |
@@ -243,3 +243,13 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D10 | Key names in `cave.toml` for idle auto-suspend, automatic snapshots and deletion, TTL and the update detector. | Propose them in P1.2 and approve them there. |
 | D11 | CI for hardware tests: registering the self-hosted Mac runner, when e2e runs (every PR or nightly), and branch protection. | Self-hosted runner runs e2e on PRs from the repo itself while it is private; revisit before going public, since self-hosted runners on public repos run untrusted code. Ivan registers the runner and sets protection. |
 | D12 | README describes `cave fork` as "create a copy-on-write copy of a project VM"; the design says "create a new VM from a snapshot, copy-on-write". | Align the README with the design in P1.7. |
+| D13 | The quickstart runs in a folder that already has code. Sealed mode puts the code only in the VM, but the design never says how existing files get there. | On the VM's first boot, the folder's files (everything except `.cave/`) are copied into the VM once. In sealed mode the Mac files stay untouched but are no longer updated, and `cave` says so. |
+| D14 | Where the Mac mirror lives in synced mode. | The project folder itself. |
+| D15 | Whether `cave run`, `shell`, `exec` and `agent` set up a project themselves when there is no `cave.toml`. | Yes: they run `cave init` with defaults and say so. Refused in the home folder itself. |
+| D16 | Whether `cave` looks for `cave.toml` in parent folders, like git. | Yes, up to the home folder. |
+| D17 | `cave ls` lists "project VMs", but the design has no registry. | The daemon keeps a list of project folders it has run, used only for listing and pruned when a folder is gone. |
+| D18 | What `cave fork [name]` names, and how a fork is used. The SDK example `Sandbox.fork("base")` reads as naming the source snapshot. | `name` is the new fork; the source is a fresh snapshot of the current state, or `--from <snapshot>`. Other commands take `--fork <name>`. The SDK follows the CLI. |
+| D19 | What `cave export` produces: the project's files, or the whole VM. | The project's files, copied out of the VM or a snapshot into a Mac folder. Whole-VM export and import waits until after v1. |
+| D20 | There is no command to suspend a VM now, which `--net` changes and freeing memory need. | Add `cave stop`, which suspends to a snapshot. |
+| D21 | What happens when a TTL runs out. | Off by default. When set and it runs out, the VM is stopped and removed like `cave rm --yes`, and startup prints when that happens. |
+| D22 | Where the base-image digest pin is stored. The design says `cave.toml` plus the pin rebuilds the environment anywhere, but `.cave/` is gitignored. | On first run, the digest is written into `cave.toml` as `image = "base@sha256:..."`. |
