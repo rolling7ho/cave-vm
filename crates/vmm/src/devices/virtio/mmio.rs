@@ -174,7 +174,9 @@ impl MmioTransport {
             QUEUE_SEL => self.queue_sel = value,
             QUEUE_NUM => {
                 if let Some(q) = self.queue_writable() {
-                    q.size = value as u16;
+                    // A size that does not fit is kept invalid (zero), not
+                    // truncated into a valid one.
+                    q.size = u16::try_from(value).unwrap_or(0);
                 }
             }
             QUEUE_READY => self.set_queue_ready(value == 1),
@@ -504,6 +506,19 @@ mod tests {
         w32(&mut t, QUEUE_NUM, 2);
         assert_eq!(t.queues[0].desc_table, q0.desc);
         assert_eq!(t.queues[0].size, 8);
+    }
+
+    #[test]
+    fn oversized_queue_num_is_not_truncated() {
+        let (mut t, mem) = transport(Echo::default());
+        let q0 = DriverQueue::at(&mem, 8, 0);
+        init(&mut t, &[]);
+        w32(&mut t, STATUS, 0);
+        w32(&mut t, STATUS, status::ACKNOWLEDGE | status::DRIVER);
+        w32(&mut t, QUEUE_SEL, 0);
+        w32(&mut t, QUEUE_NUM, 0x1_0008);
+        assert_eq!(t.queues[0].size, 0);
+        let _ = q0;
     }
 
     #[test]

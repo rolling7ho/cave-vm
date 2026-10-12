@@ -1,6 +1,6 @@
 # Protocol
 
-This is the wire protocol for the guest agent and the daemon API (ROADMAP task P1.3). It becomes the source for the `proto` crate in P3.1. Nothing here is implemented yet.
+This is the wire protocol for the guest agent and the daemon API (ROADMAP task P1.3). It is the source for the `proto` crate: P3.1 implements the framing, the handshake, errors and the guest agent messages. The daemon API messages follow in a second PR.
 
 The design fixes the shape: length-prefixed JSON messages, versioned from day one, with streamed output and a pseudo-terminal for `cave shell`, and the same message format on the daemon's Unix socket so the SDKs stay thin. The framing width, the maximum frame size, the version handshake and everything else below were proposed in the phase 1 PR and approved by Ivan there.
 
