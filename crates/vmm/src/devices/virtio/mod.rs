@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::memory::GuestMemory;
 
+pub mod block;
 pub mod mmio;
 pub mod queue;
 

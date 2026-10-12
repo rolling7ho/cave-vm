@@ -13,6 +13,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- virtio-blk device in `cave-vm-vmm` on a raw image file: read, write, flush and device ID (P3.3, without discard). The spike takes `--disk <file>`, and its kernel config gains virtio-mmio, virtio-blk, virtio-net and vsock.
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
