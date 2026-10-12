@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- Image names and digests (`debian@sha256:...`) and the shared image cache in `cave-vm-daemon`: downloads are hashed as they are written and kept only when size and SHA-256 match, so an interrupted or wrong download leaves nothing behind (P3.12a).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
