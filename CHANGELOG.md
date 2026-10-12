@@ -6,7 +6,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Fixed
 
-- Restored spike snapshots got no more timer interrupts once the guest went idle, so they hung at 100% CPU. `hv_gic_state_get_data` leaves out each redistributor's SGI and PPI state; snapshots now save it per vCPU (format version 2, so older spike snapshots are refused).
+- Restored spike snapshots got no more timer interrupts once the guest went idle, so they hung at 100% CPU. `hv_gic_state_get_data` leaves out each redistributor's SGI and PPI state; snapshots now save it per vCPU (format version 3, so older spike snapshots are refused).
+- Device MMIO loads now honor sign extension (`LDRSB`, `LDRSH`, `LDRSW`) and 32-bit destination registers.
+- A virtqueue buffer whose address range would wrap past the top of the address space is an error instead of an overflow, and an oversized `QueueNum` leaves the queue invalid instead of truncating to a valid size.
+- A restored spike VM saved again now records the time of the second save, not of the restore, for its timers.
 
 ### Added
 

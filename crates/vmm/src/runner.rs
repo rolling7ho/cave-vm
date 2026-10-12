@@ -573,10 +573,30 @@ fn mmio<V: BackendVcpu, W: Write>(
         };
         drop(devices);
         if access.reg != 31 {
-            vcpu.set_reg(Reg::x(access.reg).expect("srt below 31"), value)?;
+            vcpu.set_reg(
+                Reg::x(access.reg).expect("srt below 31"),
+                extend_load(value, size, access),
+            )?;
         }
     }
     Ok(())
+}
+
+/// Applies a load's sign extension (`LDRSB`, `LDRSH`, `LDRSW`) and register
+/// width to the `size`-byte value a device returned.
+fn extend_load(value: u64, size: usize, access: DataAccess) -> u64 {
+    let bits = size as u32 * 8;
+    let value = if access.sign_extend && bits < 64 {
+        let shift = 64 - bits;
+        (((value << shift) as i64) >> shift) as u64
+    } else {
+        value
+    };
+    if access.wide_reg {
+        value
+    } else {
+        value & 0xffff_ffff
+    }
 }
 
 /// The guest's virtual counter now, and the deadline it has armed, if the
@@ -627,4 +647,39 @@ fn wait_for_interrupt<B: Backend, V: BackendVcpu, W: Write>(
         machine.take_input(sleep);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load(size: u8, sign_extend: bool, wide_reg: bool) -> DataAccess {
+        DataAccess {
+            write: false,
+            size,
+            reg: 0,
+            sign_extend,
+            wide_reg,
+        }
+    }
+
+    #[test]
+    fn loads_sign_extend_to_the_register_width() {
+        // LDRSB x0 and LDRSB w0 of 0x80.
+        assert_eq!(
+            extend_load(0x80, 1, load(1, true, true)),
+            0xffff_ffff_ffff_ff80
+        );
+        assert_eq!(extend_load(0x80, 1, load(1, true, false)), 0xffff_ff80);
+        // LDRSW x0 of a negative word.
+        assert_eq!(
+            extend_load(0x8000_0000, 4, load(4, true, true)),
+            0xffff_ffff_8000_0000
+        );
+        // LDRSH of a positive halfword stays positive.
+        assert_eq!(extend_load(0x7fff, 2, load(2, true, true)), 0x7fff);
+        // Plain loads zero-extend.
+        assert_eq!(extend_load(0x80, 1, load(1, false, false)), 0x80);
+        assert_eq!(extend_load(u64::MAX, 8, load(8, false, true)), u64::MAX);
+    }
 }
