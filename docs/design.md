@@ -284,7 +284,7 @@ Phases are ordered, not dated. Gate 2 can change the plan: if saving and restori
 - AI-assisted contributions are allowed, with disclosure in the PR.
 - `main` is protected: one required CI check, squash merges, no direct pushes. PRs are small, and a large feature starts with a design note in an issue.
 - `SECURITY.md` with private vulnerability reporting, the Contributor Covenant, and issue and PR templates.
-- Every `unsafe` block has a `// SAFETY:` comment, and `unsafe` is allowed only in the Hypervisor.framework wrapper and the guest-memory code. CI runs `cargo-deny` and `cargo-audit`, new dependencies need a stated reason, and the toolchain is pinned in `rust-toolchain.toml`.
+- Every `unsafe` block has a `// SAFETY:` comment, and `unsafe` is allowed only in the Hypervisor.framework wrapper, the guest-memory code and two system-call modules ([decision 0007](decisions/0007-unsafe-host-calls-and-pr-flow.md)). CI runs `cargo-deny` and `cargo-audit`, new dependencies need a stated reason, and the toolchain is pinned in `rust-toolchain.toml`.
 - Published crates are prefixed `cave-vm-` (for example `cave-vm-proto`), since short names are likely taken on crates.io.
 
 **Layout**

@@ -10,6 +10,9 @@ use crate::memory::{self, GuestMemory, Region};
 
 /// EL1h with debug, SError, IRQ and FIQ masked, as Linux expects at entry.
 const PSTATE_EL1H_MASKED: u64 = 0x3c5;
+/// `SCTLR_EL1` with only its RES1 bits set: MMU, caches and alignment
+/// checks off.
+const SCTLR_EL1_RESET: u64 = 0x30d0_0800;
 
 /// What to boot.
 #[derive(Debug, Clone)]
@@ -134,5 +137,21 @@ pub fn setup_vcpu<V: BackendVcpu>(
             vcpu.set_reg(Reg::x(n).expect("x1 to x3"), 0)?;
         }
     }
+    Ok(())
+}
+
+/// Puts a secondary vCPU in the entry state PSCI `CPU_ON` asks for: `PC`
+/// at `entry`, `x0` the context ID, EL1h with interrupts masked and the
+/// MMU off.
+pub fn start_secondary<V: BackendVcpu>(
+    vcpu: &mut V,
+    entry: u64,
+    context: u64,
+) -> backend::Result<()> {
+    vcpu.set_reg(Reg::PC, entry)?;
+    vcpu.set_reg(Reg::CPSR, PSTATE_EL1H_MASKED)?;
+    vcpu.set_reg(Reg::x(0).expect("x0"), context)?;
+    // The MMU and caches start off, as after a reset.
+    vcpu.set_sys_reg(SysReg::SCTLR_EL1, SCTLR_EL1_RESET)?;
     Ok(())
 }

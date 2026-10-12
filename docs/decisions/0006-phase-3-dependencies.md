@@ -22,4 +22,4 @@ Each crate is still added in the PR that first needs it, and passes `cargo deny`
 ## Consequences
 
 - Binary data in `proto` is base64 encoded by a small function in the crate, rather than by another dependency.
-- Whether `libc` is added and `unsafe` allowed outside `hvf` and the `memory` module is a separate question. It is listed under "Needs Ivan's decision" in `ROADMAP.md`.
+- Whether `libc` is added and `unsafe` allowed outside `hvf` and the `memory` module is a separate question. It was answered as D24 in decision 0007.

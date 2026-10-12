@@ -2,10 +2,13 @@
 //! the backend records what the VMM did, so device models and the run loop
 //! can be tested on any machine.
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
-use super::{Backend, BackendVcpu, Error, Exit, IccReg, IrqChip, Kick, Reg, Result, SysReg};
+use super::{
+    Backend, BackendVcpu, Error, Exit, IccReg, IrqChip, Kick, RedistReg, Reg, Result, SysReg,
+};
 use crate::memory::GuestMemory;
 
 /// Something the VMM did to the mock backend.
@@ -53,6 +56,9 @@ pub enum Event {
 pub struct Step {
     pub regs: Vec<(Reg, u64)>,
     pub exit: Exit,
+    /// Wait for a kick before reporting the exit, like a guest idling in
+    /// the hypervisor.
+    pub wait_for_kick: bool,
 }
 
 impl Step {
@@ -61,6 +67,16 @@ impl Step {
         Step {
             regs: Vec::new(),
             exit,
+            wait_for_kick: false,
+        }
+    }
+
+    /// Blocks in `run` until another thread kicks this vCPU, then reports
+    /// [`Exit::Canceled`]. A kick that came earlier counts.
+    pub fn until_kicked() -> Step {
+        Step {
+            wait_for_kick: true,
+            ..Step::exit(Exit::Canceled)
         }
     }
 
@@ -77,13 +93,20 @@ struct State {
     scripts: HashMap<u32, VecDeque<Step>>,
     irqchip_state: Vec<u8>,
     now: u64,
+    /// vCPUs kicked since their last [`Step::until_kicked`].
+    kicked: HashSet<u32>,
 }
+
+/// Longest a [`Step::until_kicked`] waits, so a broken test fails instead
+/// of hanging.
+const KICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The mock backend. Clones share the same script and event log, so a test
 /// can keep one to inspect while the VMM owns another.
 #[derive(Debug, Clone, Default)]
 pub struct MockBackend {
     state: Arc<Mutex<State>>,
+    kicks: Arc<Condvar>,
 }
 
 impl MockBackend {
@@ -137,6 +160,7 @@ impl Backend for MockBackend {
             sys_regs: HashMap::new(),
             simd: HashMap::new(),
             icc: HashMap::new(),
+            redist: HashMap::new(),
             vtimer_masked: false,
             vtimer_offset: 0,
         })
@@ -183,6 +207,10 @@ pub struct MockVcpu {
     sys_regs: HashMap<SysReg, u64>,
     simd: HashMap<u8, u128>,
     icc: HashMap<IccReg, u64>,
+    /// Redistributor registers as plain storage, except that the set and
+    /// clear registers for enable, pending and active act on bits as on a
+    /// real GIC.
+    redist: HashMap<RedistReg, u64>,
     vtimer_masked: bool,
     vtimer_offset: u64,
 }
@@ -198,6 +226,18 @@ impl BackendVcpu for MockVcpu {
             .and_then(VecDeque::pop_front)
             .ok_or(Error::ScriptExhausted { vcpu: self.index })?;
         self.regs.extend(step.regs);
+        if step.wait_for_kick {
+            let state = self.backend.state();
+            let (mut state, timeout) = self
+                .backend
+                .kicks
+                .wait_timeout_while(state, KICK_TIMEOUT, |s| !s.kicked.contains(&self.index))
+                .unwrap_or_else(|e| e.into_inner());
+            if timeout.timed_out() {
+                return Err(Error::ScriptExhausted { vcpu: self.index });
+            }
+            state.kicked.remove(&self.index);
+        }
         // Like Hypervisor.framework, a timer exit masks the timer.
         if step.exit == Exit::VtimerActivated {
             self.vtimer_masked = true;
@@ -273,6 +313,35 @@ impl BackendVcpu for MockVcpu {
         Ok(())
     }
 
+    fn redist_reg(&self, reg: RedistReg) -> Result<u64> {
+        let reg = match reg {
+            RedistReg::ICENABLER0 => RedistReg::ISENABLER0,
+            RedistReg::ICPENDR0 => RedistReg::ISPENDR0,
+            RedistReg::ICACTIVER0 => RedistReg::ISACTIVER0,
+            other => other,
+        };
+        Ok(self.redist.get(&reg).copied().unwrap_or(0))
+    }
+
+    fn set_redist_reg(&mut self, reg: RedistReg, value: u64) -> Result<()> {
+        let mut bits = |target: RedistReg, set: bool| {
+            let v = self.redist.entry(target).or_default();
+            if set { *v |= value } else { *v &= !value }
+        };
+        match reg {
+            RedistReg::ISENABLER0 => bits(RedistReg::ISENABLER0, true),
+            RedistReg::ICENABLER0 => bits(RedistReg::ISENABLER0, false),
+            RedistReg::ISPENDR0 => bits(RedistReg::ISPENDR0, true),
+            RedistReg::ICPENDR0 => bits(RedistReg::ISPENDR0, false),
+            RedistReg::ISACTIVER0 => bits(RedistReg::ISACTIVER0, true),
+            RedistReg::ICACTIVER0 => bits(RedistReg::ISACTIVER0, false),
+            other => {
+                self.redist.insert(other, value);
+            }
+        }
+        Ok(())
+    }
+
     fn set_ppi_pending(&mut self, intid: u32, pending: bool) -> Result<()> {
         self.backend.record(Event::PpiPending {
             vcpu: self.index,
@@ -284,6 +353,11 @@ impl BackendVcpu for MockVcpu {
 
     /// Does nothing: scripted runs never block.
     fn kicker(&self) -> Kick {
-        Box::new(|| {})
+        let backend = self.backend.clone();
+        let index = self.index;
+        Box::new(move || {
+            backend.state().kicked.insert(index);
+            backend.kicks.notify_all();
+        })
     }
 }
