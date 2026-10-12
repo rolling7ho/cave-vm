@@ -306,6 +306,34 @@ fn host_data_larger_than_a_receive_buffer_is_split_in_order() {
 }
 
 #[test]
+fn guest_close_after_sending_delivers_everything_first() {
+    let mut r = rig("drain");
+    let (mut host, port) = r.host_connect();
+    let data: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+    for chunk in data.chunks(50_000) {
+        r.guest_send(r.guest_header(AGENT_PORT, port, op::RW), chunk);
+    }
+    // close() in the guest: no more sending or receiving.
+    let close = Header {
+        flags: shutdown::SEND | shutdown::RCV,
+        ..r.guest_header(AGENT_PORT, port, op::SHUTDOWN)
+    };
+    r.guest_send(close, &[]);
+    let mut got = Vec::new();
+    host.read_to_end(&mut got).unwrap();
+    assert_eq!(got.len(), data.len());
+    assert!(got == data);
+    // Then the device resets the connection for the guest.
+    loop {
+        let (header, _) = r.next_packet();
+        if header.op == op::RST {
+            break;
+        }
+        assert_eq!(header.op, op::CREDIT_UPDATE);
+    }
+}
+
+#[test]
 fn credit_request_is_answered_with_an_update() {
     let mut r = rig("credreq");
     let (_host, port) = r.host_connect();

@@ -156,6 +156,11 @@ struct Conn {
     fwd_cnt_sent: u32,
     /// The guest will send no more.
     guest_done_sending: bool,
+    /// The guest will neither send nor receive; the connection is reset
+    /// once the writer has delivered what the guest sent.
+    guest_closed: bool,
+    /// The writer thread has not finished.
+    writer_running: bool,
 }
 
 impl Conn {
@@ -460,7 +465,11 @@ fn handle(shared: &Arc<Shared>, header: Header, data: Vec<u8>) {
                 conn.writer = None;
             }
             if header.flags & shutdown::RCV != 0 && conn.guest_done_sending {
-                shared.reset_conn(&mut state, key);
+                if conn.writer_running {
+                    conn.guest_closed = true;
+                } else {
+                    shared.reset_conn(&mut state, key);
+                }
             }
         }
         op::RST => {
@@ -515,6 +524,8 @@ fn new_conn(stream: UnixStream, state: ConnState) -> Conn {
         fwd_cnt: 0,
         fwd_cnt_sent: 0,
         guest_done_sending: false,
+        guest_closed: false,
+        writer_running: false,
     }
 }
 
@@ -565,6 +576,7 @@ fn start_threads(shared: &Arc<Shared>, key: Key, generation: u64, state: &mut St
     // to BUF_ALLOC.
     let (tx, rx) = mpsc::channel();
     conn.writer = Some(tx);
+    conn.writer_running = true;
     let reader_shared = Arc::clone(shared);
     thread::spawn(move || reader(&reader_shared, key, generation, read_half));
     let writer_shared = Arc::clone(shared);
@@ -659,6 +671,16 @@ fn writer(
     }
     // The guest shut down its sending side and everything was written.
     let _ = stream.shutdown(Shutdown::Write);
+    let mut state = shared.lock();
+    if state.generation != generation {
+        return;
+    }
+    if let Some(conn) = state.conns.get_mut(&key) {
+        conn.writer_running = false;
+        if conn.guest_closed {
+            shared.reset_conn(&mut state, key);
+        }
+    }
 }
 
 impl VirtioDevice for Vsock {
