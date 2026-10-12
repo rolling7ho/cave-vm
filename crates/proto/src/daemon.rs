@@ -58,7 +58,9 @@ pub enum Request {
     },
     Start {
         vm: VmId,
-        net: NetMode,
+        /// `--net`; the mode in `cave.toml` when left out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        net: Option<NetMode>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         ports: Vec<PortMap>,
     },
