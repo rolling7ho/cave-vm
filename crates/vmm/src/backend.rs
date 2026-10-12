@@ -12,7 +12,7 @@
 
 use std::fmt;
 
-pub use cave_vm_hvf::{DataAccess, Exception, Exit, Reg, SysReg, Trap};
+pub use cave_vm_hvf::{DataAccess, Exception, Exit, IccReg, Reg, SysReg, Trap};
 
 use crate::memory::GuestMemory;
 
@@ -81,6 +81,15 @@ pub trait Backend {
     /// Raises or lowers a shared peripheral interrupt line.
     fn set_irq_line(&self, intid: u32, level: bool) -> Result<()>;
 
+    /// Saves the interrupt controller's distributor and redistributor
+    /// state as an opaque blob. The CPU interface registers are per vCPU;
+    /// see [`BackendVcpu::icc_reg`].
+    fn irqchip_state(&self) -> Result<Vec<u8>>;
+
+    /// Restores state from [`irqchip_state`](Self::irqchip_state). Every
+    /// vCPU must exist first.
+    fn set_irqchip_state(&self, state: &[u8]) -> Result<()>;
+
     /// The host clock the guest's virtual counter derives from, in ticks.
     fn now_ticks(&self) -> u64;
 
@@ -124,6 +133,21 @@ pub trait BackendVcpu {
 
     /// Host ticks minus guest virtual counter.
     fn vtimer_offset(&self) -> Result<u64>;
+
+    /// Sets host ticks minus guest virtual counter.
+    fn set_vtimer_offset(&mut self, offset: u64) -> Result<()>;
+
+    /// Reads SIMD and floating-point register `q<n>`.
+    fn simd_reg(&self, n: u8) -> Result<u128>;
+
+    /// Writes SIMD and floating-point register `q<n>`.
+    fn set_simd_reg(&mut self, n: u8, value: u128) -> Result<()>;
+
+    /// Reads a GIC CPU interface register.
+    fn icc_reg(&self, reg: IccReg) -> Result<u64>;
+
+    /// Writes a GIC CPU interface register.
+    fn set_icc_reg(&mut self, reg: IccReg, value: u64) -> Result<()>;
 
     /// Marks a private peripheral interrupt (interrupt ID below 32) of this
     /// vCPU pending or not.

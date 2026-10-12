@@ -16,3 +16,5 @@ pub mod memory;
 pub mod psci;
 #[cfg(target_os = "macos")]
 pub mod runner;
+#[cfg(target_os = "macos")]
+pub mod snapshot;
