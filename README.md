@@ -34,13 +34,13 @@ Planned commands:
 | `cave run` / `cave shell` | Boot or restore this project's VM, and open a shell in it |
 | `cave exec -- <cmd>` | Run a command in the VM |
 | `cave snapshot` / `cave restore` | Save VM state and roll back to it |
-| `cave fork` | Create a copy-on-write copy of a project VM |
+| `cave fork` | Create a new VM from a snapshot, copy-on-write |
 | `cave inspect` | Show the VM's policy, resources and audit log |
 | `cave sync` / `cave pull` | Keep a Mac copy of the code in step with the VM, and bring Mac edits back (synced mode) |
 | `cave agent <codex, claude, etc.>` | Start a coding agent against this project's VM |
 | `cave doctor` | Check entitlements, macOS version, disk space and image state |
 
-An SDK (Rust first, then Python and TypeScript) exposes the same operations.
+The full command reference, with every flag and error, is in [docs/cli.md](docs/cli.md), and `cave.toml` is described in [docs/config.md](docs/config.md). An SDK (Rust first, then Python and TypeScript) exposes the same operations.
 
 ## Safety defaults
 
