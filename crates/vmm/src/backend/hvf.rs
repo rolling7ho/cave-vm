@@ -3,7 +3,7 @@
 
 use cave_vm_hvf::{GicConfig, GicParams, RedistReg, Vcpu, Vm};
 
-use super::{Backend, BackendVcpu, Error, Exit, IrqChip, Kick, Reg, Result, SysReg};
+use super::{Backend, BackendVcpu, Error, Exit, IccReg, IrqChip, Kick, Reg, Result, SysReg};
 use crate::layout;
 use crate::memory::{GuestMemory, Mapping};
 
@@ -63,6 +63,14 @@ impl<'vm> Backend for HvfBackend<'vm> {
         Ok(self.vm.set_spi(intid, level)?)
     }
 
+    fn irqchip_state(&self) -> Result<Vec<u8>> {
+        Ok(self.vm.gic_state()?)
+    }
+
+    fn set_irqchip_state(&self, state: &[u8]) -> Result<()> {
+        Ok(self.vm.set_gic_state(state)?)
+    }
+
     fn now_ticks(&self) -> u64 {
         cave_vm_hvf::host_ticks()
     }
@@ -107,6 +115,26 @@ impl BackendVcpu for HvfVcpu<'_> {
 
     fn vtimer_offset(&self) -> Result<u64> {
         Ok(self.0.vtimer_offset()?)
+    }
+
+    fn set_vtimer_offset(&mut self, offset: u64) -> Result<()> {
+        Ok(self.0.set_vtimer_offset(offset)?)
+    }
+
+    fn simd_reg(&self, n: u8) -> Result<u128> {
+        Ok(self.0.simd_fp_reg(n)?)
+    }
+
+    fn set_simd_reg(&mut self, n: u8, value: u128) -> Result<()> {
+        Ok(self.0.set_simd_fp_reg(n, value)?)
+    }
+
+    fn icc_reg(&self, reg: IccReg) -> Result<u64> {
+        Ok(self.0.icc_reg(reg)?)
+    }
+
+    fn set_icc_reg(&mut self, reg: IccReg, value: u64) -> Result<()> {
+        Ok(self.0.set_icc_reg(reg, value)?)
     }
 
     fn set_ppi_pending(&mut self, intid: u32, pending: bool) -> Result<()> {

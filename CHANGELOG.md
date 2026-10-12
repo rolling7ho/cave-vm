@@ -17,3 +17,4 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - Spike kernel config and busybox initramfs in `image/spike/`, built in an Apple container, that boot to a shell in about 40 ms (`docs/spike/p2.7-boot.md`).
 - A backend trait in `cave-vm-vmm` with a mock backend for tests and a Hypervisor.framework backend.
 - A direct kernel boot path: arm64 Image loading, a generated device tree, PSCI, a PL011 UART console and the virtual timer, with a `cave-vmm-spike` binary that boots a kernel on the terminal. Input wakes the vCPU (Hypervisor.framework handles guest WFI itself), and `--stop-at` stops the VM when the guest prints a given text, for boot timing.
+- Spike snapshots: `cave-vmm-spike --snapshot` saves a paused guest (vCPU, GIC, timer, UART and sparse memory file) and `--restore` resumes it in a new process in about 3 ms (`docs/spike/p2.9-snapshot.md`).

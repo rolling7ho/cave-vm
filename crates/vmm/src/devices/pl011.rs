@@ -37,6 +37,15 @@ const INT_RT: u32 = 1 << 6;
 /// PeriphID0-3 then PCellID0-3: a PL011 r1p5.
 const ID: [u32; 8] = [0x11, 0x10, 0x34, 0x00, 0x0d, 0xf0, 0x05, 0xb1];
 
+/// The UART's registers and waiting input, for a snapshot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Pl011State {
+    /// `ILPR`, `IBRD`, `FBRD`, `LCR_H`, `CR`, `IFLS`, `IMSC`, `RIS` and
+    /// `DMACR`, in that order.
+    pub regs: [u32; 9],
+    pub rx: Vec<u8>,
+}
+
 /// The UART. `out` receives what the guest transmits.
 pub struct Pl011<W: Write> {
     out: W,
@@ -69,6 +78,26 @@ impl<W: Write> Pl011<W> {
             ris: INT_TX,
             dmacr: 0,
         }
+    }
+
+    /// Saves the registers and waiting input.
+    pub fn state(&self) -> Pl011State {
+        Pl011State {
+            regs: [
+                self.ilpr, self.ibrd, self.fbrd, self.lcr_h, self.cr, self.ifls, self.imsc,
+                self.ris, self.dmacr,
+            ],
+            rx: self.rx.iter().copied().collect(),
+        }
+    }
+
+    /// Restores what [`state`](Self::state) saved.
+    pub fn set_state(&mut self, state: &Pl011State) {
+        [
+            self.ilpr, self.ibrd, self.fbrd, self.lcr_h, self.cr, self.ifls, self.imsc, self.ris,
+            self.dmacr,
+        ] = state.regs;
+        self.rx = state.rx.iter().copied().collect();
     }
 
     /// Queues bytes typed on the host for the guest to read.
@@ -154,6 +183,20 @@ impl<W: Write> Pl011<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_round_trips() {
+        let mut uart = Pl011::new(Vec::new());
+        uart.write(IMSC, INT_RX);
+        uart.write(LCR_H, 0x70);
+        uart.push_input(b"ab");
+        let state = uart.state();
+        let mut other = Pl011::new(Vec::new());
+        other.set_state(&state);
+        assert_eq!(other.state(), state);
+        assert!(other.irq_level());
+        assert_eq!(other.read(DR), u32::from(b'a'));
+    }
 
     #[test]
     fn transmit_goes_to_output() {
