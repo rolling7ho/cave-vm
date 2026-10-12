@@ -14,8 +14,6 @@ cave-vm is an open-source (Apache 2.0) microVM runtime for macOS, built for codi
 
 ## Commands
 
-The workspace does not exist yet. Until it does, treat these as the intended commands.
-
 - Build: `cargo build --workspace`
 - Test: `cargo test --workspace`
 - Lint: `cargo fmt --check && cargo clippy --workspace -- -D warnings`
