@@ -1,0 +1,348 @@
+use super::*;
+use crate::devices::virtio::testing::{DriverQueue, guest_memory};
+use std::time::Instant;
+
+const GUEST_CID: u64 = 3;
+const AGENT_PORT: u32 = 1024;
+const RX_BUF: u32 = (HEADER_SIZE + 4096) as u32;
+
+struct Rig {
+    dir: PathBuf,
+    mem: GuestMemory,
+    rxq: DriverQueue,
+    txq: DriverQueue,
+    dev: Vsock,
+    /// Receive buffers posted, by head.
+    posted: Vec<u16>,
+}
+
+impl Drop for Rig {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn rig(name: &str) -> Rig {
+    // Unix socket paths are limited to about 100 bytes, so keep this short.
+    let dir = PathBuf::from("/tmp").join(format!("cvs-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let mem = guest_memory();
+    let rxq = DriverQueue::at(&mem, 64, 0);
+    let txq = DriverQueue::at(&mem, 64, 1);
+    let evq = DriverQueue::at(&mem, 8, 2);
+    let mut dev = Vsock::new(GUEST_CID, &dir, &[AGENT_PORT]).unwrap();
+    dev.activate(Activation {
+        memory: mem.clone(),
+        queues: vec![rxq.device_queue(), txq.device_queue(), evq.device_queue()],
+        features: 0,
+        interrupt: Interrupt::new(),
+    })
+    .unwrap();
+    let mut r = Rig {
+        dir,
+        mem,
+        rxq,
+        txq,
+        dev,
+        posted: Vec::new(),
+    };
+    for _ in 0..8 {
+        r.post();
+    }
+    r
+}
+
+impl Rig {
+    fn post(&mut self) {
+        let head = self.rxq.add(&self.mem, &[], &[RX_BUF]);
+        self.posted.push(head);
+        self.dev.queue_notify(RX_QUEUE);
+    }
+
+    /// The next packet the device gave the guest.
+    fn next_packet(&mut self) -> (Header, Vec<u8>) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(&(head, len)) = self.rxq.used(&self.mem).first() {
+                let head = head as u16;
+                let bytes = self.rxq.written(&self.mem, head, 0, len as usize);
+                self.rxq.recycle(head);
+                self.post();
+                let header = Header::from_bytes(bytes[..HEADER_SIZE].try_into().unwrap());
+                assert_eq!(header.len as usize, bytes.len() - HEADER_SIZE);
+                return (header, bytes[HEADER_SIZE..].to_vec());
+            }
+            assert!(Instant::now() < deadline, "no packet for the guest");
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Asserts no packet arrives within a short time.
+    fn no_packet(&mut self) {
+        thread::sleep(Duration::from_millis(100));
+        assert!(self.rxq.used(&self.mem).is_empty());
+    }
+
+    fn guest_send(&mut self, header: Header, data: &[u8]) {
+        let header = Header {
+            len: data.len() as u32,
+            ..header
+        };
+        let bytes = header.to_bytes();
+        self.txq.add(&self.mem, &[&bytes, data], &[]);
+        self.dev.queue_notify(TX_QUEUE);
+    }
+
+    /// A header from the guest's `guest_port` to the host's `host_port`.
+    fn guest_header(&self, guest_port: u32, host_port: u32, op: u16) -> Header {
+        Header {
+            src_cid: GUEST_CID,
+            dst_cid: HOST_CID,
+            src_port: guest_port,
+            dst_port: host_port,
+            kind: TYPE_STREAM,
+            op,
+            buf_alloc: 64 * 1024,
+            ..Header::default()
+        }
+    }
+
+    /// Connects a host process to the agent port and accepts in the guest.
+    /// Returns the host stream and the host port the device picked.
+    fn host_connect(&mut self) -> (UnixStream, u32) {
+        let stream = with_timeout(UnixStream::connect(self.dir.join("1024.sock")).unwrap());
+        let (req, _) = self.next_packet();
+        assert_eq!(req.op, op::REQUEST);
+        let response = self.guest_header(AGENT_PORT, req.src_port, op::RESPONSE);
+        self.guest_send(response, &[]);
+        (stream, req.src_port)
+    }
+}
+
+/// Sets a read timeout, which macOS refuses once the peer has closed, so
+/// tests set it as soon as they have the stream.
+fn with_timeout(stream: UnixStream) -> UnixStream {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+}
+
+fn read_exactly(stream: &mut UnixStream, n: usize) -> Vec<u8> {
+    let mut buf = vec![0u8; n];
+    stream.read_exact(&mut buf).unwrap();
+    buf
+}
+
+#[test]
+fn header_round_trips() {
+    let h = Header {
+        src_cid: 3,
+        dst_cid: 2,
+        src_port: 1,
+        dst_port: 2,
+        len: 3,
+        kind: 1,
+        op: 5,
+        flags: 6,
+        buf_alloc: 7,
+        fwd_cnt: 8,
+    };
+    assert_eq!(Header::from_bytes(&h.to_bytes()), h);
+}
+
+#[test]
+fn config_has_the_guest_cid() {
+    let r = rig("cfg");
+    let mut config = [0u8; 8];
+    r.dev.read_config(0, &mut config);
+    assert_eq!(u64::from_le_bytes(config), GUEST_CID);
+    assert_eq!(r.dev.queue_max_sizes().len(), 3);
+}
+
+#[test]
+fn host_connection_to_a_guest_port_carries_data_both_ways() {
+    let mut r = rig("host");
+    let mut host = with_timeout(UnixStream::connect(r.dir.join("1024.sock")).unwrap());
+    let (req, _) = r.next_packet();
+    assert_eq!(
+        (req.op, req.src_cid, req.dst_cid, req.dst_port, req.kind),
+        (op::REQUEST, HOST_CID, GUEST_CID, AGENT_PORT, TYPE_STREAM)
+    );
+    assert!(req.src_port >= FIRST_HOST_PORT);
+    assert_eq!(req.buf_alloc, BUF_ALLOC);
+    let port = req.src_port;
+    r.guest_send(r.guest_header(AGENT_PORT, port, op::RESPONSE), &[]);
+
+    host.write_all(b"hello").unwrap();
+    let (rw, data) = r.next_packet();
+    assert_eq!(
+        (rw.op, rw.dst_port, data.as_slice()),
+        (op::RW, AGENT_PORT, &b"hello"[..])
+    );
+
+    r.guest_send(r.guest_header(AGENT_PORT, port, op::RW), b"world");
+    assert_eq!(read_exactly(&mut host, 5), b"world");
+
+    // The host closes its sending side: the guest is told.
+    host.shutdown(Shutdown::Write).unwrap();
+    let (shut, _) = r.next_packet();
+    assert_eq!((shut.op, shut.flags), (op::SHUTDOWN, shutdown::SEND));
+
+    // The guest resets: the host sees the end.
+    r.guest_send(r.guest_header(AGENT_PORT, port, op::RST), &[]);
+    let mut rest = Vec::new();
+    assert_eq!(host.read_to_end(&mut rest).unwrap(), 0);
+}
+
+#[test]
+fn guest_connection_to_a_host_listener() {
+    let mut r = rig("guest");
+    let listener = UnixListener::bind(r.dir.join("host_5000.sock")).unwrap();
+    r.guest_send(r.guest_header(777, 5000, op::REQUEST), &[]);
+    let (resp, _) = r.next_packet();
+    assert_eq!(
+        (resp.op, resp.src_port, resp.dst_port),
+        (op::RESPONSE, 5000, 777)
+    );
+    let mut host = with_timeout(listener.accept().unwrap().0);
+
+    r.guest_send(r.guest_header(777, 5000, op::RW), b"ping");
+    assert_eq!(read_exactly(&mut host, 4), b"ping");
+    host.write_all(b"pong").unwrap();
+    let (rw, data) = r.next_packet();
+    assert_eq!((rw.op, data.as_slice()), (op::RW, &b"pong"[..]));
+
+    // The guest shuts down both ways: the device resets and the host sees
+    // the end.
+    let both = Header {
+        flags: shutdown::SEND | shutdown::RCV,
+        ..r.guest_header(777, 5000, op::SHUTDOWN)
+    };
+    r.guest_send(both, &[]);
+    let (rst, _) = r.next_packet();
+    assert_eq!(rst.op, op::RST);
+    let mut rest = Vec::new();
+    assert_eq!(host.read_to_end(&mut rest).unwrap(), 0);
+}
+
+#[test]
+fn guest_connection_with_no_listener_is_reset() {
+    let mut r = rig("nolisten");
+    r.guest_send(r.guest_header(777, 6000, op::REQUEST), &[]);
+    let (rst, _) = r.next_packet();
+    assert_eq!((rst.op, rst.src_port, rst.dst_port), (op::RST, 6000, 777));
+}
+
+#[test]
+fn packets_for_unknown_connections_are_reset_and_strangers_ignored() {
+    let mut r = rig("unknown");
+    r.guest_send(r.guest_header(1, 2, op::RW), b"x");
+    let (rst, _) = r.next_packet();
+    assert_eq!(rst.op, op::RST);
+    // An RST for nothing gets no answer, and neither does a packet with
+    // someone else's source CID.
+    r.guest_send(r.guest_header(1, 2, op::RST), &[]);
+    let spoofed = Header {
+        src_cid: 99,
+        ..r.guest_header(1, 2, op::REQUEST)
+    };
+    r.guest_send(spoofed, &[]);
+    r.no_packet();
+}
+
+#[test]
+fn host_data_stays_within_the_guest_credit() {
+    let mut r = rig("credit");
+    let mut host = with_timeout(UnixStream::connect(r.dir.join("1024.sock")).unwrap());
+    let (req, _) = r.next_packet();
+    let port = req.src_port;
+    let small = Header {
+        buf_alloc: 10,
+        ..r.guest_header(AGENT_PORT, port, op::RESPONSE)
+    };
+    r.guest_send(small, &[]);
+    host.write_all(&[7u8; 25]).unwrap();
+    let mut got = 0;
+    while got < 10 {
+        got += r.next_packet().1.len();
+    }
+    assert_eq!(got, 10);
+    r.no_packet();
+
+    // The guest consumed what it got: ten more may come.
+    let update = Header {
+        buf_alloc: 10,
+        fwd_cnt: 10,
+        ..r.guest_header(AGENT_PORT, port, op::CREDIT_UPDATE)
+    };
+    r.guest_send(update, &[]);
+    while got < 20 {
+        got += r.next_packet().1.len();
+    }
+    assert_eq!(got, 20);
+    r.no_packet();
+}
+
+#[test]
+fn credit_request_is_answered_with_an_update() {
+    let mut r = rig("credreq");
+    let (_host, port) = r.host_connect();
+    r.guest_send(r.guest_header(AGENT_PORT, port, op::CREDIT_REQUEST), &[]);
+    let (update, _) = r.next_packet();
+    assert_eq!(
+        (update.op, update.buf_alloc),
+        (op::CREDIT_UPDATE, BUF_ALLOC)
+    );
+}
+
+#[test]
+fn guest_overrunning_the_credit_is_reset() {
+    let mut r = rig("overrun");
+    let (host, port) = r.host_connect();
+    // Nobody reads on the host side, so the bytes stay in flight.
+    let chunk = vec![1u8; 32 * 1024];
+    for _ in 0..(BUF_ALLOC as usize / chunk.len()) {
+        r.guest_send(r.guest_header(AGENT_PORT, port, op::RW), &chunk);
+    }
+    // Some of it may already have been written and credited; send until
+    // the device refuses.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        r.guest_send(
+            r.guest_header(AGENT_PORT, port, op::RW),
+            &vec![2u8; BUF_ALLOC as usize],
+        );
+        if let Some(&(head, len)) = r.rxq.used(&r.mem).first() {
+            let bytes = r.rxq.written(&r.mem, head as u16, 0, len as usize);
+            let header = Header::from_bytes(bytes[..HEADER_SIZE].try_into().unwrap());
+            if header.op == op::RST {
+                break;
+            }
+        }
+        assert!(Instant::now() < deadline, "never reset");
+    }
+    let _ = host.shutdown(Shutdown::Both);
+}
+
+#[test]
+fn device_reset_closes_host_connections() {
+    let mut r = rig("reset");
+    let (mut host, _) = r.host_connect();
+    r.dev.reset();
+    let mut rest = Vec::new();
+    assert_eq!(host.read_to_end(&mut rest).unwrap(), 0);
+}
+
+#[test]
+fn host_connection_before_the_driver_starts_is_closed() {
+    let dir = PathBuf::from("/tmp").join(format!("cvs-early-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let dev = Vsock::new(GUEST_CID, &dir, &[AGENT_PORT]).unwrap();
+    let mut host = with_timeout(UnixStream::connect(dir.join("1024.sock")).unwrap());
+    let mut rest = Vec::new();
+    assert_eq!(host.read_to_end(&mut rest).unwrap(), 0);
+    drop(dev);
+    assert!(!dir.join("1024.sock").exists(), "socket removed on drop");
+    let _ = fs::remove_dir_all(&dir);
+}

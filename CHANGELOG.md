@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- virtio-vsock device in `cave-vm-vmm`: host processes reach guest ports through `<port>.sock` Unix sockets, guest connections to the host go to `host_<port>.sock`, with credit-based flow control and per-connection threads so a slow peer never blocks a vCPU (P3.5).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
