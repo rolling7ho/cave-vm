@@ -31,8 +31,27 @@ jobs:
       - name: Install the pinned toolchain
         run: rustup toolchain install
 
+      # Prebuilt release binaries, checked against pinned SHA-256 sums.
+      # Building them with `cargo install` took about six minutes.
       - name: Install cargo-deny and cargo-audit
-        run: cargo install --locked cargo-deny@0.20.2 cargo-audit@0.22.2
+        run: |
+          set -euo pipefail
+          bin="$HOME/.local/bin"
+          mkdir -p "$bin"
+          fetch() { # url sha256 binary-path-in-archive
+            curl -sSfL "$1" -o tool.tgz
+            echo "$2  tool.tgz" | shasum -a 256 -c -
+            tar xzf tool.tgz
+            install -m 755 "$3" "$bin/"
+            rm -rf tool.tgz "$(dirname "$3")"
+          }
+          fetch "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-aarch64-apple-darwin.tar.gz" \
+            fe67d82a10d8597a3549364cb733a3f9cc1bfff9031b7ae46384a9f2a72090c3 \
+            cargo-deny-0.20.2-aarch64-apple-darwin/cargo-deny
+          fetch "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.22.2/cargo-audit-aarch64-apple-darwin-v0.22.2.tgz" \
+            ec7ca4263769593df4d909be85b94a6b79efa2897be5d2bb8ebd516e823175af \
+            cargo-audit-aarch64-apple-darwin-v0.22.2/cargo-audit
+          echo "$bin" >> "$GITHUB_PATH"
 
       - name: Format
         run: cargo fmt --all --check

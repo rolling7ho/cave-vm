@@ -12,8 +12,7 @@ Thanks for helping. cave-vm is an open-source (Apache 2.0) microVM runtime for m
 ## Requirements
 
 - macOS 26 or later on Apple Silicon. The VMM needs Hypervisor.framework, so it cannot be developed or tested on other hosts.
-- The Rust toolchain pinned in `rust-toolchain.toml`. `rustup` installs it automatically when you run cargo in the repo.
-  Other installs, such as Homebrew's Rust, ignore that file, so check that `rustc --version` matches it.
+- [rustup](https://rustup.rs), which installs the toolchain pinned in `rust-toolchain.toml` automatically when you run cargo in the repo. Use it instead of Homebrew's `rust` formula, which ignores that file; if you have that formula, `brew uninstall rust` first.
 - `cargo-deny` and `cargo-audit` for the supply-chain checks (`cargo install --locked cargo-deny cargo-audit`).
 
 ## Building and testing
