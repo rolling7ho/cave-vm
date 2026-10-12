@@ -18,11 +18,14 @@ use crate::backend::{self, Backend, BackendVcpu, IccReg, Reg, SysReg};
 use crate::devices::pl011::Pl011State;
 use crate::layout;
 use crate::memory::{self, FileMode, GuestMemory, PAGE_SIZE, Region};
+use crate::runner::Power;
 
 use cave_vm_hvf::{GUEST_STATE_ICC_REGS, GUEST_STATE_SYS_REGS, SIMD_FP_REGS};
 
 const MAGIC: &[u8; 8] = b"CAVESNAP";
-const VERSION: u32 = 1;
+/// Version 2 adds each vCPU's PSCI power state. Version 1 files, from
+/// single-vCPU spike runs, still load with the vCPU on.
+const VERSION: u32 = 2;
 const STATE_FILE: &str = "state";
 const MEMORY_FILE: &str = "memory";
 
@@ -37,6 +40,8 @@ pub struct VcpuState {
     /// timer offset so the counter continues from here.
     pub guest_counter: u64,
     pub vtimer_masked: bool,
+    /// Whether the guest had the vCPU on, off, or about to start.
+    pub power: Power,
 }
 
 /// Everything but guest memory.
@@ -91,7 +96,8 @@ impl From<memory::Error> for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Reads a paused vCPU's state. `now` is the backend's host clock.
+/// Reads a paused vCPU's state. `now` is the backend's host clock. The
+/// power state is set to on; the caller fills in the machine's.
 pub fn save_vcpu<V: BackendVcpu>(vcpu: &V, now: u64) -> backend::Result<VcpuState> {
     let regs = Reg::all()
         .map(|r| Ok((r, vcpu.reg(r)?)))
@@ -114,6 +120,7 @@ pub fn save_vcpu<V: BackendVcpu>(vcpu: &V, now: u64) -> backend::Result<VcpuStat
         icc_regs,
         guest_counter: now.wrapping_sub(vcpu.vtimer_offset()?),
         vtimer_masked: vcpu.vtimer_masked()?,
+        power: Power::On,
     })
 }
 
@@ -172,6 +179,18 @@ pub fn load_memory(dir: &Path, memory_size: u64) -> Result<GuestMemory> {
     Ok(GuestMemory::new(vec![region])?)
 }
 
+/// Sets a new vCPU's `MPIDR_EL1` from saved state. The redistributors are
+/// found by MPIDR, so every vCPU needs this before the GIC state is
+/// restored. [`restore`] does it; a caller restoring vCPUs on their own
+/// threads calls this, then [`Backend::set_irqchip_state`], then
+/// [`restore_vcpu`].
+pub fn restore_mpidr<V: BackendVcpu>(vcpu: &mut V, saved: &VcpuState) -> backend::Result<()> {
+    if let Some(&(_, mpidr)) = saved.sys_regs.iter().find(|(r, _)| *r == SysReg::MPIDR_EL1) {
+        vcpu.set_sys_reg(SysReg::MPIDR_EL1, mpidr)?;
+    }
+    Ok(())
+}
+
 /// Restores interrupt controller and vCPU state into a backend whose
 /// interrupt controller, memory and vCPUs already exist.
 pub fn restore<B: Backend, V: BackendVcpu>(
@@ -179,11 +198,8 @@ pub fn restore<B: Backend, V: BackendVcpu>(
     vcpus: &mut [V],
     state: &State,
 ) -> backend::Result<()> {
-    // The redistributors are found by MPIDR, so set it before the GIC state.
     for (vcpu, saved) in vcpus.iter_mut().zip(&state.vcpus) {
-        if let Some(&(_, mpidr)) = saved.sys_regs.iter().find(|(r, _)| *r == SysReg::MPIDR_EL1) {
-            vcpu.set_sys_reg(SysReg::MPIDR_EL1, mpidr)?;
-        }
+        restore_mpidr(vcpu, saved)?;
     }
     backend.set_irqchip_state(&state.irqchip)?;
     let now = backend.now_ticks();
@@ -226,6 +242,15 @@ fn encode(state: &State) -> Vec<u8> {
         }
         put_u64(&mut out, vcpu.guest_counter);
         out.push(u8::from(vcpu.vtimer_masked));
+        match vcpu.power {
+            Power::Off => out.push(0),
+            Power::On => out.push(1),
+            Power::OnPending { entry, context } => {
+                out.push(2);
+                put_u64(&mut out, entry);
+                put_u64(&mut out, context);
+            }
+        }
     }
     out
 }
@@ -236,7 +261,7 @@ fn decode(bytes: &[u8]) -> Result<State> {
         return Err(Error::Format("not a cave-vm snapshot".into()));
     }
     let version = r.u32()?;
-    if version != VERSION {
+    if version != VERSION && version != 1 {
         return Err(Error::Format(format!(
             "format version {version}, this build reads {VERSION}"
         )));
@@ -286,13 +311,29 @@ fn decode(bytes: &[u8]) -> Result<State> {
                 Ok((reg, r.u64()?))
             })
             .collect::<Result<_>>()?;
+        let guest_counter = r.u64()?;
+        let vtimer_masked = r.take(1)?[0] != 0;
+        let power = if version == 1 {
+            Power::On
+        } else {
+            match r.take(1)?[0] {
+                0 => Power::Off,
+                1 => Power::On,
+                2 => Power::OnPending {
+                    entry: r.u64()?,
+                    context: r.u64()?,
+                },
+                other => return Err(unknown("power state", u32::from(other))),
+            }
+        };
         vcpus.push(VcpuState {
             regs,
             simd,
             sys_regs,
             icc_regs,
-            guest_counter: r.u64()?,
-            vtimer_masked: r.take(1)?[0] != 0,
+            guest_counter,
+            vtimer_masked,
+            power,
         });
     }
     if !r.bytes.is_empty() {
@@ -381,8 +422,39 @@ mod tests {
                     .collect(),
                 guest_counter: 123_456,
                 vtimer_masked: true,
+                power: Power::On,
             }],
         }
+    }
+
+    #[test]
+    fn power_states_round_trip() {
+        let mut state = sample();
+        let first = state.vcpus[0].clone();
+        state.vcpus = [
+            Power::On,
+            Power::Off,
+            Power::OnPending {
+                entry: 0x4008_0000,
+                context: 9,
+            },
+        ]
+        .into_iter()
+        .map(|power| VcpuState {
+            power,
+            ..first.clone()
+        })
+        .collect();
+        assert_eq!(decode(&encode(&state)).unwrap(), state);
+    }
+
+    #[test]
+    fn version_1_loads_with_the_vcpu_on() {
+        let state = sample();
+        let mut bytes = encode(&state);
+        bytes[8..12].copy_from_slice(&1u32.to_le_bytes());
+        bytes.pop(); // version 1 has no power byte
+        assert_eq!(decode(&bytes).unwrap(), state);
     }
 
     #[test]
