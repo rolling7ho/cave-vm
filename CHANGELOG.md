@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- Userspace network stack in `cave-vm-vmm` (`nat`), built on smoltcp: the guest gets a fixed address on 192.168.127.0/24, the gateway answers ARP and ping, and frames with another hardware or IP address are dropped (P3.7b).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
