@@ -3,7 +3,7 @@
 # tries it signed and installed different ways, printing WORKS or FAILS for
 # each. Exit 137 means macOS killed the process at launch. Everything happens in a temporary folder; nothing is installed.
 #
-# Run on a clean macOS 26 Mac with no paid Apple developer account:
+# Run on macOS 26 or later with no paid Apple developer account:
 #   scripts/spike/signing-check.sh
 set -u
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
