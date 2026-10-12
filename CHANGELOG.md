@@ -15,6 +15,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 - `cave-vm-proto`: the length-prefixed JSON frame codec, the `hello` version handshake, `error` messages and every guest agent message from `docs/protocol.md` (P3.1).
 - Userspace network stack in `cave-vm-vmm` (`nat`), built on smoltcp: the guest gets a fixed address on 192.168.127.0/24, the gateway answers ARP and ping, and frames with another hardware or IP address are dropped (P3.7b).
+- Outbound TCP through host sockets in the userspace network stack, with the network policy: `nat` mode denies private, link-local and shared ranges, every mode denies loopback, multicast, reserved ranges and the Mac's own addresses, and `lan` mode allows private ranges. A denied or refused connection resets the guest's, and each attempt is recorded for the audit log (P3.7c, P3.7e).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
