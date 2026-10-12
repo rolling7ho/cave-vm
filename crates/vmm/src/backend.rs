@@ -12,7 +12,7 @@
 
 use std::fmt;
 
-pub use cave_vm_hvf::{DataAccess, Exception, Exit, IccReg, Reg, SysReg, Trap};
+pub use cave_vm_hvf::{DataAccess, Exception, Exit, IccReg, RedistReg, Reg, SysReg, Trap};
 
 use crate::memory::GuestMemory;
 
@@ -148,6 +148,12 @@ pub trait BackendVcpu {
 
     /// Writes a GIC CPU interface register.
     fn set_icc_reg(&mut self, reg: IccReg, value: u64) -> Result<()>;
+
+    /// Reads a register of this vCPU's GIC redistributor.
+    fn redist_reg(&self, reg: RedistReg) -> Result<u64>;
+
+    /// Writes a register of this vCPU's GIC redistributor.
+    fn set_redist_reg(&mut self, reg: RedistReg, value: u64) -> Result<()>;
 
     /// Marks a private peripheral interrupt (interrupt ID below 32) of this
     /// vCPU pending or not.

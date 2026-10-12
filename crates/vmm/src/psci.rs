@@ -1,6 +1,7 @@
 //! PSCI, the firmware interface Linux uses to manage CPUs and power, as
-//! trapped through `HVC`. Only what a single-vCPU spike needs is handled;
-//! secondary CPUs are reported as not supported.
+//! trapped through `HVC`. [`handle`] decodes a call and checks its
+//! arguments; the run loop applies CPU power changes, since those need the
+//! state of every vCPU.
 
 /// Function IDs from the PSCI specification (SMC32 and SMC64 forms).
 pub mod function {
@@ -24,6 +25,14 @@ pub mod ret {
     pub const NOT_SUPPORTED: i64 = -1;
     pub const INVALID_PARAMETERS: i64 = -2;
     pub const ALREADY_ON: i64 = -4;
+    pub const ON_PENDING: i64 = -5;
+}
+
+/// `AFFINITY_INFO` results.
+pub mod affinity {
+    pub const ON: i64 = 0;
+    pub const OFF: i64 = 1;
+    pub const ON_PENDING: i64 = 2;
 }
 
 /// PSCI 1.0, as `major << 16 | minor`.
@@ -36,6 +45,15 @@ const MIGRATE_NOT_REQUIRED: i64 = 2;
 pub enum Action {
     /// Write this value to `x0` and resume the guest.
     Return(i64),
+    /// Start vCPU `target` at `entry` with `context` in `x0`, then return
+    /// the result to the caller.
+    CpuOn {
+        target: u32,
+        entry: u64,
+        context: u64,
+    },
+    /// Return the power state of vCPU `target`.
+    AffinityInfo { target: u32 },
     /// Stop the calling vCPU.
     CpuOff,
     /// Power the VM off.
@@ -44,8 +62,19 @@ pub enum Action {
     SystemReset,
 }
 
-/// Handles a PSCI call. `args` are `x0` to `x3`. `cpus` is the number of
-/// vCPUs, of which only vCPU 0 runs in the spike.
+/// The vCPU index an MPIDR value names, the inverse of
+/// [`fdt::mpidr`](crate::fdt::mpidr), if it is one of `cpus`.
+pub fn vcpu_index(mpidr: u64, cpus: u32) -> Option<u32> {
+    // Only affinity levels 0 and 1 are used; anything above must be zero.
+    if mpidr & 0xff_00ff_0000 != 0 {
+        return None;
+    }
+    let index = (mpidr & 0xff) as u32 | (((mpidr >> 8) & 0xff) as u32) << 8;
+    (index < cpus).then_some(index)
+}
+
+/// Decodes a PSCI call. `args` are `x0` to `x3`. `cpus` is the number of
+/// vCPUs.
 pub fn handle(args: [u64; 4], cpus: u32) -> Action {
     use function::*;
     let func = args[0] as u32;
@@ -60,16 +89,28 @@ pub fn handle(args: [u64; 4], cpus: u32) -> Action {
             _ => ret::NOT_SUPPORTED,
         }),
         CPU_OFF => Action::CpuOff,
-        CPU_ON_32 | CPU_ON_64 => Action::Return(match args[1] & 0xff_ffff {
-            0 => ret::ALREADY_ON,
-            target if target < u64::from(cpus) => ret::NOT_SUPPORTED,
-            _ => ret::INVALID_PARAMETERS,
-        }),
-        AFFINITY_INFO_32 | AFFINITY_INFO_64 => Action::Return(match args[1] & 0xff_ffff {
-            0 => 0,                        // ON
-            t if t < u64::from(cpus) => 1, // OFF
-            _ => ret::INVALID_PARAMETERS,
-        }),
+        CPU_ON_32 | CPU_ON_64 => {
+            let (entry, context) = if func == CPU_ON_32 {
+                (args[2] & 0xffff_ffff, args[3] & 0xffff_ffff)
+            } else {
+                (args[2], args[3])
+            };
+            match vcpu_index(args[1], cpus) {
+                Some(target) => Action::CpuOn {
+                    target,
+                    entry,
+                    context,
+                },
+                None => Action::Return(ret::INVALID_PARAMETERS),
+            }
+        }
+        AFFINITY_INFO_32 | AFFINITY_INFO_64 => {
+            // Only the lowest affinity level (single vCPUs) is supported.
+            match (vcpu_index(args[1], cpus), args[2]) {
+                (Some(target), 0) => Action::AffinityInfo { target },
+                _ => Action::Return(ret::INVALID_PARAMETERS),
+            }
+        }
         SYSTEM_OFF => Action::SystemOff,
         SYSTEM_RESET => Action::SystemReset,
         _ => Action::Return(ret::NOT_SUPPORTED),
@@ -110,10 +151,62 @@ mod tests {
     }
 
     #[test]
-    fn cpu_on_for_boot_cpu_and_others() {
-        assert_eq!(call(CPU_ON_64, 0), Action::Return(ret::ALREADY_ON));
-        assert_eq!(call(CPU_ON_64, 1), Action::Return(ret::NOT_SUPPORTED));
+    fn cpu_on_names_the_target_entry_and_context() {
+        assert_eq!(
+            handle([u64::from(CPU_ON_64), 0x8000_0001, 0x4008_0000, 7], 2),
+            Action::CpuOn {
+                target: 1,
+                entry: 0x4008_0000,
+                context: 7
+            }
+        );
         assert_eq!(call(CPU_ON_64, 9), Action::Return(ret::INVALID_PARAMETERS));
+    }
+
+    #[test]
+    fn cpu_on_32_truncates_its_arguments() {
+        assert_eq!(
+            handle(
+                [
+                    u64::from(CPU_ON_32),
+                    1,
+                    0xffff_0000_4008_0000,
+                    0x1_0000_0002
+                ],
+                2
+            ),
+            Action::CpuOn {
+                target: 1,
+                entry: 0x4008_0000,
+                context: 2
+            }
+        );
+    }
+
+    #[test]
+    fn affinity_info_checks_target_and_level() {
+        assert_eq!(
+            call(AFFINITY_INFO_64, 1),
+            Action::AffinityInfo { target: 1 }
+        );
+        assert_eq!(
+            call(AFFINITY_INFO_64, 2),
+            Action::Return(ret::INVALID_PARAMETERS)
+        );
+        assert_eq!(
+            handle([u64::from(AFFINITY_INFO_64), 0, 1, 0], 2),
+            Action::Return(ret::INVALID_PARAMETERS),
+            "higher affinity levels are not supported"
+        );
+    }
+
+    #[test]
+    fn mpidr_round_trips_to_index() {
+        for index in [0, 1, 7, 0x102] {
+            assert_eq!(vcpu_index(crate::fdt::mpidr(index), 0x200), Some(index));
+        }
+        assert_eq!(vcpu_index(0x8000_0002, 2), None, "out of range");
+        assert_eq!(vcpu_index(0x1_0000, 2), None, "affinity level 2");
     }
 
     #[test]

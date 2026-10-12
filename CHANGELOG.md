@@ -4,8 +4,16 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored spike snapshots got no more timer interrupts once the guest went idle, so they hung at 100% CPU. `hv_gic_state_get_data` leaves out each redistributor's SGI and PPI state; snapshots now save it per vCPU (format version 3, so older spike snapshots are refused).
+- Device MMIO loads now honor sign extension (`LDRSB`, `LDRSH`, `LDRSW`) and 32-bit destination registers.
+- A virtqueue buffer whose address range would wrap past the top of the address space is an error instead of an overflow, and an oversized `QueueNum` leaves the queue invalid instead of truncating to a valid size.
+- A restored spike VM saved again now records the time of the second save, not of the restore, for its timers.
+
 ### Added
 
+- `cave-vm-proto`: the length-prefixed JSON frame codec, the `hello` version handshake, `error` messages and every guest agent message from `docs/protocol.md` (P3.1).
 - Userspace network stack in `cave-vm-vmm` (`nat`), built on smoltcp: the guest gets a fixed address on 192.168.127.0/24, the gateway answers ARP and ping, and frames with another hardware or IP address are dropped (P3.7b).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
@@ -21,4 +29,6 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - Spike snapshots: `cave-vmm-spike --snapshot` saves a paused guest (vCPU, GIC, timer, UART and sparse memory file) and `--restore` resumes it in a new process in about 3 ms (`docs/spike/p2.9-snapshot.md`).
 - Fork experiment: `scripts/spike/fork-check.sh` restores one snapshot into two VMs at once with copy-on-write memory and checks they diverge (`docs/spike/p2.10-fork.md`).
 - Spike report with baseline numbers and the approved gate 4 targets (`docs/decisions/0005-spike-report.md`).
+- 2-vCPU spike numbers, measured with `scripts/spike/vcpu-bench.py`, as an addendum to the spike report. The gate 4 targets stand.
 - Virtio-mmio transport (version 2) and split virtqueues in `cave-vm-vmm`, with indirect descriptors, level-triggered interrupts and 32 device slots in the device tree. Malformed queues from the guest are errors, never VMM crashes.
+- Secondary vCPUs: PSCI `CPU_ON`, `CPU_OFF` and `AFFINITY_INFO`, each vCPU on its own thread, and `cave-vmm-spike --cpus <n>` to boot, snapshot and restore with more than one. Spike snapshots record each vCPU's power state.
