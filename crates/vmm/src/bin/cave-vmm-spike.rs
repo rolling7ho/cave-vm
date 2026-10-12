@@ -246,9 +246,11 @@ mod spike {
         let vcpus_saved = Barrier::new(cpus as usize + 1);
         let gic_saved = Barrier::new(cpus as usize + 1);
         let (kick_tx, kick_rx) = mpsc::channel::<Kick>();
-        // One host time for every vCPU's timer, so the guest counters keep
-        // the same relation to each other across a save and a restore.
-        let clock = OnceLock::new();
+        // One host time for every vCPU's timer at restore, and another at
+        // save, so the guest counters keep the same relation to each other.
+        // They must be separate: a restored VM that is saved again would
+        // otherwise save with the restore time and lose the run in between.
+        let clocks = Clocks::default();
 
         let (ended, irqchip, power) = std::thread::scope(|scope| {
             let threads: Vec<_> = (0..cpus)
@@ -257,11 +259,11 @@ mod spike {
                     let (created, gic_ready) = (&created, &gic_ready);
                     let (vcpus_saved, gic_saved) = (&vcpus_saved, &gic_saved);
                     let kick_tx = kick_tx.clone();
-                    let clock = &clock;
+                    let clocks = &clocks;
                     scope.spawn(move || {
                         let ended = vcpu_thread(
                             backend, machine, start, index, created, gic_ready, kick_tx, saving,
-                            clock,
+                            clocks,
                         );
                         if ended.result.is_err() {
                             machine.request_stop();
@@ -359,7 +361,7 @@ mod spike {
         gic_ready: &Barrier,
         kick_tx: mpsc::Sender<Kick>,
         saving: bool,
-        clock: &OnceLock<u64>,
+        clocks: &Clocks,
     ) -> Ended {
         let mut ended = Ended {
             result: Ok(Stop::Canceled),
@@ -390,7 +392,7 @@ mod spike {
         };
         if let Start::Restore(state) = start {
             let saved = &state.vcpus[index as usize];
-            let now = *clock.get_or_init(|| backend.now_ticks());
+            let now = *clocks.restore.get_or_init(|| backend.now_ticks());
             if let Err(e) = snapshot::restore_vcpu(&mut vcpu, saved, now) {
                 ended.result = Err(err(e));
                 return ended;
@@ -408,13 +410,21 @@ mod spike {
         }
         .map_err(err);
         if saving && ended.result == Ok(Stop::Canceled) {
-            let now = *clock.get_or_init(|| backend.now_ticks());
+            let now = *clocks.save.get_or_init(|| backend.now_ticks());
             match snapshot::save_vcpu(&vcpu, now) {
                 Ok(state) => ended.saved = Some(state),
                 Err(e) => ended.result = Err(err(e)),
             }
         }
         ended
+    }
+
+    /// Host times shared by every vCPU thread: one taken at restore, one at
+    /// save.
+    #[derive(Default)]
+    struct Clocks {
+        restore: OnceLock<u64>,
+        save: OnceLock<u64>,
     }
 
     /// Forwards the terminal to the guest's UART, kicking vCPU 0 so it

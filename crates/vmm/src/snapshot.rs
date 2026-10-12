@@ -25,11 +25,12 @@ use cave_vm_hvf::{
 };
 
 const MAGIC: &[u8; 8] = b"CAVESNAP";
-/// Version 2 adds each vCPU's PSCI power state and its redistributor's SGI
-/// and PPI registers. Version 1 files are refused: without the
-/// redistributor state, the restored guest never gets another timer
-/// interrupt.
-const VERSION: u32 = 2;
+/// Version 3 has each vCPU's PSCI power state and its redistributor's SGI
+/// and PPI registers. Older files are refused: version 1 has neither, and
+/// version 2 (written only by builds of the unmerged SMP branch) has the
+/// power state but not the redistributor state. Without that state the
+/// restored guest never gets another timer interrupt.
+const VERSION: u32 = 3;
 const STATE_FILE: &str = "state";
 const MEMORY_FILE: &str = "memory";
 
@@ -490,11 +491,13 @@ mod tests {
     }
 
     #[test]
-    fn version_1_is_refused() {
-        let mut bytes = encode(&sample());
-        bytes[8..12].copy_from_slice(&1u32.to_le_bytes());
-        let err = decode(&bytes).unwrap_err().to_string();
-        assert!(err.contains("version 1"), "{err}");
+    fn versions_1_and_2_are_refused() {
+        for old in [1u32, 2] {
+            let mut bytes = encode(&sample());
+            bytes[8..12].copy_from_slice(&old.to_le_bytes());
+            let err = decode(&bytes).unwrap_err().to_string();
+            assert!(err.contains(&format!("version {old}")), "{err}");
+        }
     }
 
     #[test]
