@@ -41,6 +41,7 @@ fn fake_kernel_prints_and_powers_off() {
         cmdline: "console=ttyAMA0".into(),
         memory_size: 64 << 20,
         cpus: 1,
+        virtio_slots: 0,
     };
     let vm = Vm::new(&VmConfig::default()).unwrap();
     let mut backend = HvfBackend::new(&vm);

@@ -170,6 +170,7 @@ mod spike {
                     cmdline: args.cmdline.clone(),
                     memory_size: args.memory_mib << 20,
                     cpus: 1,
+                    virtio_slots: 0,
                 };
                 let prepared = boot::prepare(&mut backend, &config).map_err(err)?;
                 let mut vcpu = backend.create_vcpu(0).map_err(err)?;

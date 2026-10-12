@@ -1,6 +1,7 @@
 //! The vCPU run loop: runs the guest and handles what it traps on.
 //!
-//! Handles PSCI over HVC, MMIO to the UART, WFI by sleeping until the
+//! Handles PSCI over HVC, MMIO to the UART and the virtio-mmio slots, WFI
+//! by sleeping until the
 //! virtual timer is due or input arrives, and the virtual timer interrupt.
 //! Hypervisor.framework handles WFI itself once the VM has a GIC, so a
 //! thread that gives the machine work (such as input) kicks the vCPU with
@@ -16,6 +17,7 @@ use std::time::Duration;
 
 use crate::backend::{self, Backend, BackendVcpu, DataAccess, Exit, Reg, SysReg, Trap};
 use crate::devices::pl011::Pl011;
+use crate::devices::virtio::mmio::MmioTransport;
 use crate::layout;
 use crate::psci;
 
@@ -93,7 +95,10 @@ pub struct Machine<W: Write> {
     pub input: Option<Receiver<Vec<u8>>>,
     /// Number of vCPUs in the device tree.
     pub cpus: u32,
+    /// Virtio devices, by slot.
+    virtio: Vec<MmioTransport>,
     uart_irq: bool,
+    virtio_irq: Vec<bool>,
     stop: Arc<AtomicBool>,
 }
 
@@ -103,7 +108,9 @@ impl<W: Write> Machine<W> {
             uart: Pl011::new(uart_out),
             input,
             cpus,
+            virtio: Vec::new(),
             uart_irq: false,
+            virtio_irq: Vec::new(),
             stop: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -120,6 +127,23 @@ impl<W: Write> Machine<W> {
     pub fn with_stop_flag(mut self, flag: Arc<AtomicBool>) -> Machine<W> {
         self.stop = flag;
         self
+    }
+
+    /// Puts a virtio device in the next free slot and returns the slot. The
+    /// device tree must list at least this many slots.
+    pub fn add_virtio(&mut self, transport: MmioTransport) -> u32 {
+        assert!(
+            (self.virtio.len() as u32) < layout::VIRTIO_MMIO_SLOTS,
+            "out of virtio-mmio slots"
+        );
+        self.virtio.push(transport);
+        self.virtio_irq.push(false);
+        self.virtio.len() as u32 - 1
+    }
+
+    /// The virtio device in `slot`.
+    pub fn virtio(&self, slot: u32) -> Option<&MmioTransport> {
+        self.virtio.get(slot as usize)
     }
 
     /// Moves waiting input into the UART, waiting up to `timeout` for some
@@ -168,6 +192,18 @@ impl<W: Write> Machine<W> {
         }
         Ok(())
     }
+
+    /// Drives each virtio device's interrupt line to match its status.
+    fn sync_virtio_irqs<B: Backend>(&mut self, backend: &B) -> Result<()> {
+        for (slot, (transport, line)) in self.virtio.iter().zip(&mut self.virtio_irq).enumerate() {
+            let level = transport.interrupt().level();
+            if level != *line {
+                backend.set_irq_line(layout::virtio_intid(slot as u32), level)?;
+                *line = level;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Runs `vcpu` until the guest stops it or an error occurs.
@@ -179,6 +215,7 @@ pub fn run<B: Backend, V: BackendVcpu, W: Write>(
     loop {
         machine.take_input(Duration::ZERO);
         machine.sync_uart_irq(backend)?;
+        machine.sync_virtio_irqs(backend)?;
         sync_vtimer(backend, vcpu)?;
 
         match vcpu.run()? {
@@ -271,10 +308,13 @@ fn mmio<V: BackendVcpu, W: Write>(
     access: DataAccess,
 ) -> Result<()> {
     let in_uart = (layout::UART_BASE..layout::UART_BASE + layout::UART_SIZE).contains(&ipa);
-    let mask = if access.size >= 8 {
+    let virtio =
+        layout::virtio_slot_of(ipa).filter(|&(slot, _)| (slot as usize) < machine.virtio.len());
+    let size = usize::from(access.size).clamp(1, 8);
+    let mask = if size >= 8 {
         u64::MAX
     } else {
-        (1u64 << (access.size * 8)) - 1
+        (1u64 << (size * 8)) - 1
     };
     if access.write {
         let value = if access.reg == 31 {
@@ -286,10 +326,16 @@ fn mmio<V: BackendVcpu, W: Write>(
             machine
                 .uart
                 .write(ipa - layout::UART_BASE, (value & mask) as u32);
+        } else if let Some((slot, offset)) = virtio {
+            machine.virtio[slot as usize].write(offset, &value.to_le_bytes()[..size]);
         }
     } else {
         let value = if in_uart {
             u64::from(machine.uart.read(ipa - layout::UART_BASE)) & mask
+        } else if let Some((slot, offset)) = virtio {
+            let mut bytes = [0u8; 8];
+            machine.virtio[slot as usize].read(offset, &mut bytes[..size]);
+            u64::from_le_bytes(bytes)
         } else {
             0
         };
