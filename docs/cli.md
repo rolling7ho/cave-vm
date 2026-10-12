@@ -2,7 +2,7 @@
 
 This is the spec for the `cave` command, written before any code (ROADMAP task P1.1). Nothing here is implemented yet.
 
-[docs/design.md](design.md) is the source of truth. Every command in its CLI table is here, and the flags it names (`--net off`, `--net lan`, `-p 3000`, `--in-vm`, the `cave rm` confirmation) are written as the design specifies them. Anything the design does not name is marked **Proposed** and waits for Ivan to accept or cut it. Questions the design leaves open are listed under "Needs Ivan's decision" in [ROADMAP.md](../ROADMAP.md) as D13 to D22, and are linked from the places they affect.
+[docs/design.md](design.md) is the source of truth. Every command in its CLI table is here, and the flags it names (`--net off`, `--net lan`, `-p 3000`, `--in-vm`, the `cave rm` confirmation) are written as the design specifies them. Anything the design does not name is marked **Proposed** and waits for Ivan to accept or cut it. Questions the design left open were answered by Ivan as D13 to D22 ([decision 0004](decisions/0004-cli-and-config-open-items.md)), and are linked from the places they affect.
 
 The quickstart stays at two commands:
 
@@ -15,17 +15,17 @@ cd my-project && cave agent claude
 
 ### The project
 
-The project directory is the VM's identity. Commands that act on a VM find the project by looking for `cave.toml` in the current directory, then in each parent directory up to the home directory, the way git finds a repository. **Proposed, D16.** Outside any project, those commands fail with "not a cave project" and suggest `cave init`, except for the ones below that set the project up themselves.
+The project directory is the VM's identity. Commands that act on a VM find the project by looking for `cave.toml` in the current directory, then in each parent directory up to the home directory, the way git finds a repository ([D16](../ROADMAP.md#decisions)). Outside any project, those commands fail with "not a cave project" and suggest `cave init`, except for the ones below that set the project up themselves.
 
 ### Setting up on first use
 
-`cave run`, `cave shell`, `cave exec` and `cave agent` work in a directory that has no `cave.toml`: they run `cave init` with its defaults first and say so in one line. This is what keeps the quickstart at two commands (design principle 1: `cave run` works with no config). **Proposed, D15.**
+`cave run`, `cave shell`, `cave exec` and `cave agent` work in a directory that has no `cave.toml`: they run `cave init` with its defaults first and say so in one line. This is what keeps the quickstart at two commands (design principle 1: `cave run` works with no config). It refuses to do this in the home folder itself ([D15](../ROADMAP.md#decisions)).
 
 The first time `cave` runs on a Mac it also does the first-run setup from the design: it checks the host, fetches the kernel and the base image, signs itself ad hoc with the hypervisor entitlement, creates the data directory and runs the `cave doctor` checks. Ad hoc signing without a paid Apple account is an assumption checked in the spike [A5].
 
 ### Forks
 
-A fork is a VM that lives inside its parent project at `.cave/forks/<name>`. Every command that acts on a VM takes `--fork <name>` to act on that fork instead of the project's own VM, for example `cave exec --fork try-2 -- npm test`. **Proposed, D18.**
+A fork is a VM that lives inside its parent project at `.cave/forks/<name>`. Every command that acts on a VM takes `--fork <name>` to act on that fork instead of the project's own VM, for example `cave exec --fork try-2 -- npm test` ([D18](../ROADMAP.md#decisions)).
 
 ### Names
 
@@ -135,7 +135,7 @@ Sets up the current directory as a project. It writes:
 - `.cave/`, and adds `.cave/` to `.gitignore`, creating the file if needed.
 - The agent skill files: a cave section in `AGENTS.md` (existing content is kept; the section sits between marker comments so it can be updated), a `.claude/skills/` entry, and, for agents that support it, a permissions config that denies host Bash.
 
-It does not boot the VM. The files already in the folder are copied into the VM when it first boots ([D13](../ROADMAP.md#needs-ivans-decision)).
+It does not boot the VM. The files already in the folder, everything except `.cave/`, are copied into the VM once when it first boots. In sealed mode the Mac files are left untouched but are no longer updated, and cave says so ([D13](../ROADMAP.md#decisions)).
 
 When stdin is a terminal and neither `--sealed` nor `--synced` is given, it asks the design's setup question, with sealed as the default:
 
@@ -150,7 +150,7 @@ Running `cave init` again in a project is safe: it refreshes the skill files and
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--sealed` | yes | Code lives only on the VM disk. **Proposed** flag |
-| `--synced` | | Also keep a Mac mirror of the code. The mirror is the project folder itself ([D14](../ROADMAP.md#needs-ivans-decision)). **Proposed** flag |
+| `--synced` | | Also keep a Mac mirror of the code. The mirror is the project folder itself ([D14](../ROADMAP.md#decisions)). **Proposed** flag |
 | `--image <name>` | `base` | Base image, from `cave images`. **Proposed** flag |
 
 Output:
@@ -186,7 +186,7 @@ Boots this project's VM, or restores it if it is suspended, and returns once the
 | `--net off` | | No network device at all (design) |
 | `--net lan` | | Allow private and link-local ranges as well (design). Echoed back at startup |
 | `-p <port>` | none | Forward `localhost:<port>` on the Mac to the same port in the VM (design: `-p 3000`). `-p <mac>:<vm>` maps different ports. Repeatable. **Proposed:** the `<mac>:<vm>` form, and binding to localhost only |
-| `--fork <name>` | | Run a fork instead. **Proposed, D18** |
+| `--fork <name>` | | Run a fork instead ([D18](../ROADMAP.md#decisions)) |
 
 Without `--net`, the mode comes from `cave.toml`, which is `nat` by default. Flags apply to this boot only; there is no way to make `--net lan` or a port forward permanent in `cave.toml`, so a cloned repository cannot widen access on its own ([config.md](config.md#network)). **Proposed.**
 
@@ -205,7 +205,7 @@ Warning, from the design: `memory is getting tight: N VMs are running and M GB i
 
 ### cave stop
 
-**Proposed command, D20.** The design has running, suspended and stopped states and auto-suspend after an idle time, but no verb to suspend a VM now. Without one, changing `--net` or freeing memory means waiting for the idle timer.
+Added by [D20](../ROADMAP.md#decisions). The design has running, suspended and stopped states and auto-suspend after an idle time, but no verb to suspend a VM now. Without one, changing `--net` or freeing memory means waiting for the idle timer.
 
 ```
 cave stop [--fork <name>]
@@ -298,7 +298,7 @@ Errors:
 cave fork [name] [--from <snapshot>]
 ```
 
-Creates a new VM from a snapshot, copy-on-write, stored at `.cave/forks/<name>` (design). The design leaves two things open, so both are **Proposed, D18**:
+Creates a new VM from a snapshot, copy-on-write, stored at `.cave/forks/<name>` (design). The design left two things open, answered by [D18](../ROADMAP.md#decisions):
 
 - `name` is the new fork's name. Without it, forks are named `fork-1`, `fork-2` and so on.
 - The source is a fresh snapshot of the VM's current state. `--from <snapshot>` forks an existing snapshot instead.
@@ -320,7 +320,7 @@ Errors: the same name errors as `cave snapshot`, and `no snapshot named "<name>"
 cave ls [--all] [--json]
 ```
 
-Inside a project, lists this project's VM, its forks and its snapshots. With `--all`, or outside a project, lists every project VM on this Mac that the daemon knows about. **Proposed, D17:** the daemon keeps a list of project folders it has run, pruned when a folder is gone, because the design has no registry.
+Inside a project, lists this project's VM, its forks and its snapshots. With `--all`, or outside a project, lists every project VM on this Mac that the daemon knows about. The daemon keeps a list of project folders it has run, pruned when a folder is gone, because the design has no registry ([D17](../ROADMAP.md#decisions)).
 
 ```
 NAME                            KIND      STATE      SIZE    CREATED
@@ -462,7 +462,7 @@ Errors:
 cave export [snapshot] [-o <dir>]
 ```
 
-**Proposed, D19.** The design lists `cave export` with `cave cp` as the way to "move files in and out" and as an escape hatch for code in sealed mode. This spec reads it as: copy the project directory out of the VM, or out of a snapshot's disk, into a folder on the Mac. Without `-o`, the folder is `./<ProjectFolder>-export-<YYYY-MM-DD>`. It copies everything, including `.git`, and leaves out nothing, so it is a full copy of the work. Exporting from a snapshot that recorded injected credentials shows the same warning as `cave fork`.
+Decided by [D19](../ROADMAP.md#decisions). The design lists `cave export` with `cave cp` as the way to "move files in and out" and as an escape hatch for code in sealed mode. `cave export` copies the project directory out of the VM, or out of a snapshot's disk, into a folder on the Mac. Without `-o`, the folder is `./<ProjectFolder>-export-<YYYY-MM-DD>`. It copies everything, including `.git`, and leaves out nothing, so it is a full copy of the work. Exporting from a snapshot that recorded injected credentials shows the same warning as `cave fork`.
 
 Output: `Exported 1,204 files (38 MB) to ./my-project-export-2026-10-12`.
 
@@ -565,7 +565,7 @@ cd my-project && cave agent claude
 
 1. `cave agent` finds no `cave.toml`, so it runs `cave init`, which asks whether to keep a copy of the code on the Mac. Enter keeps the default, sealed.
 2. First-run setup fetches the kernel and the Debian image with a progress bar, signs `cave` ad hoc [A5], and runs the doctor checks.
-3. The VM boots, the files in `my-project` are copied into `/workspace` ([D13](../ROADMAP.md#needs-ivans-decision)), and the startup policy is printed.
+3. The VM boots, the files in `my-project` are copied into `/workspace` ([D13](../ROADMAP.md#decisions)), and the startup policy is printed.
 4. A snapshot is taken, and Claude Code starts on the Mac with the VM as its only place to run commands.
 
 ### Undo a bad agent run

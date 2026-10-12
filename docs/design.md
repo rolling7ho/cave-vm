@@ -352,6 +352,7 @@ cave-vm/
 - [x] `cave agent <name>`: the agent runs on the Mac and uses the VM through MCP; `--in-vm` runs it inside the VM instead. See `docs/decisions/0002-cave-agent-runs-on-the-mac.md`.
 - [x] Roadmap: six phases, each of the first five closed by a gate, and phase 6 ending at the v1 release. See `docs/decisions/0001-roadmap-phases-and-gates.md`.
 - [x] Roadmap open items (dependencies, guest-memory location, Linux build environment, toolchain pin, interrupt-controller contingency, printed credentials, config key names, hardware CI, README fork wording). See `docs/decisions/0003-roadmap-open-items.md`.
+- [x] CLI and config open items (existing files at first boot, the synced mirror location, setup on first use, project lookup, `cave ls`, forks, `cave export`, `cave stop`, TTL, the digest pin). See `docs/decisions/0004-cli-and-config-open-items.md`.
 - [x] Success targets: the headline is a fork in well under a second; exact numbers are set after the spike measures a baseline.
 - [x] Telemetry (none), security (sandbox profile), testing (self-hosted Mac and a mock backend), repo and process (one Cargo workspace, DCO sign-off).
 

@@ -50,13 +50,13 @@ check        = true        # proposed
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `image` | string | `"base"` | Base image name from `cave images`. On first run cave pins it by writing the digest to `.cave/` and uses that digest from then on. **Proposed:** where the pin is stored, see below |
+| `image` | string | `"base"` | Base image name from `cave images`. On first run cave pins it by writing the digest to `.cave/` and uses that digest from then on. The pin is written into this key ([D22](../ROADMAP.md#decisions)) |
 | `cpus` | integer | `2` | Virtual CPUs, 1 to the Mac's CPU count |
 | `memory` | size | `"2G"` | Guest memory. The configurable guest address size bounds the maximum [A4] |
 | `idle_suspend` | duration or `"off"` | `"30m"` | **Proposed.** Suspend the VM after this long idle. Idle means no `cave` or SDK or MCP connection to the VM and no traffic on a forwarded port |
-| `ttl` | duration or `"off"` | `"off"` | **Proposed.** Lifetime for disposable VMs, counted from boot. When it passes, the VM is stopped and its state removed, as `cave rm --yes` would. `cave run` prints when that will happen. See [D21](../ROADMAP.md#needs-ivans-decision) |
+| `ttl` | duration or `"off"` | `"off"` | Lifetime for disposable VMs, counted from boot. When it passes, the VM is stopped and its state removed, as `cave rm --yes` would. `cave run` prints when that will happen. Decided by [D21](../ROADMAP.md#decisions) |
 
-Where the digest pin lives is a real question. The design says `cave.toml` "plus a pinned base-image digest rebuilds the environment anywhere", but `.cave/` is machine-specific and gitignored, so a pin kept only in `.cave/` does not travel. **Proposed:** on first run cave writes the digest into `cave.toml` as `image = "base@sha256:..."`, so the pin is committed with the file. This changes the file `cave init` wrote, once. See [D22](../ROADMAP.md#needs-ivans-decision).
+The design says `cave.toml` "plus a pinned base-image digest rebuilds the environment anywhere", and `.cave/` is gitignored, so the pin lives in `cave.toml`: on first run cave rewrites `image = "base"` as `image = "base@sha256:..."`, and the pin is committed with the file. This is the one time cave edits `cave.toml` ([D22](../ROADMAP.md#decisions)).
 
 ### [storage]
 
