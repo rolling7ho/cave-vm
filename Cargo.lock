@@ -33,3 +33,6 @@ version = "0.0.0"
 [[package]]
 name = "cave-vm-vmm"
 version = "0.0.0"
+dependencies = [
+ "cave-vm-hvf",
+]
