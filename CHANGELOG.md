@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Fixed
 
+- Interrupts that virtio devices raise from their own threads now wake an idle guest at once. Before, they waited for the guest's next timer tick, which delayed vsock connection setup by about 200 ms and network replies by up to a second.
 - Restored spike snapshots got no more timer interrupts once the guest went idle, so they hung at 100% CPU. `hv_gic_state_get_data` leaves out each redistributor's SGI and PPI state; snapshots now save it per vCPU (format version 3, so older spike snapshots are refused).
 - Device MMIO loads now honor sign extension (`LDRSB`, `LDRSH`, `LDRSW`) and 32-bit destination registers.
 - A virtqueue buffer whose address range would wrap past the top of the address space is an error instead of an overflow, and an oversized `QueueNum` leaves the queue invalid instead of truncating to a valid size.
