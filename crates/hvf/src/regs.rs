@@ -185,18 +185,52 @@ impl IccReg {
 pub struct RedistReg(pub(crate) u32);
 
 impl RedistReg {
+    /// Group of each SGI and PPI.
+    pub const IGROUPR0: RedistReg = RedistReg(0x1_0080);
+    /// Set-enable for SGIs and PPIs.
+    pub const ISENABLER0: RedistReg = RedistReg(0x1_0100);
+    /// Clear-enable for SGIs and PPIs.
+    pub const ICENABLER0: RedistReg = RedistReg(0x1_0180);
     /// Set-pending for SGIs and PPIs 0 to 31, one bit each.
     pub const ISPENDR0: RedistReg = RedistReg(0x1_0200);
     /// Clear-pending for SGIs and PPIs 0 to 31, one bit each.
     pub const ICPENDR0: RedistReg = RedistReg(0x1_0280);
-    /// Set-enable for SGIs and PPIs.
-    pub const ISENABLER0: RedistReg = RedistReg(0x1_0100);
+    /// Set-active for SGIs and PPIs.
+    pub const ISACTIVER0: RedistReg = RedistReg(0x1_0300);
+    /// Clear-active for SGIs and PPIs.
+    pub const ICACTIVER0: RedistReg = RedistReg(0x1_0380);
+    /// Trigger configuration of SGIs (read-only) and PPIs.
+    pub const ICFGR0: RedistReg = RedistReg(0x1_0c00);
+    pub const ICFGR1: RedistReg = RedistReg(0x1_0c04);
 
     /// The raw `hv_gic_redistributor_reg_t` value.
     pub const fn raw(self) -> u32 {
         self.0
     }
 }
+
+/// The per-vCPU GIC redistributor registers a snapshot saves, with their
+/// names: the SGI and PPI group, enable, pending, active, priority and
+/// trigger state. `hv_gic_state_get_data` does not carry these (measured in
+/// phase 3: a restored vCPU had every SGI and PPI disabled), so they are
+/// saved and written back one by one. Enable, pending and active are
+/// written through their set registers after clearing.
+pub const GUEST_STATE_REDIST_REGS: &[(&str, RedistReg)] = &[
+    ("IGROUPR0", RedistReg::IGROUPR0),
+    ("ISENABLER0", RedistReg::ISENABLER0),
+    ("ISPENDR0", RedistReg::ISPENDR0),
+    ("ISACTIVER0", RedistReg::ISACTIVER0),
+    ("IPRIORITYR0", RedistReg(0x1_0400)),
+    ("IPRIORITYR1", RedistReg(0x1_0404)),
+    ("IPRIORITYR2", RedistReg(0x1_0408)),
+    ("IPRIORITYR3", RedistReg(0x1_040c)),
+    ("IPRIORITYR4", RedistReg(0x1_0410)),
+    ("IPRIORITYR5", RedistReg(0x1_0414)),
+    ("IPRIORITYR6", RedistReg(0x1_0418)),
+    ("IPRIORITYR7", RedistReg(0x1_041c)),
+    ("ICFGR0", RedistReg::ICFGR0),
+    ("ICFGR1", RedistReg::ICFGR1),
+];
 
 /// The GIC CPU interface registers a snapshot saves, with their names.
 /// `RPR_EL1` is read-only and derived, so it is left out.
@@ -268,5 +302,12 @@ mod tests {
         icc.sort_unstable();
         icc.dedup();
         assert_eq!(icc.len(), GUEST_STATE_ICC_REGS.len());
+        let mut redist: Vec<u32> = GUEST_STATE_REDIST_REGS
+            .iter()
+            .map(|(_, r)| r.raw())
+            .collect();
+        redist.sort_unstable();
+        redist.dedup();
+        assert_eq!(redist.len(), GUEST_STATE_REDIST_REGS.len());
     }
 }

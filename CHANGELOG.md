@@ -4,6 +4,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored spike snapshots got no more timer interrupts once the guest went idle, so they hung at 100% CPU. `hv_gic_state_get_data` leaves out each redistributor's SGI and PPI state; snapshots now save it per vCPU (format version 2, so older spike snapshots are refused).
+
 ### Added
 
 - Design document, roadmap and decision records.
@@ -21,4 +25,4 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - Fork experiment: `scripts/spike/fork-check.sh` restores one snapshot into two VMs at once with copy-on-write memory and checks they diverge (`docs/spike/p2.10-fork.md`).
 - Spike report with baseline numbers and the approved gate 4 targets (`docs/decisions/0005-spike-report.md`).
 - Virtio-mmio transport (version 2) and split virtqueues in `cave-vm-vmm`, with indirect descriptors, level-triggered interrupts and 32 device slots in the device tree. Malformed queues from the guest are errors, never VMM crashes.
-- Secondary vCPUs: PSCI `CPU_ON`, `CPU_OFF` and `AFFINITY_INFO`, each vCPU on its own thread, and `cave-vmm-spike --cpus <n>` to boot, snapshot and restore with more than one. Spike snapshots record each vCPU's power state (format version 2; version 1 still loads).
+- Secondary vCPUs: PSCI `CPU_ON`, `CPU_OFF` and `AFFINITY_INFO`, each vCPU on its own thread, and `cave-vmm-spike --cpus <n>` to boot, snapshot and restore with more than one. Spike snapshots record each vCPU's power state.
