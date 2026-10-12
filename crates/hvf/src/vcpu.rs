@@ -7,7 +7,7 @@ use std::ptr;
 use crate::error::{Error, Result};
 use crate::exit::Exit;
 use crate::ffi;
-use crate::regs::{IccReg, Reg, SIMD_FP_REGS, SysReg};
+use crate::regs::{IccReg, RedistReg, Reg, SIMD_FP_REGS, SysReg};
 use crate::vm::Vm;
 
 /// Which interrupt line [`Vcpu::set_pending_interrupt`] drives.
@@ -39,6 +39,17 @@ pub struct Vcpu<'vm> {
 /// Identifies a vCPU to other threads, for [`Vm::exit_vcpus`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VcpuHandle(pub(crate) ffi::hv_vcpu_t);
+
+impl VcpuHandle {
+    /// Makes the vCPU's current or next [`Vcpu::run`] return
+    /// [`Exit::Canceled`]. Callable from any thread. Fails harmlessly once
+    /// the vCPU is gone.
+    pub fn exit(self) -> Result<()> {
+        // SAFETY: points at one vCPU ID for the length of the call; the
+        // framework rejects IDs that are not live.
+        Error::check(unsafe { ffi::hv_vcpus_exit(&self.0, 1) })
+    }
+}
 
 impl<'vm> Vcpu<'vm> {
     pub(crate) fn new(_vm: &'vm Vm) -> Result<Vcpu<'vm>> {
@@ -157,6 +168,22 @@ impl<'vm> Vcpu<'vm> {
     pub fn set_icc_reg(&self, reg: IccReg, value: u64) -> Result<()> {
         // SAFETY: `self.id` is a live vCPU owned by this thread.
         Error::check(unsafe { ffi::hv_gic_set_icc_reg(self.id, reg.raw(), value) })
+    }
+
+    /// Reads a register of this vCPU's GIC redistributor. Needs a GIC.
+    pub fn redist_reg(&self, reg: RedistReg) -> Result<u64> {
+        let mut value = 0;
+        // SAFETY: `self.id` is a live vCPU; `value` is writable.
+        Error::check(unsafe { ffi::hv_gic_get_redistributor_reg(self.id, reg.raw(), &mut value) })?;
+        Ok(value)
+    }
+
+    /// Writes a register of this vCPU's GIC redistributor. Needs a GIC.
+    /// Setting a bit in [`RedistReg::ISPENDR0`] makes that PPI pending,
+    /// which is how the host delivers the virtual timer interrupt.
+    pub fn set_redist_reg(&self, reg: RedistReg, value: u64) -> Result<()> {
+        // SAFETY: `self.id` is a live vCPU.
+        Error::check(unsafe { ffi::hv_gic_set_redistributor_reg(self.id, reg.raw(), value) })
     }
 
     /// Guest physical address of this vCPU's GIC redistributor. Needs a GIC,

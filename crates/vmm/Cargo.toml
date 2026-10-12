@@ -10,3 +10,4 @@ publish.workspace = true
 
 [dependencies]
 cave-vm-hvf = { path = "../hvf" }
+vm-fdt = "0.3.0"

@@ -179,6 +179,25 @@ impl IccReg {
     }
 }
 
+/// A GIC redistributor register (`hv_gic_redistributor_reg_t`), the offset
+/// from the GICv3 specification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RedistReg(pub(crate) u32);
+
+impl RedistReg {
+    /// Set-pending for SGIs and PPIs 0 to 31, one bit each.
+    pub const ISPENDR0: RedistReg = RedistReg(0x1_0200);
+    /// Clear-pending for SGIs and PPIs 0 to 31, one bit each.
+    pub const ICPENDR0: RedistReg = RedistReg(0x1_0280);
+    /// Set-enable for SGIs and PPIs.
+    pub const ISENABLER0: RedistReg = RedistReg(0x1_0100);
+
+    /// The raw `hv_gic_redistributor_reg_t` value.
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
 /// The GIC CPU interface registers a snapshot saves, with their names.
 /// `RPR_EL1` is read-only and derived, so it is left out.
 pub const GUEST_STATE_ICC_REGS: &[(&str, IccReg)] = &[
