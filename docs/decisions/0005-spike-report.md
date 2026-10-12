@@ -66,15 +66,15 @@ Same machine and guest as above, 2 GiB, release build, warm cache, wall clock fr
 
 | Measure | 1 vCPU | 2 vCPUs |
 |---|---|---|
-| Boot to shell | median 41.5 ms | median 43.1 ms |
-| Save a snapshot | median 620 ms | median 621 ms |
-| Memory file on disk | 61 MiB | 62 MiB |
-| Restore to the first command's output | median 6.0 ms | median 5.5 ms |
-| Ten forks of one snapshot at once, all ran a command | 16.0 ms | 15.6 ms |
-| Idle memory, booted VM (`footprint`) | 14.0 MB | 14.0 MB |
-| Idle memory, restored VM (`footprint`) | 3.2 MB | 3.3 MB |
-| Idle CPU, restored VM | 1.5% of one core | 2.0% of one core |
+| Boot to shell | median 43.0 ms | median 44.1 ms |
+| Save a snapshot | median 627 ms | median 612 ms |
+| Memory file on disk | 60 MiB | 62 MiB |
+| Restore to the first command's output | median 5.5 ms | median 5.4 ms |
+| Ten forks of one snapshot at once, all ran a command | 15.5 ms | 15.4 ms |
+| Idle memory, booted VM (`phys_footprint`) | 66 MB | 67 MB |
+| Idle memory, restored VM (`phys_footprint`) | 4.9 MB | 5.2 MB |
+| Idle CPU, booted or restored VM | 1% of one core | 2% of one core |
 
-Memory is measured with the `footprint` tool here, so the booted figure is lower than the 66 MB in the baseline table, which used a different measure. Compare the two columns with each other, not with the baseline. The same goes for the ten-fork time, which no longer includes powering the forks off.
+Memory is `phys_footprint` from the `footprint` tool, the same measure as the baseline table, and the booted figure matches its 66 MB. A restored VM's figure is small because its guest RAM is the snapshot file mapped copy-on-write: pages it has only read stay clean file pages and are not counted. The ten-fork time no longer includes powering the forks off, so compare it with the other column, not with the baseline.
 
 **Correction to answer 3 (A1).** The GIC state blob does not carry each redistributor's SGI and PPI registers. Without them, a restored guest had every SGI and PPI disabled, so its timer interrupt never arrived. It ran a command typed right after restore, which is all P2.9 tested, then hung at 100% CPU once it went idle. Snapshots now also save group, enable, pending, active, priority and trigger state for each vCPU's redistributor, and write it back after the GIC state. Restored guests now idle at about 1 to 2% CPU and keep answering. A1 holds with that addition.

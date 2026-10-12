@@ -94,7 +94,7 @@ def restore_to_output(path):
 def footprint_mb(pid):
     """phys_footprint of a process in MB, from the footprint tool."""
     out = subprocess.run(["footprint", str(pid)], capture_output=True, text=True).stdout
-    m = re.search(r"Footprint:\s+([0-9.]+)\s+(KB|MB|GB)", out)
+    m = re.search(r"phys_footprint:\s+([0-9.]+)\s+(KB|MB|GB)", out)
     if not m:
         return None
     scale = {"KB": 1 / 1024, "MB": 1, "GB": 1024}[m.group(2)]
