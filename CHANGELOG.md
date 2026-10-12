@@ -12,3 +12,4 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - Guest agent and daemon wire protocol in `docs/protocol.md`.
 - Cargo workspace with an empty crate for each component, the Rust toolchain pinned to 1.99.0, and a `deny.toml`.
 - CI that runs `cargo fmt`, `cargo clippy`, the tests, `cargo deny` and `cargo audit` on every pull request.
+- `cave-vm-hvf`: a safe wrapper around Hypervisor.framework for VMs, guest memory mappings, vCPUs, registers, the virtual timer and the GICv3 interrupt controller, including saving and restoring its state.

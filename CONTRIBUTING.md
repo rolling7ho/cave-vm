@@ -27,6 +27,14 @@ cargo deny check && cargo audit
 
 Tests must not use the network. Device models are tested against the mock hypervisor backend, so most tests run without booting a VM. End-to-end tests need a real Mac with the hypervisor entitlement and are run separately.
 
+Hardware tests that create real VMs are marked `#[ignore]`. On an Apple Silicon Mac, run them with:
+
+```sh
+cargo test --workspace -- --ignored --test-threads=1
+```
+
+`.cargo/config.toml` makes cargo sign each test binary ad hoc with the `com.apple.security.hypervisor` entitlement (`scripts/hypervisor-runner.sh`) before running it.
+
 ## Making a change
 
 1. Fork the repo and branch from `main`.

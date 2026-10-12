@@ -1,0 +1,4 @@
+# Sign macOS test and run binaries with the hypervisor entitlement so they
+# can create VMs. See scripts/hypervisor-runner.sh.
+[target.aarch64-apple-darwin]
+runner = "scripts/hypervisor-runner.sh"
