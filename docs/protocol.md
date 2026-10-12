@@ -2,13 +2,13 @@
 
 This is the wire protocol for the guest agent and the daemon API (ROADMAP task P1.3). It becomes the source for the `proto` crate in P3.1. Nothing here is implemented yet.
 
-The design fixes the shape: length-prefixed JSON messages, versioned from day one, with streamed output and a pseudo-terminal for `cave shell`, and the same message format on the daemon's Unix socket so the SDKs stay thin. The framing width, the maximum frame size, the version handshake and everything else below are **Proposed** and wait for Ivan to accept or cut them.
+The design fixes the shape: length-prefixed JSON messages, versioned from day one, with streamed output and a pseudo-terminal for `cave shell`, and the same message format on the daemon's Unix socket so the SDKs stay thin. The framing width, the maximum frame size, the version handshake and everything else below were proposed in the phase 1 PR and approved by Ivan there.
 
 ## Where it runs
 
 | Link | Transport | Client | Server |
 | --- | --- | --- | --- |
-| Guest agent | vsock, guest port 1024. **Proposed** port | VMM, on the daemon's behalf | `agent` in the guest |
+| Guest agent | vsock, guest port 1024. | VMM, on the daemon's behalf | `agent` in the guest |
 | Daemon API | Unix socket `daemon.sock` in the data directory, mode `0600` (design: user-only permissions) | CLI, SDKs, MCP server | `daemon` |
 
 ## Framing
@@ -214,7 +214,7 @@ The exact fields of the reply objects (`policy`, `list`, `usage` and so on) mirr
 {"type": "exec", "vm": {"project": "/Users/ivan/p"}, "argv": ["./deploy.sh"], "credentials": ["API_KEY"]}
 ```
 
-The daemon resolves each name from the project's `.env` or a similar source, adds the values to `env` on the agent link only, and records the names, not the values, in the audit log and in the metadata of later snapshots (design). While streaming `output` back, it replaces the exact value of each injected credential with `[redacted:API_KEY]`, including values split across two chunks [D9]. Redaction is best effort, and a command can still leak a value through files or the network; the docs say so.
+The daemon resolves each name from the project's `.env` or a similar source, adds the values to `env` on the agent link only, and records the names, not the values, in the audit log and in the metadata of later snapshots (design). While streaming `output` back, it replaces the exact value of each injected credential with the credential's name in brackets, so `API_KEY_1: snednao_#m34nr` is streamed as `API_KEY_1: [API_KEY_1]`, including values split across two chunks [D9]. Redaction is best effort, and a command can still leak a value through files or the network; the docs say so.
 
 ## Versioning this document
 

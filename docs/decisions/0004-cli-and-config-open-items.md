@@ -22,5 +22,6 @@ Writing the phase 1 spec (`docs/cli.md`, `docs/config.md`, ROADMAP tasks P1.1 an
 ## Consequences
 
 - The design's verb set gains `cave stop`.
-- `docs/cli.md` and `docs/config.md` describe these as decided. Other items marked Proposed in those files are still reviewed in the phase 1 PR.
+- `docs/cli.md` and `docs/config.md` describe these as decided.
+- In the same review Ivan approved every other item proposed in `docs/cli.md`, `docs/config.md` and `docs/protocol.md`, with one change: a redacted credential is shown as its name in brackets, so `API_KEY_1: snednao_#m34nr` streams as `API_KEY_1: [API_KEY_1]`.
 - `ROADMAP.md` has no open decisions.

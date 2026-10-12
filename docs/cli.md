@@ -2,7 +2,7 @@
 
 This is the spec for the `cave` command, written before any code (ROADMAP task P1.1). Nothing here is implemented yet.
 
-[docs/design.md](design.md) is the source of truth. Every command in its CLI table is here, and the flags it names (`--net off`, `--net lan`, `-p 3000`, `--in-vm`, the `cave rm` confirmation) are written as the design specifies them. Anything the design does not name is marked **Proposed** and waits for Ivan to accept or cut it. Questions the design left open were answered by Ivan as D13 to D22 ([decision 0004](decisions/0004-cli-and-config-open-items.md)), and are linked from the places they affect.
+[docs/design.md](design.md) is the source of truth. Every command in its CLI table is here, and the flags it names (`--net off`, `--net lan`, `-p 3000`, `--in-vm`, the `cave rm` confirmation) are written as the design specifies them. Everything the design does not name was proposed in the phase 1 PR and approved by Ivan there. Questions the design left open were answered by Ivan as D13 to D22 ([decision 0004](decisions/0004-cli-and-config-open-items.md)), and are linked from the places they affect.
 
 The quickstart stays at two commands:
 
@@ -29,17 +29,17 @@ A fork is a VM that lives inside its parent project at `.cave/forks/<name>`. Eve
 
 ### Names
 
-Snapshots and forks are named, never numbered. A project's snapshot and fork names share one namespace, so a name means one thing. **Proposed.** A default snapshot name follows the design: `[ProjectFolder]-[YYYY-MM-DD]-[Distro]`, for example `my-project-2026-10-12-debian`, with `-2`, `-3` and so on appended on collisions. A name is 1 to 64 characters of letters, digits, `.`, `_` and `-`, starting with a letter or digit. **Proposed.**
+Snapshots and forks are named, never numbered. A project's snapshot and fork names share one namespace, so a name means one thing. A default snapshot name follows the design: `[ProjectFolder]-[YYYY-MM-DD]-[Distro]`, for example `my-project-2026-10-12-debian`, with `-2`, `-3` and so on appended on collisions. A name is 1 to 64 characters of letters, digits, `.`, `_` and `-`, starting with a letter or digit.
 
 ### Output
 
-- Results go to stdout. Progress, the startup policy and errors go to stderr, so `cave exec -- cat file > out` captures only the file. **Proposed.**
-- `cave ls`, `cave inspect`, `cave images` and `cave gc` take `--json` and print one JSON document for scripts. **Proposed.**
-- Colour and progress bars appear only when stderr is a terminal, and `NO_COLOR` turns colour off. **Proposed.**
+- Results go to stdout. Progress, the startup policy and errors go to stderr, so `cave exec -- cat file > out` captures only the file.
+- `cave ls`, `cave inspect`, `cave images` and `cave gc` take `--json` and print one JSON document for scripts.
+- Colour and progress bars appear only when stderr is a terminal, and `NO_COLOR` turns colour off.
 
 ### Errors
 
-Every error says what went wrong and how to fix it, in this shape (**Proposed** format):
+Every error says what went wrong and how to fix it, in this shape:
 
 ```
 error: the project folder is not on an APFS volume, so cave cannot clone the base image
@@ -57,7 +57,7 @@ Warnings use the same shape with `warning:` and do not change the exit code.
 | 2 | Usage error: unknown command or flag, or a bad argument |
 | 130 | Interrupted with Ctrl-C |
 
-`cave exec`, `cave shell` and `cave agent` exit with the code of the program they ran. To keep cave's own failures distinguishable from the program's, they use 125 when cave fails before or while running it, 126 when the program exists but cannot be run, and 127 when it is not found, following the shell and Docker conventions. **Proposed.**
+`cave exec`, `cave shell` and `cave agent` exit with the code of the program they ran. To keep cave's own failures distinguishable from the program's, they use 125 when cave fails before or while running it, 126 when the program exists but cannot be run, and 127 when it is not found, following the shell and Docker conventions.
 
 ### Global flags
 
@@ -66,17 +66,17 @@ Warnings use the same shape with `warning:` and do not change the exit code.
 | `-h`, `--help` | Show help for `cave` or a command |
 | `-V`, `--version` | Print the version, for example `cave 0.1.0` |
 
-There are no other global flags. **Proposed.**
+There are no other global flags.
 
 ### The daemon and the data directory
 
-The CLI starts the daemon on demand, so there is no service to install. VMs survive the CLI exiting because the daemon owns them. After a reboot, nothing starts until a `cave` command needs the VM, which then restores from its last snapshot. **Proposed.**
+The CLI starts the daemon on demand, so there is no service to install. VMs survive the CLI exiting because the daemon owns them. After a reboot, nothing starts until a `cave` command needs the VM, which then restores from its last snapshot.
 
-Shared state (kernels, base images, the daemon socket and the list of known projects) lives in `~/Library/Application Support/cave-vm/`. The `CAVE_HOME` environment variable moves it, which the tests use. **Proposed.**
+Shared state (kernels, base images, the daemon socket and the list of known projects) lives in `~/Library/Application Support/cave-vm/`. The `CAVE_HOME` environment variable moves it, which the tests use.
 
 ### The startup policy
 
-The design says `cave run` prints the policy at startup and echoes widening flags back. Every command that boots a VM (`run`, `shell`, `exec`, `agent`) prints it to stderr when it boots or restores one, and prints nothing if the VM was already running. **Proposed** format:
+The design says `cave run` prints the policy at startup and echoes widening flags back. Every command that boots a VM (`run`, `shell`, `exec`, `agent`) prints it to stderr when it boots or restores one, and prints nothing if the VM was already running.:
 
 ```
 my-project: started in 0.4s (debian, sha256:3f2a9c1e)
@@ -96,13 +96,13 @@ A widened item is marked with the flag that widened it:
 
 ## Commands
 
-The design's verb set, in its order, plus `cave stop` and `cave mcp`, which are proposed.
+The design's verb set, in its order, plus `cave stop` (D20) and `cave mcp`, added in phase 1.
 
 | Command | What it does |
 | --- | --- |
 | [`cave init`](#cave-init) | Create `cave.toml`, `.cave/` and the agent skill files for this directory |
 | [`cave run`](#cave-run) | Boot or restore this project's VM |
-| [`cave stop`](#cave-stop) | **Proposed.** Suspend this project's VM now |
+| [`cave stop`](#cave-stop) | Suspend this project's VM now |
 | [`cave shell`](#cave-shell) | Interactive shell in the VM |
 | [`cave exec -- <cmd>`](#cave-exec) | Run a command in the VM |
 | [`cave snapshot [name]`](#cave-snapshot) | Save VM state |
@@ -119,7 +119,7 @@ The design's verb set, in its order, plus `cave stop` and `cave mcp`, which are 
 | [`cave agent <name>`](#cave-agent) | Start an agent on the Mac against this VM through MCP |
 | [`cave images`](#cave-images) | List base images |
 | [`cave doctor`](#cave-doctor) | Check entitlements, macOS version, disk space and image state |
-| [`cave mcp`](#cave-mcp) | **Proposed.** Run the MCP server on stdio (plumbing for agents) |
+| [`cave mcp`](#cave-mcp) | Run the MCP server on stdio (plumbing for agents) |
 
 ---
 
@@ -143,15 +143,15 @@ When stdin is a terminal and neither `--sealed` nor `--synced` is given, it asks
 Keep a copy of the code on your Mac? It lets you use your Mac editor and Spotlight. [y/N]
 ```
 
-Without a terminal it picks sealed and says so. **Proposed.**
+Without a terminal it picks sealed and says so.
 
-Running `cave init` again in a project is safe: it refreshes the skill files and never changes `cave.toml`. **Proposed.**
+Running `cave init` again in a project is safe: it refreshes the skill files and never changes `cave.toml`.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--sealed` | yes | Code lives only on the VM disk. **Proposed** flag |
-| `--synced` | | Also keep a Mac mirror of the code. The mirror is the project folder itself ([D14](../ROADMAP.md#decisions)). **Proposed** flag |
-| `--image <name>` | `base` | Base image, from `cave images`. **Proposed** flag |
+| `--sealed` | yes | Code lives only on the VM disk. |
+| `--synced` | | Also keep a Mac mirror of the code. The mirror is the project folder itself ([D14](../ROADMAP.md#decisions)). |
+| `--image <name>` | `base` | Base image, from `cave images`. |
 
 Output:
 
@@ -168,7 +168,7 @@ Errors:
 | --- | --- |
 | `this folder is inside the project at <path>` | Run cave from that project, or move this folder out of it |
 | `the project folder is not on an APFS volume, so cave cannot clone the base image` [A9] | Move the project to a folder on an APFS volume, such as your home folder |
-| `cave cannot set up a project in your home folder itself` | Run `cave init` in a project folder instead. **Proposed** |
+| `cave cannot set up a project in your home folder itself` | Run `cave init` in a project folder instead. |
 | `unknown image "<name>"` | Run `cave images` to see the image names |
 
 ### cave run
@@ -177,7 +177,7 @@ Errors:
 cave run [--net off|lan] [-p <port>]... [--fork <name>]
 ```
 
-Boots this project's VM, or restores it if it is suspended, and returns once the guest agent answers. It prints the startup policy. If the VM is already running it says so and prints the policy again, so `cave run` is also the way to look at what a running VM can reach. **Proposed.**
+Boots this project's VM, or restores it if it is suspended, and returns once the guest agent answers. It prints the startup policy. If the VM is already running it says so and prints the policy again, so `cave run` is also the way to look at what a running VM can reach.
 
 `cave shell`, `cave exec` and `cave agent` boot the VM themselves, so `cave run` is needed only to pass flags or to start a VM ahead of time.
 
@@ -185,12 +185,12 @@ Boots this project's VM, or restores it if it is suspended, and returns once the
 | --- | --- | --- |
 | `--net off` | | No network device at all (design) |
 | `--net lan` | | Allow private and link-local ranges as well (design). Echoed back at startup |
-| `-p <port>` | none | Forward `localhost:<port>` on the Mac to the same port in the VM (design: `-p 3000`). `-p <mac>:<vm>` maps different ports. Repeatable. **Proposed:** the `<mac>:<vm>` form, and binding to localhost only |
+| `-p <port>` | none | Forward `localhost:<port>` on the Mac to the same port in the VM (design: `-p 3000`). `-p <mac>:<vm>` maps different ports. Repeatable. Forwards listen on localhost only |
 | `--fork <name>` | | Run a fork instead ([D18](../ROADMAP.md#decisions)) |
 
-Without `--net`, the mode comes from `cave.toml`, which is `nat` by default. Flags apply to this boot only; there is no way to make `--net lan` or a port forward permanent in `cave.toml`, so a cloned repository cannot widen access on its own ([config.md](config.md#network)). **Proposed.**
+Without `--net`, the mode comes from `cave.toml`, which is `nat` by default. Flags apply to this boot only; there is no way to make `--net lan` or a port forward permanent in `cave.toml`, so a cloned repository cannot widen access on its own ([config.md](config.md#network)).
 
-On a running VM, `-p` adds a forward without a restart, because forwarding goes through the guest agent. Changing `--net` needs the VM to stop first. **Proposed.**
+On a running VM, `-p` adds a forward without a restart, because forwarding goes through the guest agent. Changing `--net` needs the VM to stop first.
 
 Errors:
 
@@ -236,9 +236,9 @@ Errors:
 cave exec [--fork <name>] -- <cmd> [args...]
 ```
 
-Runs one command in the VM and streams its stdout and stderr back, keeping them separate. Stdin is passed through. It boots the VM first if needed. The command runs in the project directory inside the VM, without a shell, so `cave exec -- sh -c 'cd sub && make'` is the way to use shell syntax. There is no pseudo-terminal; use `cave shell` for interactive programs. **Proposed:** no `-t` flag.
+Runs one command in the VM and streams its stdout and stderr back, keeping them separate. Stdin is passed through. It boots the VM first if needed. The command runs in the project directory inside the VM, without a shell, so `cave exec -- sh -c 'cd sub && make'` is the way to use shell syntax. There is no pseudo-terminal; use `cave shell` for interactive programs. no `-t` flag.
 
-The `--` is required, so cave's flags and the command's flags never mix. **Proposed.**
+The `--` is required, so cave's flags and the command's flags never mix.
 
 Exit code: the command's, or 125, 126 or 127 as described under [exit codes](#exit-codes).
 
@@ -255,7 +255,7 @@ Errors:
 cave snapshot [name] [--fork <name>]
 ```
 
-Saves the VM's disk state, memory state, VM config and metadata. With no name it uses the default name. On a stopped VM it saves disk state only, and restoring it boots normally. **Proposed.**
+Saves the VM's disk state, memory state, VM config and metadata. With no name it uses the default name. On a stopped VM it saves disk state only, and restoring it boots normally.
 
 Output: `Saved snapshot my-project-2026-10-12-debian (1.2s)`.
 
@@ -272,9 +272,9 @@ Errors:
 cave restore [name] [--fork <name>]
 ```
 
-Rolls the VM back to a snapshot, by default the most recent one. Processes in the snapshot resume where they were. Open shells and running `cave exec` calls are disconnected first, and port forwards are re-applied. **Proposed.**
+Rolls the VM back to a snapshot, by default the most recent one. Processes in the snapshot resume where they were. Open shells and running `cave exec` calls are disconnected first, and port forwards are re-applied.
 
-Before rolling back, it saves the current state as an automatic snapshot, so a restore can itself be undone. **Proposed.** Automatic snapshots are deleted by the retention rules in `cave.toml`.
+Before rolling back, it saves the current state as an automatic snapshot, so a restore can itself be undone. Automatic snapshots are deleted by the retention rules in `cave.toml`.
 
 If the memory state cannot be loaded, for example after a `cave` upgrade that cannot read it, restore falls back to the disk state and a normal boot, and says so (design):
 
@@ -283,7 +283,7 @@ warning: could not load the memory state of my-project-2026-10-12-debian (format
   restored the disk state and booted normally; processes from the snapshot were not kept
 ```
 
-If injected credentials were recorded in the snapshot's metadata, it names them. **Proposed.**
+If injected credentials were recorded in the snapshot's metadata, it names them.
 
 Errors:
 
@@ -338,7 +338,7 @@ States are the design's: running, suspended, stopped. Sizes count blocks shared 
 cave rm [name] [--yes]
 ```
 
-With no name, removes this project's VM: `.cave/` with its disk, snapshots and forks. `cave.toml`, `AGENTS.md` and the rest of the folder stay. With a name, removes that fork or snapshot. **Proposed:** the name form.
+With no name, removes this project's VM: `.cave/` with its disk, snapshots and forks. `cave.toml`, `AGENTS.md` and the rest of the folder stay. With a name, removes that fork or snapshot.
 
 Because `.cave/` can hold the only copy of the work in sealed mode, it asks first (design):
 
@@ -347,7 +347,7 @@ Remove the VM for my-project? Its disk, 3 snapshots and 1 fork are deleted (4.8 
 This project is sealed, so code that is only in the VM is lost. [y/N]
 ```
 
-`--yes` skips the question, for scripts. Without a terminal and without `--yes`, it refuses. **Proposed.**
+`--yes` skips the question, for scripts. Without a terminal and without `--yes`, it refuses.
 
 Exit code: 1 when the answer is no.
 
@@ -357,7 +357,7 @@ Exit code: 1 when the answer is no.
 cave gc [--yes] [--json]
 ```
 
-Shows disk usage and what can be reclaimed, then asks before deleting anything. It only offers things that are safe to delete: base images no project uses, automatic snapshots beyond the retention in `cave.toml`, and leftovers from crashed VMM processes. Named snapshots and VMs are never offered; remove those with `cave rm`. **Proposed.**
+Shows disk usage and what can be reclaimed, then asks before deleting anything. It only offers things that are safe to delete: base images no project uses, automatic snapshots beyond the retention in `cave.toml`, and leftovers from crashed VMM processes. Named snapshots and VMs are never offered; remove those with `cave rm`.
 
 ```
 Images        2.1 GB   debian (in use), ubuntu (unused, 1.9 GB)
@@ -374,7 +374,7 @@ Shared APFS clone blocks are reported once, not double-counted [A9].
 cave inspect [--fork <name>] [--log] [--json]
 ```
 
-Shows the policy (the same lines as the startup policy), resources, and the most recent 20 audit-log entries: exec calls, file writes and network connections. `--log` prints the whole log. **Proposed:** the 20-entry default and `--log`. Credentials appear by name only.
+Shows the policy (the same lines as the startup policy), resources, and the most recent 20 audit-log entries: exec calls, file writes and network connections. `--log` prints the whole log. Credentials appear by name only.
 
 ```
 my-project: running since 09:14 (debian, sha256:3f2a9c1e)
@@ -398,7 +398,7 @@ Audit log (last 20 of 412, cave inspect --log for all)
 cave sync
 ```
 
-Synced mode only. Updates the Mac mirror from the VM now; the daemon also does it after agent runs and on snapshot (design). If the VM is not running, the sync waits until it is, and the command says so. **Proposed:** the command blocks and says "waiting for the VM" rather than returning.
+Synced mode only. Updates the Mac mirror from the VM now; the daemon also does it after agent runs and on snapshot (design). If the VM is not running, the sync waits until it is, and the command says so: it blocks and prints "waiting for the VM" rather than returning.
 
 Errors:
 
@@ -442,7 +442,7 @@ Errors: the same sealed-mode error as `cave sync`.
 cave cp <src>... <dest>
 ```
 
-Copies files between the Mac and the VM. A path starting with `:` is in the VM, relative to the project directory there unless it is absolute; anything else is on the Mac. **Proposed** syntax, borrowed from `scp`. Directories are copied recursively. Exactly one side must be in the VM.
+Copies files between the Mac and the VM. A path starting with `:` is in the VM, relative to the project directory there unless it is absolute; anything else is on the Mac, as with `scp`. Directories are copied recursively. Exactly one side must be in the VM.
 
 ```sh
 cave cp ./fixtures :test/fixtures    # Mac to VM
@@ -484,11 +484,11 @@ Snapshot before this run: my-project-2026-10-12-debian-4
 Undo everything the agent did with: cave restore my-project-2026-10-12-debian-4
 ```
 
-`--in-vm` runs the agent inside the VM instead, which needs the VM's network to reach the model API. On first use it installs the agent inside the VM with the agent's own installer, and you sign in inside the VM. **Proposed:** the install step.
+`--in-vm` runs the agent inside the VM instead, which needs the VM's network to reach the model API. On first use it installs the agent inside the VM with the agent's own installer, and you sign in inside the VM.
 
-Arguments after `--` go to the agent unchanged. **Proposed.**
+Arguments after `--` go to the agent unchanged.
 
-Agents in v1: `claude` (Claude Code). The README also lists Codex; it is added once its MCP and permission settings are checked. **Proposed:** `claude` only at first. How `cave` passes the MCP server and the Bash denial to Claude Code depends on Claude Code's flags and settings, which are assumptions to verify in phase 5.
+Agents in v1: `claude` (Claude Code). The README also lists Codex; it is added once its MCP and permission settings are checked. How `cave` passes the MCP server and the Bash denial to Claude Code depends on Claude Code's flags and settings, which are assumptions to verify in phase 5.
 
 Exit code: the agent's.
 
@@ -505,7 +505,7 @@ Errors:
 cave images [--json]
 ```
 
-Lists the base images: name, digest, whether it is downloaded, and which projects use it. `base` is an alias for the recommended default, Debian; `debian` and `ubuntu` name each image. **Proposed** names.
+Lists the base images: name, digest, whether it is downloaded, and which projects use it. `base` is an alias for the recommended default, Debian; `debian` and `ubuntu` name each image.
 
 ```
 NAME     DIGEST           DOWNLOADED  USED BY
@@ -521,7 +521,7 @@ If the update detector has seen a newer image, it says so here and in `cave doct
 cave doctor
 ```
 
-Re-runs the first-run checks (design): Apple Silicon, macOS version, the hypervisor entitlement and signature, disk space, the kernel and image state, and the daemon. Each line passes or fails, and each failure has its fix. It changes nothing. **Proposed:** report-only.
+Re-runs the first-run checks (design): Apple Silicon, macOS version, the hypervisor entitlement and signature, disk space, the kernel and image state, and the daemon. Each line passes or fails, and each failure has its fix. It changes nothing. report-only.
 
 ```
 ok    Apple Silicon (M3 Pro)
@@ -536,19 +536,19 @@ Exit code: 1 if any check fails.
 
 ### cave mcp
 
-**Proposed command.** The design gives agents an MCP server that resolves the VM from the working directory, and `cave init` registers it in agent configs. Something has to start it, so this spec gives it a command:
+The design gives agents an MCP server that resolves the VM from the working directory, and `cave init` registers it in agent configs. Something has to start it, so this spec gives it a command:
 
 ```
 cave mcp
 ```
 
-Runs the MCP server on stdin and stdout for the project in the current directory. People do not run it by hand; `cave agent` and the configs `cave init` writes do. It is left out of `cave --help`'s main list. **Proposed.**
+Runs the MCP server on stdin and stdout for the project in the current directory. People do not run it by hand; `cave agent` and the configs `cave init` writes do. It is left out of `cave --help`'s main list.
 
 ---
 
 ## Guest layout
 
-**Proposed.** The design does not say where the code lives inside the VM or which user runs commands.
+The design does not say where the code lives inside the VM or which user runs commands.
 
 - The project directory inside the VM is `/workspace`. `cave exec`, `cave shell` and the MCP tools start there, and relative `:` paths in `cave cp` are relative to it.
 - Commands run as a user named `cave` with passwordless `sudo` and membership in the `docker` group, not as root.
