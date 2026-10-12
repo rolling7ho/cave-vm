@@ -66,14 +66,22 @@ fn requests_round_trip() {
             },
         ),
         (
-            json!({"type": "start", "vm": {"project": "/p"}, "net": "nat", "ports": [{"mac": 3000, "vm": 3000}]}),
+            json!({"type": "start", "vm": {"project": "/p"}, "net": "lan", "ports": [{"mac": 3000, "vm": 3000}]}),
             Request::Start {
                 vm: p(),
-                net: NetMode::Nat,
+                net: Some(NetMode::Lan),
                 ports: vec![PortMap {
                     mac: 3000,
                     vm: 3000,
                 }],
+            },
+        ),
+        (
+            json!({"type": "start", "vm": {"project": "/p"}}),
+            Request::Start {
+                vm: p(),
+                net: None,
+                ports: Vec::new(),
             },
         ),
         (

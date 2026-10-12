@@ -189,7 +189,7 @@ Requests that take time (`start`, `snapshot`, `restore`, `fork`, image fetches d
 | Request | Fields | Reply |
 | --- | --- | --- |
 | `init` | `project`, `storage` (`"sealed"` or `"synced"`), `image` | `ok` |
-| `start` | `vm`, `net` (`"off"`, `"nat"`, `"lan"`), `ports` (list of `{mac, vm}`) | `policy` |
+| `start` | `vm`, `net` (optional: `"off"`, `"nat"` or `"lan"`, from `--net`; the mode in `cave.toml` when left out), `ports` (list of `{mac, vm}`) | `policy` |
 | `stop` | `vm` | `ok` |
 | `exec` | `vm`, the agent's `exec` fields, `credentials` (list of names) | the agent's stream, ending in `exit` |
 | `shell` | `vm`, the agent's `pty_open` fields | the agent's pty stream, ending in `exit` |
