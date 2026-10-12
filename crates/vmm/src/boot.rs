@@ -23,6 +23,8 @@ pub struct BootConfig {
     pub memory_size: u64,
     /// vCPUs in the device tree. The spike runs only the first.
     pub cpus: u32,
+    /// Virtio-mmio slots in the device tree, from slot 0.
+    pub virtio_slots: u32,
 }
 
 /// An error setting up the boot.
@@ -102,6 +104,7 @@ pub fn prepare<B: Backend>(backend: &mut B, config: &BootConfig) -> Result<Prepa
         gic_redist_size: irqchip.redist_size,
         cmdline: config.cmdline.clone(),
         initrd,
+        virtio_slots: config.virtio_slots,
     })
     .map_err(Error::DeviceTree)?;
     memory.write(layout.dtb, &dtb)?;

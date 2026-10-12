@@ -1,7 +1,7 @@
 //! Device tree generation for direct kernel boot.
 //!
 //! The tree describes memory, the CPUs, PSCI over HVC, the architected
-//! timer, the GICv3 and one PL011 UART. Nothing else exists yet.
+//! timer, the GICv3, one PL011 UART and the used virtio-mmio slots.
 
 use vm_fdt::{Error, FdtWriter};
 
@@ -32,6 +32,8 @@ pub struct DeviceTreeConfig {
     pub cmdline: String,
     /// Guest physical start and end of the initramfs, if any.
     pub initrd: Option<(u64, u64)>,
+    /// Number of virtio-mmio slots in use, from slot 0.
+    pub virtio_slots: u32,
 }
 
 /// The `MPIDR_EL1` value, and device tree `reg`, of vCPU `index`. Affinity
@@ -135,6 +137,19 @@ pub fn build(config: &DeviceTreeConfig) -> Result<Vec<u8>, Error> {
     fdt.property_string_list("clock-names", vec!["uartclk".into(), "apb_pclk".into()])?;
     fdt.end_node(uart)?;
 
+    for slot in 0..config.virtio_slots.min(layout::VIRTIO_MMIO_SLOTS) {
+        let base = layout::virtio_mmio_base(slot);
+        let node = fdt.begin_node(&format!("virtio_mmio@{base:x}"))?;
+        fdt.property_string("compatible", "virtio,mmio")?;
+        fdt.property_array_u64("reg", &[base, layout::VIRTIO_MMIO_SIZE])?;
+        fdt.property_array_u32(
+            "interrupts",
+            &[GIC_SPI, layout::virtio_spi(slot), IRQ_TYPE_LEVEL_HIGH],
+        )?;
+        fdt.property_null("dma-coherent")?;
+        fdt.end_node(node)?;
+    }
+
     fdt.end_node(root)?;
     fdt.finish()
 }
@@ -151,6 +166,7 @@ mod tests {
             gic_redist_size: 0x2_0000,
             cmdline: "console=ttyAMA0 earlycon=pl011,0x9000000 rdinit=/init".into(),
             initrd: Some((0x5f00_0000, 0x5f40_0000)),
+            virtio_slots: 0,
         }
     }
 
@@ -197,6 +213,27 @@ mod tests {
         ] {
             assert!(contains(needle), "missing {needle}");
         }
+    }
+
+    #[test]
+    fn virtio_slots_appear_with_their_interrupts() {
+        let blob = build(&DeviceTreeConfig {
+            virtio_slots: 2,
+            ..spike_config()
+        })
+        .unwrap();
+        let count = |needle: &str| {
+            blob.windows(needle.len())
+                .filter(|w| *w == needle.as_bytes())
+                .count()
+        };
+        assert_eq!(count("virtio,mmio"), 2);
+        assert_eq!(count("virtio_mmio@c000000"), 1);
+        assert_eq!(count("virtio_mmio@c000200"), 1);
+        assert_eq!(count("virtio_mmio@c000400"), 0);
+        // Slot 1's interrupt specifier: SPI 17, level high.
+        let spec: Vec<u8> = [0u32, 17, 4].iter().flat_map(|c| c.to_be_bytes()).collect();
+        assert!(blob.windows(spec.len()).any(|w| w == spec.as_slice()));
     }
 
     #[test]

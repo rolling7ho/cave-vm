@@ -1,11 +1,16 @@
-//! The run loop against the mock backend: UART output, PSCI and the
-//! virtual timer, from scripted exits.
+//! The run loop against the mock backend: UART output, PSCI, the virtual
+//! timer and virtio-mmio routing, from scripted exits.
 
 #![cfg(target_os = "macos")]
 
 use cave_vm_vmm::backend::mock::{Event, MockBackend, Step};
 use cave_vm_vmm::backend::{Backend, BackendVcpu, Exception, Exit, Reg};
-use cave_vm_vmm::layout::{UART_BASE, uart_intid};
+use cave_vm_vmm::devices::virtio::mmio::MmioTransport;
+use cave_vm_vmm::devices::virtio::{
+    ActivateError, Activation, VirtioDevice, device_type, read_config_bytes,
+};
+use cave_vm_vmm::layout::{UART_BASE, uart_intid, virtio_intid, virtio_mmio_base};
+use cave_vm_vmm::memory::{GuestMemory, Region};
 use cave_vm_vmm::runner::{self, Machine, Stop, VTIMER_INTID};
 
 const PC: u64 = 0x4000_0000;
@@ -227,4 +232,104 @@ fn a_kick_with_the_stop_flag_stops() {
         .store(true, std::sync::atomic::Ordering::Release);
     let stop = runner::run(&mock, &mut vcpu, &mut machine).unwrap();
     assert_eq!(stop, Stop::Canceled);
+}
+
+/// A virtio device with no queues, enough to check the run loop's routing.
+struct Blank;
+
+impl VirtioDevice for Blank {
+    fn device_type(&self) -> u32 {
+        device_type::BLOCK
+    }
+    fn features(&self) -> u64 {
+        0
+    }
+    fn queue_max_sizes(&self) -> &[u16] {
+        &[]
+    }
+    fn read_config(&self, offset: u64, data: &mut [u8]) {
+        read_config_bytes(&[0x11, 0x22, 0x33, 0x44], offset, data);
+    }
+    fn activate(&mut self, _: Activation) -> Result<(), ActivateError> {
+        Ok(())
+    }
+    fn queue_notify(&mut self, _: u16) {}
+    fn reset(&mut self) {}
+}
+
+fn blank_transport() -> MmioTransport {
+    let memory = GuestMemory::new(vec![Region::anonymous(PC, 1 << 20).unwrap()]).unwrap();
+    MmioTransport::new(Box::new(Blank), memory)
+}
+
+/// An 8-bit load into `reg` from `ipa`.
+fn load8(ipa: u64, reg: u64) -> Exit {
+    exception(0x24, (1 << 24) | (reg << 16), ipa)
+}
+
+#[test]
+fn virtio_registers_are_routed_by_slot() {
+    let mock = MockBackend::new();
+    let slot1 = virtio_mmio_base(1);
+    mock.script(
+        0,
+        [
+            Step::exit(load32(slot1, 1)),        // MagicValue
+            Step::exit(load32(slot1 + 0x8, 2)),  // DeviceID
+            Step::exit(load8(slot1 + 0x102, 3)), // config byte 2
+            Step::exit(load32(virtio_mmio_base(2), 4)).with_reg(x(4), 7), // empty slot
+            Step::exit(store32(slot1 + 0x70, 5)).with_reg(x(5), 1), // Status = ACKNOWLEDGE
+            Step::exit(hvc()).with_reg(x(0), 0x8400_0008),
+        ],
+    );
+    let mut vcpu = start(&mock);
+    let mut machine = Machine::new(Vec::new(), None, 1);
+    assert_eq!(machine.add_virtio(blank_transport()), 0);
+    assert_eq!(machine.add_virtio(blank_transport()), 1);
+    runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+
+    assert_eq!(vcpu.reg(x(1)).unwrap(), 0x7472_6976);
+    assert_eq!(vcpu.reg(x(2)).unwrap(), u64::from(device_type::BLOCK));
+    assert_eq!(vcpu.reg(x(3)).unwrap(), 0x33);
+    assert_eq!(vcpu.reg(x(4)).unwrap(), 0, "unused slot reads as zero");
+    assert_eq!(machine.virtio(1).unwrap().status(), 1);
+    assert_eq!(machine.virtio(0).unwrap().status(), 0);
+}
+
+#[test]
+fn virtio_interrupt_drives_its_line() {
+    let mock = MockBackend::new();
+    mock.script(
+        0,
+        [
+            // InterruptACK of bit 0 on slot 0.
+            Step::exit(store32(virtio_mmio_base(0) + 0x64, 1)).with_reg(x(1), 1),
+            Step::exit(hvc()).with_reg(x(0), 0x8400_0008),
+        ],
+    );
+    let mut vcpu = start(&mock);
+    let mut machine = Machine::new(Vec::new(), None, 1);
+    let transport = blank_transport();
+    transport.interrupt().raise(1);
+    machine.add_virtio(transport);
+    runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+
+    let lines: Vec<Event> = mock
+        .events()
+        .into_iter()
+        .filter(|e| matches!(e, Event::IrqLine { .. }))
+        .collect();
+    assert_eq!(
+        lines,
+        vec![
+            Event::IrqLine {
+                intid: virtio_intid(0),
+                level: true
+            },
+            Event::IrqLine {
+                intid: virtio_intid(0),
+                level: false
+            },
+        ]
+    );
 }

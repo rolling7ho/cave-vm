@@ -20,3 +20,4 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - Spike snapshots: `cave-vmm-spike --snapshot` saves a paused guest (vCPU, GIC, timer, UART and sparse memory file) and `--restore` resumes it in a new process in about 3 ms (`docs/spike/p2.9-snapshot.md`).
 - Fork experiment: `scripts/spike/fork-check.sh` restores one snapshot into two VMs at once with copy-on-write memory and checks they diverge (`docs/spike/p2.10-fork.md`).
 - Spike report with baseline numbers and the approved gate 4 targets (`docs/decisions/0005-spike-report.md`).
+- Virtio-mmio transport (version 2) and split virtqueues in `cave-vm-vmm`, with indirect descriptors, level-triggered interrupts and 32 device slots in the device tree. Malformed queues from the guest are errors, never VMM crashes.
