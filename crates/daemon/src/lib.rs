@@ -3,4 +3,9 @@
 
 #![deny(unsafe_code)]
 
+pub mod home;
 pub mod image;
+pub mod launch;
+pub mod link;
+pub mod server;
+pub mod vms;

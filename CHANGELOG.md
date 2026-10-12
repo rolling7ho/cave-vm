@@ -13,6 +13,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- `cave-vm-daemon`: the daemon socket (`daemon.sock`, user-only) with the hello handshake, one VMM process per VM with `start`, `stop` and `list`, crash detection so the next `start` relaunches a crashed VMM, and startup cleanup of VMM processes an earlier daemon left behind. The VMM control link and its messages (`cave-vm-proto::vmm`) are specified in `docs/protocol.md` (P3.10a).
 - `cave-vm-proto`: the daemon API requests and replies, with the reply objects written down in `docs/protocol.md` (P3.1b).
 - `cave-vm-proto`: the length-prefixed JSON frame codec, the `hello` version handshake, `error` messages and every guest agent message from `docs/protocol.md` (P3.1).
 - Image names and digests (`debian@sha256:...`) and the shared image cache in `cave-vm-daemon`: downloads are hashed as they are written and kept only when size and SHA-256 match, so an interrupted or wrong download leaves nothing behind (P3.12a).
