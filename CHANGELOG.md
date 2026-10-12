@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- virtio-net device in `cave-vm-vmm`: frames from the guest go to a backend trait, and frames for the guest are delivered from any thread with a bounded backlog. No offloads; the link is always up (P3.7a).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
