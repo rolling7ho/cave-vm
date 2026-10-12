@@ -256,3 +256,4 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D23 | Phase 3 dependencies, asked per D4. | Add `serde`/`serde_json` (P3.1), `clap` (P3.11), `sha2` (P3.6, P3.12) and `smoltcp` with minimal features (P3.7b to d). Do not add `vm-memory`, `virtio-queue` or an async runtime. |
 | D24 | Calls std does not wrap: vsock, ptys and `setsid` in the agent; `clonefile` and hole punching in the VMM. | Add `libc`. `unsafe` is also allowed in an `agent` `sys` module and a `vmm` `host` module, each block with a `// SAFETY:` comment. |
 | D25 | How PRs that depend on each other are opened, after stacked PRs were auto-closed. | Every PR targets main and none are stacked; dependent work waits on its branch until the PR it needs merges. |
+| D27 | Which crate reads `cave.toml` and writes the image pin into it (D22). | Add `toml_edit`, which keeps the user's comments and layout when the pin is written. |
