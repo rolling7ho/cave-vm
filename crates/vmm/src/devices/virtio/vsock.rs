@@ -241,7 +241,24 @@ fn fill(state: &mut State) {
                 break;
             }
         };
-        let (header, data) = state.backlog.pop_front().expect("not empty");
+        let (header, mut data) = state.backlog.pop_front().expect("not empty");
+        // The guest's receive buffers are small (4 KiB in Linux), so data
+        // that does not fit goes out as more packets, in order.
+        let room = usize::try_from(chain.writable_len())
+            .unwrap_or(usize::MAX)
+            .saturating_sub(HEADER_SIZE);
+        let mut header = header;
+        if data.len() > room && room > 0 {
+            let rest = data.split_off(room);
+            state.backlog.push_front((
+                Header {
+                    len: rest.len() as u32,
+                    ..header
+                },
+                rest,
+            ));
+            header.len = data.len() as u32;
+        }
         let written = write_packet(&active.memory, &chain, header, &data).unwrap_or(0);
         if active
             .queue

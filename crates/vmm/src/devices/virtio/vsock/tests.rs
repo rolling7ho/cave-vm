@@ -14,6 +14,8 @@ struct Rig {
     dev: Vsock,
     /// Receive buffers posted, by head.
     posted: Vec<u16>,
+    /// Used receive buffers not yet looked at.
+    used: VecDeque<(u32, u32)>,
 }
 
 impl Drop for Rig {
@@ -45,6 +47,7 @@ fn rig(name: &str) -> Rig {
         txq,
         dev,
         posted: Vec::new(),
+        used: VecDeque::new(),
     };
     for _ in 0..8 {
         r.post();
@@ -63,7 +66,9 @@ impl Rig {
     fn next_packet(&mut self) -> (Header, Vec<u8>) {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            if let Some(&(head, len)) = self.rxq.used(&self.mem).first() {
+            let fresh = self.rxq.used(&self.mem);
+            self.used.extend(fresh);
+            if let Some((head, len)) = self.used.pop_front() {
                 let head = head as u16;
                 let bytes = self.rxq.written(&self.mem, head, 0, len as usize);
                 self.rxq.recycle(head);
@@ -80,7 +85,7 @@ impl Rig {
     /// Asserts no packet arrives within a short time.
     fn no_packet(&mut self) {
         thread::sleep(Duration::from_millis(100));
-        assert!(self.rxq.used(&self.mem).is_empty());
+        assert!(self.used.is_empty() && self.rxq.used(&self.mem).is_empty());
     }
 
     fn guest_send(&mut self, header: Header, data: &[u8]) {
@@ -282,6 +287,22 @@ fn host_data_stays_within_the_guest_credit() {
     }
     assert_eq!(got, 20);
     r.no_packet();
+}
+
+#[test]
+fn host_data_larger_than_a_receive_buffer_is_split_in_order() {
+    let mut r = rig("split");
+    let (mut host, _) = r.host_connect();
+    let data: Vec<u8> = (0..20_000u32).map(|i| (i % 251) as u8).collect();
+    host.write_all(&data).unwrap();
+    let mut got = Vec::new();
+    while got.len() < data.len() {
+        let (header, payload) = r.next_packet();
+        assert_eq!(header.op, op::RW);
+        assert!(payload.len() <= RX_BUF as usize - HEADER_SIZE);
+        got.extend(payload);
+    }
+    assert_eq!(got, data);
 }
 
 #[test]
