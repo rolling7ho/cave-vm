@@ -6,7 +6,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
-use super::{Backend, BackendVcpu, Error, Exit, IccReg, IrqChip, Kick, Reg, Result, SysReg};
+use super::{
+    Backend, BackendVcpu, Error, Exit, IccReg, IrqChip, Kick, RedistReg, Reg, Result, SysReg,
+};
 use crate::memory::GuestMemory;
 
 /// Something the VMM did to the mock backend.
@@ -158,6 +160,7 @@ impl Backend for MockBackend {
             sys_regs: HashMap::new(),
             simd: HashMap::new(),
             icc: HashMap::new(),
+            redist: HashMap::new(),
             vtimer_masked: false,
             vtimer_offset: 0,
         })
@@ -204,6 +207,10 @@ pub struct MockVcpu {
     sys_regs: HashMap<SysReg, u64>,
     simd: HashMap<u8, u128>,
     icc: HashMap<IccReg, u64>,
+    /// Redistributor registers as plain storage, except that the set and
+    /// clear registers for enable, pending and active act on bits as on a
+    /// real GIC.
+    redist: HashMap<RedistReg, u64>,
     vtimer_masked: bool,
     vtimer_offset: u64,
 }
@@ -303,6 +310,35 @@ impl BackendVcpu for MockVcpu {
 
     fn set_icc_reg(&mut self, reg: IccReg, value: u64) -> Result<()> {
         self.icc.insert(reg, value);
+        Ok(())
+    }
+
+    fn redist_reg(&self, reg: RedistReg) -> Result<u64> {
+        let reg = match reg {
+            RedistReg::ICENABLER0 => RedistReg::ISENABLER0,
+            RedistReg::ICPENDR0 => RedistReg::ISPENDR0,
+            RedistReg::ICACTIVER0 => RedistReg::ISACTIVER0,
+            other => other,
+        };
+        Ok(self.redist.get(&reg).copied().unwrap_or(0))
+    }
+
+    fn set_redist_reg(&mut self, reg: RedistReg, value: u64) -> Result<()> {
+        let mut bits = |target: RedistReg, set: bool| {
+            let v = self.redist.entry(target).or_default();
+            if set { *v |= value } else { *v &= !value }
+        };
+        match reg {
+            RedistReg::ISENABLER0 => bits(RedistReg::ISENABLER0, true),
+            RedistReg::ICENABLER0 => bits(RedistReg::ISENABLER0, false),
+            RedistReg::ISPENDR0 => bits(RedistReg::ISPENDR0, true),
+            RedistReg::ICPENDR0 => bits(RedistReg::ISPENDR0, false),
+            RedistReg::ISACTIVER0 => bits(RedistReg::ISACTIVER0, true),
+            RedistReg::ICACTIVER0 => bits(RedistReg::ISACTIVER0, false),
+            other => {
+                self.redist.insert(other, value);
+            }
+        }
         Ok(())
     }
 
