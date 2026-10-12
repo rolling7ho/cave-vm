@@ -70,7 +70,7 @@ This adds a `Signed-off-by: Your Name <you@example.com>` line. Pull requests wit
 ## Code standards
 
 - Run `cargo fmt` and fix every `cargo clippy` warning.
-- `unsafe` is allowed only in the Hypervisor.framework wrapper (`hvf`) and the guest-memory code. Every `unsafe` block needs a `// SAFETY:` comment explaining why it is sound.
+- `unsafe` is allowed only in the Hypervisor.framework wrapper (`hvf`), the guest-memory code, and the host and guest system-call modules (`vmm`'s `host`, `agent`'s `sys`). Every `unsafe` block needs a `// SAFETY:` comment explaining why it is sound.
 - Do not add a dependency without a stated reason in the pull request. `cargo deny` and `cargo audit` must pass.
 - Keep the user-facing surface small: names instead of IDs, sensible defaults, and errors that say how to fix the problem.
 - Credentials are injected into the command being run and never returned to the agent. Logs record credential names, never values.
