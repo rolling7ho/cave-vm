@@ -21,14 +21,20 @@ mod regs;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod ffi;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod time;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod vcpu;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod vm;
 
 pub use error::{Error, RawReturn, Result};
 pub use exit::{DataAccess, Exception, Exit, Trap};
-pub use regs::{GUEST_STATE_ICC_REGS, GUEST_STATE_SYS_REGS, IccReg, Reg, SIMD_FP_REGS, SysReg};
+pub use regs::{
+    GUEST_STATE_ICC_REGS, GUEST_STATE_SYS_REGS, IccReg, RedistReg, Reg, SIMD_FP_REGS, SysReg,
+};
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub use time::{host_ticks, ticks_to_duration};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub use vcpu::{InterruptKind, Vcpu, VcpuHandle};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

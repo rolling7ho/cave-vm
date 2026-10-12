@@ -35,4 +35,11 @@ name = "cave-vm-vmm"
 version = "0.0.0"
 dependencies = [
  "cave-vm-hvf",
+ "vm-fdt",
 ]
+
+[[package]]
+name = "vm-fdt"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e21282841a059bb62627ce8441c491f09603622cd5a21c43bfedc85a2952f23"

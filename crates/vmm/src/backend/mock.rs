@@ -5,18 +5,46 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use super::{Backend, BackendVcpu, Error, Exit, Reg, Result, SysReg};
+use super::{Backend, BackendVcpu, Error, Exit, IrqChip, Reg, Result, SysReg};
 use crate::memory::GuestMemory;
 
 /// Something the VMM did to the mock backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    MapMemory { gpa: u64, size: usize },
-    CreateVcpu { vcpu: u32 },
-    SetReg { vcpu: u32, reg: Reg, value: u64 },
-    SetSysReg { vcpu: u32, reg: SysReg, value: u64 },
-    Run { vcpu: u32 },
-    IrqLine { intid: u32, level: bool },
+    MapMemory {
+        gpa: u64,
+        size: usize,
+    },
+    CreateVcpu {
+        vcpu: u32,
+    },
+    SetReg {
+        vcpu: u32,
+        reg: Reg,
+        value: u64,
+    },
+    SetSysReg {
+        vcpu: u32,
+        reg: SysReg,
+        value: u64,
+    },
+    Run {
+        vcpu: u32,
+    },
+    IrqLine {
+        intid: u32,
+        level: bool,
+    },
+    CreateIrqChip,
+    VtimerMasked {
+        vcpu: u32,
+        masked: bool,
+    },
+    PpiPending {
+        vcpu: u32,
+        intid: u32,
+        pending: bool,
+    },
 }
 
 /// One scripted exit: the registers the "guest" leaves behind, then the
@@ -100,12 +128,30 @@ impl Backend for MockBackend {
             backend: self.clone(),
             regs: HashMap::new(),
             sys_regs: HashMap::new(),
+            vtimer_masked: false,
+        })
+    }
+
+    fn create_irqchip(&mut self) -> Result<IrqChip> {
+        self.record(Event::CreateIrqChip);
+        Ok(IrqChip {
+            dist_size: 0x1_0000,
+            redist_size: 0x2_0000,
         })
     }
 
     fn set_irq_line(&self, intid: u32, level: bool) -> Result<()> {
         self.record(Event::IrqLine { intid, level });
         Ok(())
+    }
+
+    /// The mock clock stands still at zero.
+    fn now_ticks(&self) -> u64 {
+        0
+    }
+
+    fn ticks_to_duration(&self, ticks: u64) -> std::time::Duration {
+        std::time::Duration::from_nanos(ticks)
     }
 }
 
@@ -116,6 +162,7 @@ pub struct MockVcpu {
     backend: MockBackend,
     regs: HashMap<Reg, u64>,
     sys_regs: HashMap<SysReg, u64>,
+    vtimer_masked: bool,
 }
 
 impl BackendVcpu for MockVcpu {
@@ -129,6 +176,10 @@ impl BackendVcpu for MockVcpu {
             .and_then(VecDeque::pop_front)
             .ok_or(Error::ScriptExhausted { vcpu: self.index })?;
         self.regs.extend(step.regs);
+        // Like Hypervisor.framework, a timer exit masks the timer.
+        if step.exit == Exit::VtimerActivated {
+            self.vtimer_masked = true;
+        }
         Ok(step.exit)
     }
 
@@ -157,6 +208,32 @@ impl BackendVcpu for MockVcpu {
             value,
         });
         self.sys_regs.insert(reg, value);
+        Ok(())
+    }
+
+    fn vtimer_masked(&self) -> Result<bool> {
+        Ok(self.vtimer_masked)
+    }
+
+    fn set_vtimer_masked(&mut self, masked: bool) -> Result<()> {
+        self.backend.record(Event::VtimerMasked {
+            vcpu: self.index,
+            masked,
+        });
+        self.vtimer_masked = masked;
+        Ok(())
+    }
+
+    fn vtimer_offset(&self) -> Result<u64> {
+        Ok(0)
+    }
+
+    fn set_ppi_pending(&mut self, intid: u32, pending: bool) -> Result<()> {
+        self.backend.record(Event::PpiPending {
+            vcpu: self.index,
+            intid,
+            pending,
+        });
         Ok(())
     }
 }

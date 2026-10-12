@@ -7,7 +7,7 @@ use std::ptr;
 use crate::error::{Error, Result};
 use crate::exit::Exit;
 use crate::ffi;
-use crate::regs::{IccReg, Reg, SIMD_FP_REGS, SysReg};
+use crate::regs::{IccReg, RedistReg, Reg, SIMD_FP_REGS, SysReg};
 use crate::vm::Vm;
 
 /// Which interrupt line [`Vcpu::set_pending_interrupt`] drives.
@@ -157,6 +157,22 @@ impl<'vm> Vcpu<'vm> {
     pub fn set_icc_reg(&self, reg: IccReg, value: u64) -> Result<()> {
         // SAFETY: `self.id` is a live vCPU owned by this thread.
         Error::check(unsafe { ffi::hv_gic_set_icc_reg(self.id, reg.raw(), value) })
+    }
+
+    /// Reads a register of this vCPU's GIC redistributor. Needs a GIC.
+    pub fn redist_reg(&self, reg: RedistReg) -> Result<u64> {
+        let mut value = 0;
+        // SAFETY: `self.id` is a live vCPU; `value` is writable.
+        Error::check(unsafe { ffi::hv_gic_get_redistributor_reg(self.id, reg.raw(), &mut value) })?;
+        Ok(value)
+    }
+
+    /// Writes a register of this vCPU's GIC redistributor. Needs a GIC.
+    /// Setting a bit in [`RedistReg::ISPENDR0`] makes that PPI pending,
+    /// which is how the host delivers the virtual timer interrupt.
+    pub fn set_redist_reg(&self, reg: RedistReg, value: u64) -> Result<()> {
+        // SAFETY: `self.id` is a live vCPU.
+        Error::check(unsafe { ffi::hv_gic_set_redistributor_reg(self.id, reg.raw(), value) })
     }
 
     /// Guest physical address of this vCPU's GIC redistributor. Needs a GIC,

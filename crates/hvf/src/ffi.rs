@@ -110,6 +110,8 @@ unsafe extern "C" {
     pub fn hv_gic_create(config: hv_gic_config_t) -> hv_return_t;
     pub fn hv_gic_set_spi(intid: u32, level: bool) -> hv_return_t;
     pub fn hv_gic_get_redistributor_base(vcpu: hv_vcpu_t, base: *mut hv_ipa_t) -> hv_return_t;
+    pub fn hv_gic_get_redistributor_reg(vcpu: hv_vcpu_t, reg: u32, value: *mut u64) -> hv_return_t;
+    pub fn hv_gic_set_redistributor_reg(vcpu: hv_vcpu_t, reg: u32, value: u64) -> hv_return_t;
     pub fn hv_gic_get_icc_reg(vcpu: hv_vcpu_t, reg: u16, value: *mut u64) -> hv_return_t;
     pub fn hv_gic_set_icc_reg(vcpu: hv_vcpu_t, reg: u16, value: u64) -> hv_return_t;
     pub fn hv_gic_set_state(data: *const c_void, size: usize) -> hv_return_t;
@@ -118,7 +120,19 @@ unsafe extern "C" {
     pub fn hv_gic_state_get_data(state: hv_gic_state_t, data: *mut c_void) -> hv_return_t;
 }
 
+/// `mach_timebase_info_data_t` from <mach/mach_time.h>.
+#[repr(C)]
+pub struct mach_timebase_info {
+    pub numer: u32,
+    pub denom: u32,
+}
+
 unsafe extern "C" {
+    /// Host monotonic clock in ticks. The guest's virtual counter is this
+    /// minus the vCPU's vtimer offset.
+    pub fn mach_absolute_time() -> u64;
+    pub fn mach_timebase_info(info: *mut mach_timebase_info) -> i32;
+
     /// Releases an OS object such as `hv_vm_config_t` (libSystem, os/object.h).
     pub fn os_release(object: *mut c_void);
 }
