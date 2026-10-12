@@ -1,21 +1,29 @@
 //! The vCPU run loop: runs the guest and handles what it traps on.
 //!
-//! Handles PSCI over HVC, MMIO to the UART and the virtio-mmio slots, WFI
-//! by sleeping until the
+//! Handles PSCI over HVC (including starting and stopping secondary vCPUs),
+//! MMIO to the UART and the virtio-mmio slots, WFI by sleeping until the
 //! virtual timer is due or input arrives, and the virtual timer interrupt.
 //! Hypervisor.framework handles WFI itself once the VM has a GIC, so a
 //! thread that gives the machine work (such as input) kicks the vCPU with
 //! [`BackendVcpu::kicker`](crate::backend::BackendVcpu::kicker).
 //! Generic over [`Backend`] so it runs against the mock in tests.
+//!
+//! Each vCPU runs on its own thread, because a Hypervisor.framework vCPU
+//! belongs to the thread that created it. The vCPUs share one [`Machine`]:
+//! devices sit behind a lock taken only for a single access, and the PSCI
+//! power state of every vCPU lives in [`Machine`] too. vCPU 0 runs with
+//! [`run`]; the others with [`run_secondary`], which waits for the guest to
+//! start them with `CPU_ON`.
 
 use std::fmt;
 use std::io::Write;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
-use crate::backend::{self, Backend, BackendVcpu, DataAccess, Exit, Reg, SysReg, Trap};
+use crate::backend::{self, Backend, BackendVcpu, DataAccess, Exit, Kick, Reg, SysReg, Trap};
+use crate::boot;
 use crate::devices::pl011::Pl011;
 use crate::devices::virtio::mmio::MmioTransport;
 use crate::layout;
@@ -25,6 +33,8 @@ use crate::psci;
 pub const VTIMER_INTID: u32 = 27;
 /// Longest a WFI sleeps before checking for input again.
 const MAX_WFI_SLEEP: Duration = Duration::from_millis(10);
+/// How often a powered-off vCPU checks whether the machine is stopping.
+const POWER_POLL: Duration = Duration::from_millis(20);
 
 // CNTV_CTL_EL0 bits.
 const CNTV_ENABLE: u64 = 1 << 0;
@@ -39,8 +49,21 @@ pub enum Stop {
     Reset,
     /// The vCPU turned itself off (PSCI `CPU_OFF`).
     CpuOff,
-    /// Another thread stopped the vCPU through [`Machine::stop_flag`].
+    /// Another thread stopped the machine through [`Machine::stop_flag`].
     Canceled,
+}
+
+/// PSCI power state of one vCPU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Power {
+    Off,
+    /// `CPU_ON` was called; the vCPU starts at `entry` with `context` in
+    /// `x0` when its thread next looks.
+    OnPending {
+        entry: u64,
+        context: u64,
+    },
+    On,
 }
 
 /// An error that stops the run loop.
@@ -88,34 +111,82 @@ impl From<backend::Error> for Error {
 /// Result of the run loop.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// The devices and settings the run loop serves.
-pub struct Machine<W: Write> {
+/// The devices the vCPUs share.
+pub struct Devices<W: Write> {
     pub uart: Pl011<W>,
-    /// Bytes typed on the host, for the UART.
-    pub input: Option<Receiver<Vec<u8>>>,
-    /// Number of vCPUs in the device tree.
-    pub cpus: u32,
     /// Virtio devices, by slot.
     virtio: Vec<MmioTransport>,
     uart_irq: bool,
     virtio_irq: Vec<bool>,
+}
+
+impl<W: Write> Devices<W> {
+    /// The virtio device in `slot`.
+    pub fn virtio(&self, slot: u32) -> Option<&MmioTransport> {
+        self.virtio.get(slot as usize)
+    }
+
+    /// Drives the UART's and each virtio device's interrupt line to match
+    /// the device.
+    fn sync_irqs<B: Backend>(&mut self, backend: &B) -> Result<()> {
+        let level = self.uart.irq_level();
+        if level != self.uart_irq {
+            backend.set_irq_line(layout::uart_intid(), level)?;
+            self.uart_irq = level;
+        }
+        for (slot, (transport, line)) in self.virtio.iter().zip(&mut self.virtio_irq).enumerate() {
+            let level = transport.interrupt().level();
+            if level != *line {
+                backend.set_irq_line(layout::virtio_intid(slot as u32), level)?;
+                *line = level;
+            }
+        }
+        Ok(())
+    }
+}
+
+struct CpuTable {
+    power: Vec<Power>,
+    kicks: Vec<Option<Kick>>,
+    /// Set when the guest powers off or resets the whole machine.
+    system: Option<Stop>,
+}
+
+/// The devices, vCPU power states and settings the run loops share.
+pub struct Machine<W: Write> {
+    devices: Mutex<Devices<W>>,
+    /// Bytes typed on the host, for the UART.
+    input: Mutex<Option<Receiver<Vec<u8>>>>,
+    cpus: Mutex<CpuTable>,
+    power_changed: Condvar,
     stop: Arc<AtomicBool>,
 }
 
 impl<W: Write> Machine<W> {
+    /// A machine with `cpus` vCPUs, of which only vCPU 0 is on.
     pub fn new(uart_out: W, input: Option<Receiver<Vec<u8>>>, cpus: u32) -> Machine<W> {
+        assert!(cpus >= 1, "a machine needs a vCPU");
+        let mut power = vec![Power::Off; cpus as usize];
+        power[0] = Power::On;
         Machine {
-            uart: Pl011::new(uart_out),
-            input,
-            cpus,
-            virtio: Vec::new(),
-            uart_irq: false,
-            virtio_irq: Vec::new(),
+            devices: Mutex::new(Devices {
+                uart: Pl011::new(uart_out),
+                virtio: Vec::new(),
+                uart_irq: false,
+                virtio_irq: Vec::new(),
+            }),
+            input: Mutex::new(input),
+            cpus: Mutex::new(CpuTable {
+                power,
+                kicks: (0..cpus).map(|_| None).collect(),
+                system: None,
+            }),
+            power_changed: Condvar::new(),
             stop: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    /// Set this, then kick the vCPU, to stop the run loop with
+    /// Set this, then kick any vCPU, to stop every run loop with
     /// [`Stop::Canceled`]. A kick without it only makes the loop serve
     /// device work, such as new input.
     pub fn stop_flag(&self) -> Arc<AtomicBool> {
@@ -129,27 +200,145 @@ impl<W: Write> Machine<W> {
         self
     }
 
+    /// Number of vCPUs.
+    pub fn cpus(&self) -> u32 {
+        self.cpu_table().power.len() as u32
+    }
+
+    /// The shared devices. Hold the guard briefly: vCPUs wait for it.
+    pub fn devices(&self) -> MutexGuard<'_, Devices<W>> {
+        self.devices.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn cpu_table(&self) -> MutexGuard<'_, CpuTable> {
+        self.cpus.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Puts a virtio device in the next free slot and returns the slot. The
     /// device tree must list at least this many slots.
     pub fn add_virtio(&mut self, transport: MmioTransport) -> u32 {
+        let devices = self.devices.get_mut().unwrap_or_else(|e| e.into_inner());
         assert!(
-            (self.virtio.len() as u32) < layout::VIRTIO_MMIO_SLOTS,
+            (devices.virtio.len() as u32) < layout::VIRTIO_MMIO_SLOTS,
             "out of virtio-mmio slots"
         );
-        self.virtio.push(transport);
-        self.virtio_irq.push(false);
-        self.virtio.len() as u32 - 1
+        devices.virtio.push(transport);
+        devices.virtio_irq.push(false);
+        devices.virtio.len() as u32 - 1
     }
 
-    /// The virtio device in `slot`.
-    pub fn virtio(&self, slot: u32) -> Option<&MmioTransport> {
-        self.virtio.get(slot as usize)
+    /// The power state of every vCPU, for a snapshot.
+    pub fn power(&self) -> Vec<Power> {
+        self.cpu_table().power.clone()
+    }
+
+    /// Sets the power state of every vCPU, when restoring a snapshot.
+    pub fn set_power(&self, power: &[Power]) {
+        let mut table = self.cpu_table();
+        assert_eq!(power.len(), table.power.len(), "one state per vCPU");
+        table.power.copy_from_slice(power);
+        self.power_changed.notify_all();
+    }
+
+    /// Why the machine as a whole stopped, if it did.
+    fn stopping(&self) -> Option<Stop> {
+        if let Some(stop) = self.cpu_table().system {
+            return Some(stop);
+        }
+        self.stop.load(Ordering::Acquire).then_some(Stop::Canceled)
+    }
+
+    /// Stops every vCPU with `stop`, from the guest's `SYSTEM_OFF` or
+    /// `SYSTEM_RESET`.
+    fn stop_all(&self, stop: Stop) {
+        let mut table = self.cpu_table();
+        table.system.get_or_insert(stop);
+        for kick in table.kicks.iter().flatten() {
+            kick();
+        }
+        self.power_changed.notify_all();
+    }
+
+    /// Sets the stop flag and kicks every vCPU, so all run loops return
+    /// [`Stop::Canceled`]. For a caller whose vCPU thread failed and needs
+    /// the others to stop too.
+    pub fn request_stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        self.kick_all();
+    }
+
+    /// Kicks every running vCPU so it notices the stop flag.
+    fn kick_all(&self) {
+        let table = self.cpu_table();
+        for kick in table.kicks.iter().flatten() {
+            kick();
+        }
+        self.power_changed.notify_all();
+    }
+
+    fn register_kick(&self, index: u32, kick: Kick) {
+        self.cpu_table().kicks[index as usize] = Some(kick);
+    }
+
+    /// PSCI `CPU_ON`.
+    fn power_on(&self, target: u32, entry: u64, context: u64) -> i64 {
+        let mut table = self.cpu_table();
+        match table.power[target as usize] {
+            Power::On => psci::ret::ALREADY_ON,
+            Power::OnPending { .. } => psci::ret::ON_PENDING,
+            Power::Off => {
+                table.power[target as usize] = Power::OnPending { entry, context };
+                self.power_changed.notify_all();
+                psci::ret::SUCCESS
+            }
+        }
+    }
+
+    /// PSCI `AFFINITY_INFO`.
+    fn affinity_info(&self, target: u32) -> i64 {
+        match self.cpu_table().power[target as usize] {
+            Power::On => psci::affinity::ON,
+            Power::Off => psci::affinity::OFF,
+            Power::OnPending { .. } => psci::affinity::ON_PENDING,
+        }
+    }
+
+    fn power_off(&self, index: u32) {
+        self.cpu_table().power[index as usize] = Power::Off;
+    }
+
+    /// Waits until vCPU `index` is started, returning the entry point and
+    /// context ID and marking it on, or `None` if the machine stops first.
+    fn wait_for_power_on(&self, index: u32) -> Option<(u64, u64)> {
+        let mut table = self.cpu_table();
+        loop {
+            if table.system.is_some() || self.stop.load(Ordering::Acquire) {
+                return None;
+            }
+            if let Power::OnPending { entry, context } = table.power[index as usize] {
+                table.power[index as usize] = Power::On;
+                return Some((entry, context));
+            }
+            table = self
+                .power_changed
+                .wait_timeout(table, POWER_POLL)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
     }
 
     /// Moves waiting input into the UART, waiting up to `timeout` for some
-    /// to arrive. Returns whether any did.
-    fn take_input(&mut self, timeout: Duration) -> bool {
-        let Some(rx) = &self.input else {
+    /// to arrive. Returns whether any did. Only one vCPU waits for input
+    /// at a time; another one just sleeps.
+    fn take_input(&self, timeout: Duration) -> bool {
+        let Ok(mut input) = self.input.try_lock() else {
+            if !timeout.is_zero() {
+                std::thread::sleep(timeout);
+            }
+            return false;
+        };
+        let Some(rx) = input.as_ref() else {
+            drop(input);
             if !timeout.is_zero() {
                 std::thread::sleep(timeout);
             }
@@ -173,53 +362,74 @@ impl<W: Write> Machine<W> {
             rest.push(more);
         }
         if disconnected {
-            self.input = None;
+            *input = None;
         }
+        drop(input);
         let Some(first) = first else { return false };
-        self.uart.push_input(&first);
+        let mut devices = self.devices();
+        devices.uart.push_input(&first);
         for more in rest {
-            self.uart.push_input(&more);
+            devices.uart.push_input(&more);
         }
         true
     }
-
-    /// Drives the UART's interrupt line to match the device.
-    fn sync_uart_irq<B: Backend>(&mut self, backend: &B) -> Result<()> {
-        let level = self.uart.irq_level();
-        if level != self.uart_irq {
-            backend.set_irq_line(layout::uart_intid(), level)?;
-            self.uart_irq = level;
-        }
-        Ok(())
-    }
-
-    /// Drives each virtio device's interrupt line to match its status.
-    fn sync_virtio_irqs<B: Backend>(&mut self, backend: &B) -> Result<()> {
-        for (slot, (transport, line)) in self.virtio.iter().zip(&mut self.virtio_irq).enumerate() {
-            let level = transport.interrupt().level();
-            if level != *line {
-                backend.set_irq_line(layout::virtio_intid(slot as u32), level)?;
-                *line = level;
-            }
-        }
-        Ok(())
-    }
 }
 
-/// Runs `vcpu` until the guest stops it or an error occurs.
+/// Runs vCPU 0 until the guest stops it or an error occurs.
 pub fn run<B: Backend, V: BackendVcpu, W: Write>(
     backend: &B,
     vcpu: &mut V,
-    machine: &mut Machine<W>,
+    machine: &Machine<W>,
 ) -> Result<Stop> {
+    run_vcpu(backend, vcpu, 0, machine)
+}
+
+/// Runs secondary vCPU `index`: waits for the guest to start it with PSCI
+/// `CPU_ON`, runs it, and waits again after `CPU_OFF`. A vCPU already on
+/// (from a restored snapshot) runs straight away with its restored state.
+/// Returns when the machine stops.
+pub fn run_secondary<B: Backend, V: BackendVcpu, W: Write>(
+    backend: &B,
+    vcpu: &mut V,
+    index: u32,
+    machine: &Machine<W>,
+) -> Result<Stop> {
+    assert!(index > 0 && index < machine.cpus(), "not a secondary vCPU");
+    machine.register_kick(index, vcpu.kicker());
+    let mut restored_on = machine.cpu_table().power[index as usize] == Power::On;
     loop {
+        if !restored_on {
+            let Some((entry, context)) = machine.wait_for_power_on(index) else {
+                return Ok(machine.stopping().unwrap_or(Stop::Canceled));
+            };
+            boot::start_secondary(vcpu, entry, context)?;
+        }
+        restored_on = false;
+        match run_vcpu(backend, vcpu, index, machine)? {
+            Stop::CpuOff => continue,
+            stop => return Ok(stop),
+        }
+    }
+}
+
+fn run_vcpu<B: Backend, V: BackendVcpu, W: Write>(
+    backend: &B,
+    vcpu: &mut V,
+    index: u32,
+    machine: &Machine<W>,
+) -> Result<Stop> {
+    machine.register_kick(index, vcpu.kicker());
+    loop {
+        if let Some(stop) = machine.stopping() {
+            machine.kick_all();
+            return Ok(stop);
+        }
         machine.take_input(Duration::ZERO);
-        machine.sync_uart_irq(backend)?;
-        machine.sync_virtio_irqs(backend)?;
+        machine.devices().sync_irqs(backend)?;
         sync_vtimer(backend, vcpu)?;
 
         match vcpu.run()? {
-            Exit::Canceled if machine.stop.load(Ordering::Acquire) => return Ok(Stop::Canceled),
+            // The loop top checks for a stop.
             Exit::Canceled => {}
             Exit::VtimerActivated => vcpu.set_ppi_pending(VTIMER_INTID, true)?,
             Exit::Unknown(reason) => return Err(Error::UnknownExit(reason)),
@@ -227,6 +437,7 @@ pub fn run<B: Backend, V: BackendVcpu, W: Write>(
                 if let Some(stop) = handle_trap(
                     backend,
                     vcpu,
+                    index,
                     machine,
                     exception.decode(),
                     exception.physical_address,
@@ -241,15 +452,16 @@ pub fn run<B: Backend, V: BackendVcpu, W: Write>(
 fn handle_trap<B: Backend, V: BackendVcpu, W: Write>(
     backend: &B,
     vcpu: &mut V,
-    machine: &mut Machine<W>,
+    index: u32,
+    machine: &Machine<W>,
     trap: Trap,
     ipa: u64,
 ) -> Result<Option<Stop>> {
     match trap {
         // HVC returns past the instruction already.
-        Trap::Hvc { .. } => return psci_call(vcpu, machine.cpus),
+        Trap::Hvc { .. } => return psci_call(vcpu, index, machine),
         Trap::Smc { .. } => {
-            let stop = psci_call(vcpu, machine.cpus)?;
+            let stop = psci_call(vcpu, index, machine)?;
             advance_pc(vcpu)?;
             return Ok(stop);
         }
@@ -285,31 +497,49 @@ fn advance_pc<V: BackendVcpu>(vcpu: &mut V) -> Result<()> {
     Ok(())
 }
 
-fn psci_call<V: BackendVcpu>(vcpu: &mut V, cpus: u32) -> Result<Option<Stop>> {
+fn psci_call<V: BackendVcpu, W: Write>(
+    vcpu: &mut V,
+    index: u32,
+    machine: &Machine<W>,
+) -> Result<Option<Stop>> {
     let mut args = [0u64; 4];
     for (i, arg) in args.iter_mut().enumerate() {
         *arg = vcpu.reg(Reg::x(i as u8).expect("x0 to x3"))?;
     }
-    Ok(match psci::handle(args, cpus) {
-        psci::Action::Return(value) => {
-            vcpu.set_reg(Reg::x(0).expect("x0"), value as u64)?;
-            None
+    let value = match psci::handle(args, machine.cpus()) {
+        psci::Action::Return(value) => value,
+        psci::Action::CpuOn {
+            target,
+            entry,
+            context,
+        } => machine.power_on(target, entry, context),
+        psci::Action::AffinityInfo { target } => machine.affinity_info(target),
+        psci::Action::CpuOff => {
+            machine.power_off(index);
+            return Ok(Some(Stop::CpuOff));
         }
-        psci::Action::CpuOff => Some(Stop::CpuOff),
-        psci::Action::SystemOff => Some(Stop::PowerOff),
-        psci::Action::SystemReset => Some(Stop::Reset),
-    })
+        psci::Action::SystemOff => {
+            machine.stop_all(Stop::PowerOff);
+            return Ok(Some(Stop::PowerOff));
+        }
+        psci::Action::SystemReset => {
+            machine.stop_all(Stop::Reset);
+            return Ok(Some(Stop::Reset));
+        }
+    };
+    vcpu.set_reg(Reg::x(0).expect("x0"), value as u64)?;
+    Ok(None)
 }
 
 fn mmio<V: BackendVcpu, W: Write>(
     vcpu: &mut V,
-    machine: &mut Machine<W>,
+    machine: &Machine<W>,
     ipa: u64,
     access: DataAccess,
 ) -> Result<()> {
     let in_uart = (layout::UART_BASE..layout::UART_BASE + layout::UART_SIZE).contains(&ipa);
-    let virtio =
-        layout::virtio_slot_of(ipa).filter(|&(slot, _)| (slot as usize) < machine.virtio.len());
+    let virtio = layout::virtio_slot_of(ipa)
+        .filter(|&(slot, _)| (slot as usize) < machine.devices().virtio.len());
     let size = usize::from(access.size).clamp(1, 8);
     let mask = if size >= 8 {
         u64::MAX
@@ -322,23 +552,26 @@ fn mmio<V: BackendVcpu, W: Write>(
         } else {
             vcpu.reg(Reg::x(access.reg).expect("srt below 31"))?
         };
+        let mut devices = machine.devices();
         if in_uart {
-            machine
+            devices
                 .uart
                 .write(ipa - layout::UART_BASE, (value & mask) as u32);
         } else if let Some((slot, offset)) = virtio {
-            machine.virtio[slot as usize].write(offset, &value.to_le_bytes()[..size]);
+            devices.virtio[slot as usize].write(offset, &value.to_le_bytes()[..size]);
         }
     } else {
+        let mut devices = machine.devices();
         let value = if in_uart {
-            u64::from(machine.uart.read(ipa - layout::UART_BASE)) & mask
+            u64::from(devices.uart.read(ipa - layout::UART_BASE)) & mask
         } else if let Some((slot, offset)) = virtio {
             let mut bytes = [0u8; 8];
-            machine.virtio[slot as usize].read(offset, &mut bytes[..size]);
+            devices.virtio[slot as usize].read(offset, &mut bytes[..size]);
             u64::from_le_bytes(bytes)
         } else {
             0
         };
+        drop(devices);
         if access.reg != 31 {
             vcpu.set_reg(Reg::x(access.reg).expect("srt below 31"), value)?;
         }
@@ -381,7 +614,7 @@ fn sync_vtimer<B: Backend, V: BackendVcpu>(backend: &B, vcpu: &mut V) -> Result<
 fn wait_for_interrupt<B: Backend, V: BackendVcpu, W: Write>(
     backend: &B,
     vcpu: &V,
-    machine: &mut Machine<W>,
+    machine: &Machine<W>,
 ) -> Result<()> {
     let (now, deadline) = vtimer_state(backend, vcpu)?;
     let until_timer = match deadline {

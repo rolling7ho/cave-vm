@@ -2,8 +2,9 @@
 //! the backend records what the VMM did, so device models and the run loop
 //! can be tested on any machine.
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 use super::{Backend, BackendVcpu, Error, Exit, IccReg, IrqChip, Kick, Reg, Result, SysReg};
 use crate::memory::GuestMemory;
@@ -53,6 +54,9 @@ pub enum Event {
 pub struct Step {
     pub regs: Vec<(Reg, u64)>,
     pub exit: Exit,
+    /// Wait for a kick before reporting the exit, like a guest idling in
+    /// the hypervisor.
+    pub wait_for_kick: bool,
 }
 
 impl Step {
@@ -61,6 +65,16 @@ impl Step {
         Step {
             regs: Vec::new(),
             exit,
+            wait_for_kick: false,
+        }
+    }
+
+    /// Blocks in `run` until another thread kicks this vCPU, then reports
+    /// [`Exit::Canceled`]. A kick that came earlier counts.
+    pub fn until_kicked() -> Step {
+        Step {
+            wait_for_kick: true,
+            ..Step::exit(Exit::Canceled)
         }
     }
 
@@ -77,13 +91,20 @@ struct State {
     scripts: HashMap<u32, VecDeque<Step>>,
     irqchip_state: Vec<u8>,
     now: u64,
+    /// vCPUs kicked since their last [`Step::until_kicked`].
+    kicked: HashSet<u32>,
 }
+
+/// Longest a [`Step::until_kicked`] waits, so a broken test fails instead
+/// of hanging.
+const KICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The mock backend. Clones share the same script and event log, so a test
 /// can keep one to inspect while the VMM owns another.
 #[derive(Debug, Clone, Default)]
 pub struct MockBackend {
     state: Arc<Mutex<State>>,
+    kicks: Arc<Condvar>,
 }
 
 impl MockBackend {
@@ -198,6 +219,18 @@ impl BackendVcpu for MockVcpu {
             .and_then(VecDeque::pop_front)
             .ok_or(Error::ScriptExhausted { vcpu: self.index })?;
         self.regs.extend(step.regs);
+        if step.wait_for_kick {
+            let state = self.backend.state();
+            let (mut state, timeout) = self
+                .backend
+                .kicks
+                .wait_timeout_while(state, KICK_TIMEOUT, |s| !s.kicked.contains(&self.index))
+                .unwrap_or_else(|e| e.into_inner());
+            if timeout.timed_out() {
+                return Err(Error::ScriptExhausted { vcpu: self.index });
+            }
+            state.kicked.remove(&self.index);
+        }
         // Like Hypervisor.framework, a timer exit masks the timer.
         if step.exit == Exit::VtimerActivated {
             self.vtimer_masked = true;
@@ -284,6 +317,11 @@ impl BackendVcpu for MockVcpu {
 
     /// Does nothing: scripted runs never block.
     fn kicker(&self) -> Kick {
-        Box::new(|| {})
+        let backend = self.backend.clone();
+        let index = self.index;
+        Box::new(move || {
+            backend.state().kicked.insert(index);
+            backend.kicks.notify_all();
+        })
     }
 }
