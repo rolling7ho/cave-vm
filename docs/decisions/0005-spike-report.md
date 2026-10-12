@@ -1,10 +1,10 @@
 # 0005: Phase 2 spike report and gate 4 targets
 
-Date: 2026-10-12 · Decided by: Ivan (pending) · Status: proposed
+Date: 2026-10-12 · Decided by: Ivan · Status: accepted
 
 ## Context
 
-Phase 2 (ROADMAP P2.1 to P2.10) built enough of the VMM to boot Linux through Hypervisor.framework, then measured the things the design leaves to the spike. This record answers the six spike questions with measurements and proposes the gate 4 targets, which Ivan approves.
+Phase 2 (ROADMAP P2.1 to P2.10) built enough of the VMM to boot Linux through Hypervisor.framework, then measured the things the design leaves to the spike. This record answers the six spike questions with measurements and sets the gate 4 targets, which Ivan approved as proposed.
 
 **Machine and method.** Apple M4 Pro (12 cores), 24 GiB, macOS 27.0.1 (26A434). Ivan chose not to rerun on a clean macOS 26 machine. Instead, everything used is available on macOS 26: Hypervisor.framework VM, vCPU and memory calls (macOS 11 and later), the `hv_gic_*` calls (macOS 15 and later), and `vmnet_start_interface`. All timings are release builds with a warm page cache, measured from process exec with Python's `perf_counter`. The guest is the P2.7 kernel (Linux 6.18.56, `allnoconfig` plus a fragment) and a busybox initramfs, with **1 vCPU**. The details and raw numbers are in `docs/spike/`.
 
@@ -38,7 +38,7 @@ Phase 2 (ROADMAP P2.1 to P2.10) built enough of the VMM to boot Linux through Hy
 - Whether a GIC state blob loads on a different macOS release is untested. The design's fallback (boot from disk when a memory snapshot cannot load) covers that case.
 - Gate 2 is met. A kernel boots to a shell, signing is confirmed, and a snapshot of a running guest restores in a new process and keeps running.
 
-## Decision (proposed)
+## Decision
 
 Gate 4 targets, measured on an M-series Mac with the default 2 CPU / 2 GiB VM, the real base image and the guest agent, end to end through `cave` and the daemon:
 
