@@ -96,6 +96,9 @@ pub struct IrqChip {
     pub redist_size: u64,
 }
 
+/// Interrupts a vCPU's run from another thread; see [`BackendVcpu::kicker`].
+pub type Kick = Box<dyn Fn() + Send + Sync>;
+
 /// A vCPU as the VMM sees it.
 pub trait BackendVcpu {
     /// Runs the guest until it exits to the host.
@@ -125,4 +128,10 @@ pub trait BackendVcpu {
     /// Marks a private peripheral interrupt (interrupt ID below 32) of this
     /// vCPU pending or not.
     fn set_ppi_pending(&mut self, intid: u32, pending: bool) -> Result<()>;
+
+    /// A function other threads call to make [`run`](Self::run) return
+    /// [`Exit::Canceled`], so the run loop can serve new device work. The
+    /// hypervisor handles a guest's WFI itself, so without a kick the vCPU
+    /// sleeps until an interrupt it already knows about.
+    fn kicker(&self) -> Kick;
 }

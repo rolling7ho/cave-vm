@@ -2,10 +2,15 @@
 //!
 //! Handles PSCI over HVC, MMIO to the UART, WFI by sleeping until the
 //! virtual timer is due or input arrives, and the virtual timer interrupt.
+//! Hypervisor.framework handles WFI itself once the VM has a GIC, so a
+//! thread that gives the machine work (such as input) kicks the vCPU with
+//! [`BackendVcpu::kicker`](crate::backend::BackendVcpu::kicker).
 //! Generic over [`Backend`] so it runs against the mock in tests.
 
 use std::fmt;
 use std::io::Write;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
 
@@ -32,7 +37,7 @@ pub enum Stop {
     Reset,
     /// The vCPU turned itself off (PSCI `CPU_OFF`).
     CpuOff,
-    /// Another thread stopped the vCPU.
+    /// Another thread stopped the vCPU through [`Machine::stop_flag`].
     Canceled,
 }
 
@@ -89,6 +94,7 @@ pub struct Machine<W: Write> {
     /// Number of vCPUs in the device tree.
     pub cpus: u32,
     uart_irq: bool,
+    stop: Arc<AtomicBool>,
 }
 
 impl<W: Write> Machine<W> {
@@ -98,7 +104,22 @@ impl<W: Write> Machine<W> {
             input,
             cpus,
             uart_irq: false,
+            stop: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Set this, then kick the vCPU, to stop the run loop with
+    /// [`Stop::Canceled`]. A kick without it only makes the loop serve
+    /// device work, such as new input.
+    pub fn stop_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.stop)
+    }
+
+    /// Uses `flag` as the stop flag, for a caller that needs it before the
+    /// machine exists.
+    pub fn with_stop_flag(mut self, flag: Arc<AtomicBool>) -> Machine<W> {
+        self.stop = flag;
+        self
     }
 
     /// Moves waiting input into the UART, waiting up to `timeout` for some
@@ -161,7 +182,8 @@ pub fn run<B: Backend, V: BackendVcpu, W: Write>(
         sync_vtimer(backend, vcpu)?;
 
         match vcpu.run()? {
-            Exit::Canceled => return Ok(Stop::Canceled),
+            Exit::Canceled if machine.stop.load(Ordering::Acquire) => return Ok(Stop::Canceled),
+            Exit::Canceled => {}
             Exit::VtimerActivated => vcpu.set_ppi_pending(VTIMER_INTID, true)?,
             Exit::Unknown(reason) => return Err(Error::UnknownExit(reason)),
             Exit::Exception(exception) => {

@@ -3,7 +3,7 @@
 
 use cave_vm_hvf::{GicConfig, GicParams, RedistReg, Vcpu, Vm};
 
-use super::{Backend, BackendVcpu, Error, Exit, IrqChip, Reg, Result, SysReg};
+use super::{Backend, BackendVcpu, Error, Exit, IrqChip, Kick, Reg, Result, SysReg};
 use crate::layout;
 use crate::memory::{GuestMemory, Mapping};
 
@@ -119,5 +119,13 @@ impl BackendVcpu for HvfVcpu<'_> {
             RedistReg::ICPENDR0
         };
         Ok(self.0.set_redist_reg(reg, 1 << intid)?)
+    }
+
+    fn kicker(&self) -> Kick {
+        let handle = self.0.handle();
+        // A failed kick means the vCPU is gone, so there is nothing to wake.
+        Box::new(move || {
+            let _ = handle.exit();
+        })
     }
 }
