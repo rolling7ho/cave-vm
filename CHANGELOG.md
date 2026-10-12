@@ -14,7 +14,8 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 ### Added
 
 - `cave-vm-proto`: the length-prefixed JSON frame codec, the `hello` version handshake, `error` messages and every guest agent message from `docs/protocol.md` (P3.1).
-- virtio-vsock device in `cave-vm-vmm`: host processes reach guest ports through `<port>.sock` Unix sockets, guest connections to the host go to `host_<port>.sock`, with credit-based flow control and per-connection threads so a slow peer never blocks a vCPU (P3.5).
+- virtio-vsock device in `cave-vm-vmm` with no socket files (D26): the VMM opens connections to guest ports as Unix socket pairs, and guest connections to the host go to a handler per port, with credit-based flow control and per-connection threads so a slow peer never blocks a vCPU (P3.5).
+- Decision 0008 (D26): vsock connections without socket files, after socket paths in `.cave/` hit macOS's 104-byte limit.
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.

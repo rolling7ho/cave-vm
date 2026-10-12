@@ -1,13 +1,13 @@
 //! Virtio socket device (virtio 1.2, section 5.10): stream sockets between
-//! the guest and the host, backed by Unix sockets in a folder on the host
-//! (the project's `.cave/vsock/`).
+//! the guest and the host. The host side creates no socket files, which
+//! macOS would limit to 104-byte paths (decision 0008, D26).
 //!
-//! - **Host to guest.** For each guest port the host may reach (the agent's
-//!   1024), the device listens on `<dir>/<port>.sock`. A host process that
-//!   connects there is connected to that port in the guest.
+//! - **Host to guest.** [`Connector::connect`] opens a connection to a
+//!   guest port, such as the agent's 1024, and returns the host end of a
+//!   Unix socket pair. The VMM passes it on to the daemon.
 //! - **Guest to host.** A guest connection to the host (CID 2) on port `P`
-//!   connects to `<dir>/host_<P>.sock` if something listens there, and is
-//!   reset otherwise.
+//!   goes to the handler registered with [`Vsock::serve_host_port`], and is
+//!   reset if there is none or it fails.
 //!
 //! Each connection has a reader thread, which moves bytes from the Unix
 //! socket to the guest within the credit the guest grants, and a writer
@@ -16,12 +16,9 @@
 //! it posts receive buffers.
 
 use std::collections::{HashMap, VecDeque};
-use std::fs;
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
@@ -187,9 +184,13 @@ struct State {
     generation: u64,
 }
 
+/// Opens the host side of a guest connection to a host port.
+pub type HostHandler = Arc<dyn Fn() -> io::Result<UnixStream> + Send + Sync>;
+
 struct Shared {
     cid: u64,
-    dir: PathBuf,
+    /// Handlers for guest connections to the host, by host port.
+    host_ports: Mutex<HashMap<u32, HostHandler>>,
     state: Mutex<State>,
     /// Signalled when credit or connection state changes.
     changed: Condvar,
@@ -298,19 +299,14 @@ fn write_packet(
 pub struct Vsock {
     shared: Arc<Shared>,
     tx: Option<ActiveQueue>,
-    listen_ports: Vec<u32>,
-    stop_listeners: Arc<AtomicBool>,
 }
 
 impl Vsock {
-    /// A device for a guest with context ID `cid`, whose Unix sockets live
-    /// in `dir`. The host can reach the guest ports in `listen_ports`.
-    /// Fails if `dir` cannot be created or a socket cannot be bound.
-    pub fn new(cid: u64, dir: &Path, listen_ports: &[u32]) -> io::Result<Vsock> {
-        fs::create_dir_all(dir)?;
+    /// A device for a guest with context ID `cid`.
+    pub fn new(cid: u64) -> Vsock {
         let shared = Arc::new(Shared {
             cid,
-            dir: dir.to_path_buf(),
+            host_ports: Mutex::new(HashMap::new()),
             state: Mutex::new(State {
                 rx: None,
                 backlog: VecDeque::new(),
@@ -320,24 +316,23 @@ impl Vsock {
             }),
             changed: Condvar::new(),
         });
-        let stop_listeners = Arc::new(AtomicBool::new(false));
-        for &port in listen_ports {
-            let path = dir.join(format!("{port}.sock"));
-            match fs::remove_file(&path) {
-                Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
-                _ => {}
-            }
-            let listener = UnixListener::bind(&path)?;
-            let shared = Arc::clone(&shared);
-            let stop = Arc::clone(&stop_listeners);
-            thread::spawn(move || accept_loop(&shared, listener, port, &stop));
-        }
-        Ok(Vsock {
-            shared,
-            tx: None,
-            listen_ports: listen_ports.to_vec(),
-            stop_listeners,
-        })
+        Vsock { shared, tx: None }
+    }
+
+    /// Opens host connections to guest ports, from any thread.
+    pub fn connector(&self) -> Connector {
+        Connector(Arc::clone(&self.shared))
+    }
+
+    /// Sends guest connections to host `port` to `handler`, which returns
+    /// the host end. It runs on the vCPU thread, so it must not block for
+    /// long.
+    pub fn serve_host_port(&self, port: u32, handler: HostHandler) {
+        self.shared
+            .host_ports
+            .lock()
+            .expect("host ports lock")
+            .insert(port, handler);
     }
 
     fn config(&self) -> [u8; 8] {
@@ -379,14 +374,48 @@ impl Vsock {
 
 impl Drop for Vsock {
     fn drop(&mut self) {
-        self.stop_listeners.store(true, Ordering::Release);
-        for port in &self.listen_ports {
-            // Wake each accept loop so it sees the stop flag.
-            let path = self.shared.dir.join(format!("{port}.sock"));
-            let _ = UnixStream::connect(&path);
-            let _ = fs::remove_file(path);
-        }
         self.reset();
+    }
+}
+
+/// Opens host connections to guest ports. Cheap to clone.
+#[derive(Clone)]
+pub struct Connector(Arc<Shared>);
+
+impl Connector {
+    /// Connects to guest `port` and returns the host end. If nothing in the
+    /// guest listens there, the guest resets the connection and the host
+    /// end reads end-of-file. Fails if the guest's driver is not running.
+    pub fn connect(&self, port: u32) -> io::Result<UnixStream> {
+        let (host, device) = UnixStream::pair()?;
+        let shared = &self.0;
+        let mut state = shared.lock();
+        if state.rx.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the guest's vsock driver is not running",
+            ));
+        }
+        let key = loop {
+            let host_port = state.next_host_port;
+            state.next_host_port = state
+                .next_host_port
+                .checked_add(1)
+                .unwrap_or(FIRST_HOST_PORT);
+            let key = Key {
+                host_port,
+                guest_port: port,
+            };
+            if !state.conns.contains_key(&key) {
+                break key;
+            }
+        };
+        state
+            .conns
+            .insert(key, new_conn(device, ConnState::Connecting));
+        let header = shared.header(key, op::REQUEST, None);
+        shared.send(&mut state, header, Vec::new());
+        Ok(host)
     }
 }
 
@@ -488,10 +517,15 @@ fn handle(shared: &Arc<Shared>, header: Header, data: Vec<u8>) {
     }
 }
 
-/// A guest connection to the host: connect to `host_<port>.sock`.
+/// A guest connection to the host: ask the port's handler for the host end.
 fn connect_to_host(shared: &Arc<Shared>, key: Key, request: Header) {
-    let path = shared.dir.join(format!("host_{}.sock", key.host_port));
-    let stream = UnixStream::connect(path);
+    let handler = shared
+        .host_ports
+        .lock()
+        .expect("host ports lock")
+        .get(&key.host_port)
+        .cloned();
+    let stream = handler.map_or_else(|| Err(io::ErrorKind::ConnectionRefused.into()), |h| h());
     let mut state = shared.lock();
     let Ok(stream) = stream else {
         shared.reset_conn(&mut state, key);
@@ -526,40 +560,6 @@ fn new_conn(stream: UnixStream, state: ConnState) -> Conn {
         guest_done_sending: false,
         guest_closed: false,
         writer_running: false,
-    }
-}
-
-/// Accepts host connections to guest `port`.
-fn accept_loop(shared: &Arc<Shared>, listener: UnixListener, port: u32, stop: &AtomicBool) {
-    for stream in listener.incoming() {
-        if stop.load(Ordering::Acquire) {
-            return;
-        }
-        let Ok(stream) = stream else { continue };
-        let mut state = shared.lock();
-        if state.rx.is_none() {
-            // The guest's driver is not running: refuse by closing.
-            continue;
-        }
-        let key = loop {
-            let host_port = state.next_host_port;
-            state.next_host_port = state
-                .next_host_port
-                .checked_add(1)
-                .unwrap_or(FIRST_HOST_PORT);
-            let key = Key {
-                host_port,
-                guest_port: port,
-            };
-            if !state.conns.contains_key(&key) {
-                break key;
-            }
-        };
-        state
-            .conns
-            .insert(key, new_conn(stream, ConnState::Connecting));
-        let header = shared.header(key, op::REQUEST, None);
-        shared.send(&mut state, header, Vec::new());
     }
 }
 

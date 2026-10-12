@@ -101,7 +101,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | P3.2 | `vmm`: virtio-mmio transport and virtqueue handling. No PCI, ACPI or UEFI. Devices appear in the generated device tree. | Mock-backend tests drive queues through the guest-memory abstraction. |
 | P3.3 | virtio-blk on a raw sparse image: read, write, flush, discard. | Tests against a temp file; flush ordering test. |
 | P3.4 | Project disk: create the 20 GB sparse disk as an APFS `clonefile` of the shared base image [A9]; grow on request. No absolute paths stored in `.cave/`. | Test that a clone shares blocks until written; test that moving the project folder keeps it working. |
-| P3.5 | virtio-vsock device with a host-side Unix socket per port, inside `.cave/`. | Mock-backend tests for connect, data, close and reset. |
+| P3.5 | virtio-vsock device. The VMM gets host connections to guest ports as socket pairs and registers handlers for guest connections to the host; no socket files [D26]. | Mock-backend tests for connect, data, close and reset. |
 | P3.6 | `agent`: static musl binary, listens on vsock, handles exec with streamed stdout and stderr and exit status, the pty shell with resize, file read and write, and port forwarding. Cross-build per [D6]. | Protocol and session logic unit-tested on the host; Linux-specific code behind `cfg(target_os = "linux")` and covered by e2e tests in a real guest. |
 | P3.7a | virtio-net device. | Mock-backend frame tests. |
 | P3.7b | Userspace network stack: ARP, IPv4, DHCP or a fixed guest address, and the NAT gateway [D4]. | Unit tests with recorded frames; no real network. |
@@ -227,7 +227,7 @@ None open. When a task hits something the design and the decisions below do not 
 
 ## Decisions
 
-Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md), D23 in [decision 0006](docs/decisions/0006-phase-3-dependencies.md), and D24 and D25 in [decision 0007](docs/decisions/0007-unsafe-host-calls-and-pr-flow.md).
+Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md), D23 in [decision 0006](docs/decisions/0006-phase-3-dependencies.md), D24 and D25 in [decision 0007](docs/decisions/0007-unsafe-host-calls-and-pr-flow.md), and D26 in [decision 0008](docs/decisions/0008-vsock-without-socket-files.md).
 
 | ID | Question | Decision |
 | --- | --- | --- |
@@ -256,3 +256,4 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D23 | Phase 3 dependencies, asked per D4. | Add `serde`/`serde_json` (P3.1), `clap` (P3.11), `sha2` (P3.6, P3.12) and `smoltcp` with minimal features (P3.7b to d). Do not add `vm-memory`, `virtio-queue` or an async runtime. |
 | D24 | Calls std does not wrap: vsock, ptys and `setsid` in the agent; `clonefile` and hole punching in the VMM. | Add `libc`. `unsafe` is also allowed in an `agent` `sys` module and a `vmm` `host` module, each block with a `// SAFETY:` comment. |
 | D25 | How PRs that depend on each other are opened, after stacked PRs were auto-closed. | Every PR targets main and none are stacked; dependent work waits on its branch until the PR it needs merges. |
+| D26 | How the host reaches guest vsock ports, after socket paths in `.cave/` hit macOS's 104-byte limit in deep projects. | No socket files: the device hands out socket pairs, and the VMM passes connections to the daemon as file descriptors over its control socket. |
