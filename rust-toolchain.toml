@@ -1,0 +1,5 @@
+# Pinned per ROADMAP.md D7. Bump it deliberately, in its own PR.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

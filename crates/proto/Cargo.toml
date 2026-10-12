@@ -1,0 +1,9 @@
+[package]
+name = "cave-vm-proto"
+description = "Message types shared by the cave-vm daemon, guest agent and CLI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
