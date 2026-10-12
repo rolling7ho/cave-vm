@@ -137,6 +137,14 @@ impl BackendVcpu for HvfVcpu<'_> {
         Ok(self.0.set_icc_reg(reg, value)?)
     }
 
+    fn redist_reg(&self, reg: RedistReg) -> Result<u64> {
+        Ok(self.0.redist_reg(reg)?)
+    }
+
+    fn set_redist_reg(&mut self, reg: RedistReg, value: u64) -> Result<()> {
+        Ok(self.0.set_redist_reg(reg, value)?)
+    }
+
     fn set_ppi_pending(&mut self, intid: u32, pending: bool) -> Result<()> {
         if intid >= 32 {
             return Err(Error::Hypervisor(cave_vm_hvf::Error::BadArgument));
