@@ -144,7 +144,7 @@ impl DescriptorChain {
     /// bytes into the readable part. Returns how many were copied.
     pub fn read_at(&self, mem: &GuestMemory, offset: u64, buf: &mut [u8]) -> Result<usize> {
         let mut done = 0;
-        for (gpa, len) in spans(self.readable(), offset, buf.len()) {
+        for (gpa, len) in spans(self.readable(), offset, buf.len())? {
             mem.read(gpa, &mut buf[done..done + len])?;
             done += len;
         }
@@ -155,7 +155,7 @@ impl DescriptorChain {
     /// into it, as far as it fits. Returns how many bytes were written.
     pub fn write_at(&self, mem: &GuestMemory, offset: u64, data: &[u8]) -> Result<usize> {
         let mut done = 0;
-        for (gpa, len) in spans(self.writable(), offset, data.len()) {
+        for (gpa, len) in spans(self.writable(), offset, data.len())? {
             mem.write(gpa, &data[done..done + len])?;
             done += len;
         }
@@ -164,12 +164,13 @@ impl DescriptorChain {
 }
 
 /// Splits `[offset, offset + want)` of the concatenated `descriptors` into
-/// guest address ranges.
+/// guest address ranges. A buffer whose end would pass the top of the
+/// address space is an error, not a wrap-around.
 fn spans<'a>(
     descriptors: impl Iterator<Item = &'a Descriptor>,
     mut offset: u64,
     mut want: usize,
-) -> Vec<(u64, usize)> {
+) -> Result<Vec<(u64, usize)>> {
     let mut out = Vec::new();
     for d in descriptors {
         if want == 0 {
@@ -181,11 +182,19 @@ fn spans<'a>(
             continue;
         }
         let take = (len - offset).min(want as u64) as usize;
-        out.push((d.addr + offset, take));
+        let gpa = d
+            .addr
+            .checked_add(offset)
+            .filter(|gpa| gpa.checked_add(take as u64).is_some())
+            .ok_or(Error::Memory(memory::Error::OutOfRange {
+                gpa: d.addr,
+                len: d.len as usize,
+            }))?;
+        out.push((gpa, take));
         offset = 0;
         want -= take;
     }
-    out
+    Ok(out)
 }
 
 /// One virtqueue: the driver's configuration plus the device's position in
@@ -505,6 +514,21 @@ mod tests {
         let mut buf = [0u8; 4];
         assert!(matches!(
             chain.read_at(&mem, 0, &mut buf),
+            Err(Error::Memory(_))
+        ));
+    }
+
+    #[test]
+    fn buffer_at_the_top_of_the_address_space_is_an_error() {
+        let mem = guest_memory();
+        let mut driver = DriverQueue::new(&mem, 4);
+        driver.add(&mem, &[b"a"], &[]);
+        driver.set_desc(&mem, 0, u64::MAX - 4, 64, 0, 0);
+        let mut queue = driver.device_queue();
+        let chain = queue.pop(&mem).unwrap().unwrap();
+        let mut buf = [0u8; 4];
+        assert!(matches!(
+            chain.read_at(&mem, 8, &mut buf),
             Err(Error::Memory(_))
         ));
     }

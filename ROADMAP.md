@@ -227,7 +227,7 @@ None open. When a task hits something the design and the decisions below do not 
 
 ## Decisions
 
-Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), and D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md).
+Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md), D23 in [decision 0006](docs/decisions/0006-phase-3-dependencies.md), and D24 and D25 in [decision 0007](docs/decisions/0007-unsafe-host-calls-and-pr-flow.md).
 
 | ID | Question | Decision |
 | --- | --- | --- |
@@ -253,3 +253,6 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D20 | There is no command to suspend a VM now, which `--net` changes and freeing memory need. | Add `cave stop`, which suspends to a snapshot. |
 | D21 | What happens when a TTL runs out. | Off by default. When set and it runs out, the VM is stopped and removed like `cave rm --yes`, and startup prints when that happens. |
 | D22 | Where the base-image digest pin is stored. The design says `cave.toml` plus the pin rebuilds the environment anywhere, but `.cave/` is gitignored. | On first run, the digest is written into `cave.toml` as `image = "base@sha256:..."`. |
+| D23 | Phase 3 dependencies, asked per D4. | Add `serde`/`serde_json` (P3.1), `clap` (P3.11), `sha2` (P3.6, P3.12) and `smoltcp` with minimal features (P3.7b to d). Do not add `vm-memory`, `virtio-queue` or an async runtime. |
+| D24 | Calls std does not wrap: vsock, ptys and `setsid` in the agent; `clonefile` and hole punching in the VMM. | Add `libc`. `unsafe` is also allowed in an `agent` `sys` module and a `vmm` `host` module, each block with a `// SAFETY:` comment. |
+| D25 | How PRs that depend on each other are opened, after stacked PRs were auto-closed. | Every PR targets main and none are stacked; dependent work waits on its branch until the PR it needs merges. |

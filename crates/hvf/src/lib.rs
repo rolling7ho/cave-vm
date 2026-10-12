@@ -30,7 +30,8 @@ mod vm;
 pub use error::{Error, RawReturn, Result};
 pub use exit::{DataAccess, Exception, Exit, Trap};
 pub use regs::{
-    GUEST_STATE_ICC_REGS, GUEST_STATE_SYS_REGS, IccReg, RedistReg, Reg, SIMD_FP_REGS, SysReg,
+    GUEST_STATE_ICC_REGS, GUEST_STATE_REDIST_REGS, GUEST_STATE_SYS_REGS, IccReg, RedistReg, Reg,
+    SIMD_FP_REGS, SysReg,
 };
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

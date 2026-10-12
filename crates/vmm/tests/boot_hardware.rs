@@ -50,8 +50,8 @@ fn fake_kernel_prints_and_powers_off() {
     boot::setup_vcpu(&mut vcpu, 0, &prepared.layout).unwrap();
 
     let mut out = Vec::new();
-    let mut machine = Machine::new(&mut out, None, 1);
-    let stop = runner::run(&backend, &mut vcpu, &mut machine).unwrap();
+    let machine = Machine::new(&mut out, None, 1);
+    let stop = runner::run(&backend, &mut vcpu, &machine).unwrap();
     drop(machine);
 
     assert_eq!(stop, Stop::PowerOff);
