@@ -24,7 +24,10 @@ fn main() {
     vcpu.set_reg(Reg::CPSR, 0x3c5).expect("set CPSR");
     match vcpu.run() {
         Ok(Exit::Exception(e)) if matches!(e.decode(), Trap::InstructionAbort { .. }) => {
-            println!("vcpu-run: ok (instruction abort at {:#x})", e.physical_address)
+            println!(
+                "vcpu-run: ok (instruction abort at {:#x})",
+                e.physical_address
+            )
         }
         other => {
             println!("vcpu-run: unexpected {other:?}");
