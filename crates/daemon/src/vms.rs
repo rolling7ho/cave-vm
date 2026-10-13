@@ -20,6 +20,7 @@ use cave_vm_proto::daemon::{EntryKind, ListEntry, NetMode, Policy, PortMap, VmId
 use cave_vm_proto::vmm::{FromVmm, ToVmm, VmmConfig};
 use cave_vm_proto::{ErrorCode, ErrorMessage};
 
+use crate::forward::{self, Bound, Forward};
 use crate::home::Home;
 use crate::launch::{Launched, Launcher};
 use crate::link::{BOOT_TIMEOUT, LinkError, VmmLink};
@@ -64,6 +65,8 @@ struct Running {
     child: Arc<Mutex<Child>>,
     policy: Policy,
     stop_requested: Arc<AtomicBool>,
+    /// Stop listening when the VM stops.
+    forwards: Vec<Forward>,
 }
 
 struct Vm {
@@ -154,12 +157,20 @@ impl Vms {
         ports: &[PortMap],
     ) -> Result<Policy, ErrorMessage> {
         let vm = self.vm(id)?;
-        let slot = vm.idle_slot();
-        if let Slot::Running(running) = &*slot {
+        let mut slot = vm.idle_slot();
+        if let Slot::Running(running) = &mut *slot {
+            // Forwarding goes through the agent, so `-p` on a running VM
+            // adds forwards without a restart.
+            add_forwards(&vm, running, ports)?;
             return Ok(running.policy.clone());
         }
+        // Bound first, so a port in use is reported before the VM boots.
+        let bound = bind_all(ports)?;
         vm.set(slot, Slot::Busy);
-        let result = self.launch(&vm, net, ports);
+        let result = self.launch(&vm, net, ports).map(|mut running| {
+            running.forwards = serve_all(&vm, bound);
+            running
+        });
         let slot = vm.slot.lock().expect("vm lock");
         match result {
             Ok(running) => {
@@ -226,27 +237,13 @@ impl Vms {
             child,
             policy: prepared.policy,
             stop_requested,
+            forwards: Vec::new(),
         })
     }
 
     /// A new connection to a running VM's guest agent.
     pub fn agent_connection(&self, id: &VmId) -> Result<UnixStream, ErrorMessage> {
-        let vm = self.vm(id)?;
-        let mut slot = vm.idle_slot();
-        let Slot::Running(running) = &mut *slot else {
-            return Err(error(
-                ErrorCode::NotRunning,
-                format!("{} is not running", display_name(id)),
-            )
-            .with_fix("start it with `cave run`"));
-        };
-        running.link.agent_connect().map_err(|e| match e {
-            LinkError::Vmm(e) => e,
-            e => error(
-                ErrorCode::Internal,
-                format!("cannot reach the VMM of {}: {e}", display_name(id)),
-            ),
-        })
+        agent_connection(&*self.vm(id)?)
     }
 
     /// Stops a VM. Stopping a stopped VM is not an error.
@@ -357,6 +354,76 @@ impl Vms {
         }
         Ok(killed)
     }
+}
+
+fn agent_connection(vm: &Vm) -> Result<UnixStream, ErrorMessage> {
+    let mut slot = vm.idle_slot();
+    let Slot::Running(running) = &mut *slot else {
+        return Err(error(
+            ErrorCode::NotRunning,
+            format!("{} is not running", display_name(&vm.id)),
+        )
+        .with_fix("start it with `cave run`"));
+    };
+    running.link.agent_connect().map_err(|e| match e {
+        LinkError::Vmm(e) => e,
+        e => error(
+            ErrorCode::Internal,
+            format!("cannot reach the VMM of {}: {e}", display_name(&vm.id)),
+        ),
+    })
+}
+
+fn bind_all(ports: &[PortMap]) -> Result<Vec<Bound>, ErrorMessage> {
+    ports.iter().map(|&map| forward::bind(map)).collect()
+}
+
+/// Serves `bound` with agent connections to `vm`. The listener threads
+/// hold the VM weakly, so a forgotten VM is not kept alive by them.
+fn serve_all(vm: &Arc<Vm>, bound: Vec<Bound>) -> Vec<Forward> {
+    let weak = Arc::downgrade(vm);
+    let connect: forward::Connect = Arc::new(move || match weak.upgrade() {
+        Some(vm) => agent_connection(&vm),
+        None => Err(error(ErrorCode::NotRunning, "the VM is gone")),
+    });
+    bound
+        .into_iter()
+        .map(|b| b.serve(Arc::clone(&connect)))
+        .collect()
+}
+
+/// Adds the forwards in `ports` that `running` does not have yet. A Mac
+/// port already forwarded to another VM port is refused.
+fn add_forwards(
+    vm: &Arc<Vm>,
+    running: &mut Running,
+    ports: &[PortMap],
+) -> Result<(), ErrorMessage> {
+    let mut new = Vec::new();
+    for &map in ports {
+        match running.forwards.iter().find(|f| f.map.mac == map.mac) {
+            Some(f) if f.map == map => {}
+            Some(f) => {
+                return Err(error(
+                    ErrorCode::AlreadyExists,
+                    format!(
+                        "port {} on this Mac already forwards to port {} in the VM",
+                        map.mac, f.map.vm
+                    ),
+                )
+                .with_fix("Pick another Mac port, or `cave stop` and run again"));
+            }
+            None if !new.contains(&map) => new.push(map),
+            None => {}
+        }
+    }
+    let bound = bind_all(&new)?;
+    running.forwards.extend(serve_all(vm, bound));
+    for map in new {
+        running.policy.ports.push(map);
+        running.policy.widened.push(forward::flag(map));
+    }
+    Ok(())
 }
 
 /// Marks the VM stopped when its VMM exits on its own: a crash, or the

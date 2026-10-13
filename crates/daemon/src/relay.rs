@@ -31,7 +31,7 @@ fn agent_failed(e: impl std::fmt::Display) -> ErrorMessage {
     )
 }
 
-fn read_agent(agent: &mut UnixStream) -> Result<Message, ErrorMessage> {
+pub(crate) fn read_agent(agent: &mut UnixStream) -> Result<Message, ErrorMessage> {
     match read_frame::<_, Message>(agent) {
         Ok(Some(message)) => Ok(message),
         Ok(None) => Err(agent_failed("it closed the connection")),
@@ -40,7 +40,7 @@ fn read_agent(agent: &mut UnixStream) -> Result<Message, ErrorMessage> {
 }
 
 /// The handshake on a new agent connection, then `request`.
-fn open(agent: &mut UnixStream, request: &Message) -> Result<(), ErrorMessage> {
+pub(crate) fn open(agent: &mut UnixStream, request: &Message) -> Result<(), ErrorMessage> {
     agent
         .set_read_timeout(Some(AGENT_HELLO_TIMEOUT))
         .map_err(agent_failed)?;
