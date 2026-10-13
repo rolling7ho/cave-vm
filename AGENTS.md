@@ -52,6 +52,12 @@ cave-vm is an open-source (Apache 2.0) microVM runtime for macOS, built for codi
    - Update each open PR branch from main and resolve its conflicts, then run the lint and the tests before pushing.
    - Open a PR for every waiting branch whose dependencies have now merged. Open as many as D25 allows.
    - In your status, list each branch that still has no PR and the PR it waits on.
+8. Avoid conflicts in the first place:
+   - Before starting, check which files the open PRs change (`gh pr diff <n> --name-only`). Do not touch the same lines unless the task needs it.
+   - Change only what the task needs. Do not reformat, reorder or rename unrelated code.
+   - Add list entries (`mod` lines, dependencies, match arms) in alphabetical order, not at the end, so parallel PRs insert in different places.
+   - Put a changelog line next to the other entries for the same crate, not at the top of the section.
+   - Do not run `cargo update`. `Cargo.lock` should change only for a dependency the PR adds.
 
 ## Definition of done
 
