@@ -3,7 +3,7 @@
 //! standard input.
 
 use std::fs;
-use std::io;
+use std::io::{self, Read, Write};
 use std::os::fd::AsFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
@@ -20,8 +20,10 @@ use cave_vm_daemon::vms::{Prepared, VmSource, Vms};
 use cave_vm_proto::daemon::{
     EntryKind, NetMode, Policy, PortMap, Reply, Request, Storage, VmId, VmState,
 };
+use cave_vm_proto::frame::encode;
 use cave_vm_proto::vmm::{FromVmm, ToVmm, VmmConfig};
 use cave_vm_proto::{ErrorCode, ErrorMessage, Hello, VERSIONS, read_frame, write_frame};
+use cave_vm_vmm::host;
 
 /// The fake VMM's behaviour, from `CAVE_FAKE_VMM`.
 const NORMAL: &str = "normal";
@@ -38,6 +40,9 @@ fn fake_vmm() {
     };
     let stdin = io::stdin().as_fd().try_clone_to_owned().unwrap();
     let mut link = UnixStream::from(stdin);
+    // The last connection sent stays open here until the next request, as
+    // in cave-vmm: closing it while in flight can lose it on macOS.
+    let mut in_flight = None;
     loop {
         let message = match read_frame::<_, ToVmm>(&mut link) {
             Ok(Some(message)) => message,
@@ -46,6 +51,7 @@ fn fake_vmm() {
             },
             _ => std::process::exit(0),
         };
+        drop(in_flight.take());
         let reply = match message {
             ToVmm::Hello(hello) => FromVmm::Hello(hello.accept(VERSIONS, "fake-vmm").unwrap()),
             ToVmm::Boot { .. } if mode == FAIL_BOOT => FromVmm::Error(ErrorMessage::new(
@@ -54,6 +60,18 @@ fn fake_vmm() {
             )),
             ToVmm::Boot { .. } => FromVmm::Booted,
             ToVmm::Ping => FromVmm::Pong,
+            ToVmm::AgentConnect => {
+                // The far end echoes, standing in for the guest agent.
+                let (ours, mut agent) = UnixStream::pair().unwrap();
+                thread::spawn(move || {
+                    let mut copy = agent.try_clone().unwrap();
+                    let _ = io::copy(&mut agent, &mut copy);
+                });
+                let frame = encode(&FromVmm::AgentConnection).unwrap();
+                host::send_with_fd(&link, &frame, ours.as_fd()).unwrap();
+                in_flight = Some(ours);
+                continue;
+            }
             ToVmm::Stop => {
                 write_frame(&mut link, &FromVmm::Ok).unwrap();
                 std::process::exit(0);
@@ -333,4 +351,23 @@ fn unsupported_and_malformed_requests_are_errors() {
         Reply::Error(e) => assert!(e.message.contains("absolute"), "{}", e.message),
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn agent_connections_come_from_the_running_vmm() {
+    let r = rig("agent", NORMAL);
+    let err = r.vms.agent_connection(&vm()).unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotRunning);
+    assert!(err.fix.unwrap().contains("cave run"));
+
+    assert!(matches!(r.start(), Reply::Policy(_)));
+    for _ in 0..2 {
+        let mut agent = r.vms.agent_connection(&vm()).unwrap();
+        agent.write_all(b"hello").unwrap();
+        let mut back = [0u8; 5];
+        agent.read_exact(&mut back).unwrap();
+        assert_eq!(&back, b"hello");
+    }
+    // The link still answers after handing out connections.
+    assert_eq!(r.state(), Some(VmState::Running));
 }
