@@ -12,6 +12,9 @@
 //! `--snapshot <dir>` to save it there. `--restore <dir>` runs a saved VM
 //! instead of booting (P2.9). `--cpus` sets the number of vCPUs, each on
 //! its own thread (default 1); a restore uses the snapshot's count.
+//! `--disk <file>` attaches a raw image as a virtio block device (`/dev/vda`
+//! in the guest); it cannot be combined with snapshots yet, since device
+//! state is not saved until phase 4.
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn main() {
@@ -39,12 +42,14 @@ mod spike {
     use cave_vm_vmm::backend::hvf::HvfBackend;
     use cave_vm_vmm::backend::{Backend, BackendVcpu, Kick};
     use cave_vm_vmm::boot::{self, BootConfig};
+    use cave_vm_vmm::devices::virtio::block::Block;
+    use cave_vm_vmm::devices::virtio::mmio::MmioTransport;
     use cave_vm_vmm::kernel::BootLayout;
     use cave_vm_vmm::memory::GuestMemory;
     use cave_vm_vmm::runner::{self, Machine, Stop};
     use cave_vm_vmm::snapshot::{self, State, VcpuState};
 
-    const USAGE: &str = "usage: cave-vmm-spike (--kernel <Image> [--initrd <file>] [--memory <MiB>] [--cpus <n>] [--cmdline <text>] | --restore <dir>) [--stop-at <text> [--snapshot <dir>]]";
+    const USAGE: &str = "usage: cave-vmm-spike (--kernel <Image> [--initrd <file>] [--memory <MiB>] [--cpus <n>] [--disk <file>] [--cmdline <text>] | --restore <dir>) [--stop-at <text> [--snapshot <dir>]]";
     const DEFAULT_CMDLINE: &str = "console=ttyAMA0 earlycon=pl011,0x9000000 rdinit=/init";
 
     struct Args {
@@ -52,6 +57,7 @@ mod spike {
         initrd: Option<String>,
         memory_mib: u64,
         cpus: u32,
+        disk: Option<PathBuf>,
         cmdline: String,
         stop_at: Option<String>,
         snapshot: Option<PathBuf>,
@@ -63,6 +69,7 @@ mod spike {
         let mut initrd = None;
         let mut memory_mib = 512;
         let mut cpus = 1;
+        let mut disk = None;
         let mut cmdline = DEFAULT_CMDLINE.to_string();
         let mut stop_at = None;
         let mut snapshot = None;
@@ -88,6 +95,7 @@ mod spike {
                         .filter(|n| (1..=8).contains(n))
                         .ok_or_else(|| format!("--cpus takes a number from 1 to 8\n{USAGE}"))?
                 }
+                "--disk" => disk = Some(PathBuf::from(value()?)),
                 "--cmdline" => cmdline = value()?,
                 "--stop-at" => stop_at = Some(value()?),
                 "--snapshot" => snapshot = Some(PathBuf::from(value()?)),
@@ -99,6 +107,11 @@ mod spike {
         if kernel.is_some() == restore.is_some() {
             return Err(format!("give either --kernel or --restore\n{USAGE}"));
         }
+        if disk.is_some() && (snapshot.is_some() || restore.is_some()) {
+            return Err(format!(
+                "--disk cannot be used with --snapshot or --restore yet\n{USAGE}"
+            ));
+        }
         if snapshot.is_some() && stop_at.is_none() {
             return Err(format!("--snapshot needs --stop-at\n{USAGE}"));
         }
@@ -107,6 +120,7 @@ mod spike {
             initrd,
             memory_mib,
             cpus,
+            disk,
             cmdline,
             stop_at,
             snapshot,
@@ -196,7 +210,7 @@ mod spike {
                     cmdline: args.cmdline.clone(),
                     memory_size: args.memory_mib << 20,
                     cpus: args.cpus,
-                    virtio_slots: 0,
+                    virtio_slots: u32::from(args.disk.is_some()),
                 };
                 let prepared = boot::prepare(&mut backend, &config).map_err(err)?;
                 (prepared.memory, Some(prepared.layout), None)
@@ -230,7 +244,13 @@ mod spike {
             }),
         };
         let (tx, rx) = mpsc::channel();
-        let machine = Machine::new(&mut console, Some(rx), cpus).with_stop_flag(stop);
+        let mut machine = Machine::new(&mut console, Some(rx), cpus).with_stop_flag(stop);
+        if let Some(path) = &args.disk {
+            let block = Block::open(path, false, "cave-spike")
+                .map_err(|e| format!("could not open {}: {e}", path.display()))?;
+            machine.add_virtio(MmioTransport::new(Box::new(block), memory.clone()));
+        }
+        let machine = machine;
         if let Some(state) = &saved {
             machine.devices().uart.set_state(&state.uart);
             let power: Vec<_> = state.vcpus.iter().map(|v| v.power).collect();
