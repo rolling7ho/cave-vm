@@ -12,7 +12,7 @@ use std::thread;
 use std::time::Duration;
 
 use cave_vm_agent::{Config, serve};
-use cave_vm_proto::agent::{Exec, Message, Signal, Stream};
+use cave_vm_proto::agent::{Exec, Message, PtyOpen, Signal, Stream};
 use cave_vm_proto::{Data, ErrorCode, Hello, VERSIONS, read_frame, write_frame};
 use sha2::{Digest, Sha256};
 
@@ -453,4 +453,138 @@ fn protocol_errors_are_reported() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+/// Reads `pty_data` until the output contains `want`, then returns it all.
+fn pty_until(c: &mut UnixStream, want: &str) -> String {
+    let mut seen = Vec::new();
+    while !String::from_utf8_lossy(&seen).contains(want) {
+        match recv(c) {
+            Message::PtyData { data } => seen.extend(data.0),
+            other => panic!(
+                "unexpected {other:?} after {:?}",
+                String::from_utf8_lossy(&seen)
+            ),
+        }
+    }
+    String::from_utf8_lossy(&seen).into_owned()
+}
+
+fn pty_open(argv: &[&str]) -> PtyOpen {
+    PtyOpen {
+        argv: Some(argv.iter().map(|s| s.to_string()).collect()),
+        cwd: None,
+        env: Default::default(),
+        term: None,
+        cols: 80,
+        rows: 24,
+    }
+}
+
+#[test]
+fn pty_runs_an_interactive_shell_with_a_terminal() {
+    let dir = Dir::new("pty");
+    let mut c = connect(&dir);
+    send(&mut c, Message::PtyOpen(pty_open(&["/bin/sh"])));
+    let line = "test -t 0 && echo tty-$TERM; stty size; exit 4\n";
+    send(
+        &mut c,
+        Message::PtyData {
+            data: Data(line.as_bytes().to_vec()),
+        },
+    );
+    let seen = pty_until(&mut c, "24 80");
+    assert!(seen.contains("tty-xterm-256color"), "{seen}");
+    loop {
+        match recv(&mut c) {
+            Message::PtyData { .. } => {}
+            Message::Exit { code, signal } => {
+                assert_eq!((code, signal), (Some(4), None));
+                break;
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+#[test]
+fn pty_resize_reaches_the_program() {
+    let dir = Dir::new("ptyresize");
+    let mut c = connect(&dir);
+    send(&mut c, Message::PtyOpen(pty_open(&["/bin/sh"])));
+    send(
+        &mut c,
+        Message::PtyResize {
+            cols: 132,
+            rows: 50,
+        },
+    );
+    send(
+        &mut c,
+        Message::PtyData {
+            data: Data(b"stty size\n".to_vec()),
+        },
+    );
+    pty_until(&mut c, "50 132");
+}
+
+#[test]
+fn pty_signal_and_hangup_end_the_session() {
+    let dir = Dir::new("ptysignal");
+    let mut c = connect(&dir);
+    send(&mut c, Message::PtyOpen(pty_open(&["/bin/sleep", "30"])));
+    thread::sleep(Duration::from_millis(100));
+    send(
+        &mut c,
+        Message::Signal {
+            signal: Signal::Term,
+        },
+    );
+    loop {
+        match recv(&mut c) {
+            Message::PtyData { .. } => {}
+            Message::Exit { code, signal } => {
+                assert_eq!((code, signal.as_deref()), (None, Some("TERM")));
+                break;
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // A dropped connection kills everything started in the session.
+    let marker = dir.0.join("survived");
+    let mut c = connect(&dir);
+    send(&mut c, Message::PtyOpen(pty_open(&["/bin/sh"])));
+    let line = format!("(sleep 1; touch {}) & echo started\n", marker.display());
+    send(
+        &mut c,
+        Message::PtyData {
+            data: Data(line.into_bytes()),
+        },
+    );
+    pty_until(&mut c, "started\r\n");
+    drop(c);
+    thread::sleep(Duration::from_millis(1500));
+    assert!(!marker.exists(), "the background job was killed");
+}
+
+#[test]
+fn pty_with_a_missing_program_exits_127() {
+    let dir = Dir::new("ptymissing");
+    let mut c = connect(&dir);
+    send(&mut c, Message::PtyOpen(pty_open(&["no-such-shell-cave"])));
+    assert!(matches!(
+        recv(&mut c),
+        Message::Output {
+            stream: Stream::Stderr,
+            ..
+        }
+    ));
+    assert_eq!(
+        recv(&mut c),
+        Message::Exit {
+            code: Some(127),
+            signal: None
+        }
+    );
 }

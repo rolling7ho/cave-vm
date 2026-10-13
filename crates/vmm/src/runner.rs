@@ -277,6 +277,19 @@ impl<W: Write> Machine<W> {
     }
 
     fn register_kick(&self, index: u32, kick: Kick) {
+        if index == 0 {
+            // Devices raise interrupts from their own threads; kicking vCPU 0
+            // makes its loop raise the line even while the guest sleeps in
+            // WFI, which the hypervisor handles without an exit.
+            let shared: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::from(kick);
+            let devices = self.devices.lock().unwrap_or_else(|e| e.into_inner());
+            for transport in &devices.virtio {
+                transport.interrupt().set_kick(shared.clone());
+            }
+            drop(devices);
+            self.cpu_table().kicks[0] = Some(Box::new(move || shared()));
+            return;
+        }
         self.cpu_table().kicks[index as usize] = Some(kick);
     }
 
