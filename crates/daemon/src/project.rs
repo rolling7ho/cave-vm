@@ -263,6 +263,7 @@ impl VmSource for ProjectSource {
                 ttl_seconds: settings.ttl.map(|t| t.as_secs()),
                 widened,
             },
+            idle_suspend: settings.idle_suspend,
         })
     }
 

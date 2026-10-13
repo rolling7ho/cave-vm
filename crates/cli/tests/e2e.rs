@@ -459,6 +459,29 @@ fn stop_suspends_and_the_next_command_resumes() {
     );
     rig.exec(&["sh", "-c", &format!("! kill -0 {pid} 2>/dev/null")], 0);
 
+    // An unused VM suspends itself after `idle_suspend`.
+    let toml = rig.project().join("cave.toml");
+    let text = fs::read_to_string(&toml).unwrap();
+    fs::write(
+        &toml,
+        text.replacen("[vm]\n", "[vm]\nidle_suspend = \"1s\"\n", 1),
+    )
+    .unwrap();
+    assert!(rig.cave(&["stop"]).status.success());
+    assert!(rig.cave(&["run", "--net", "off"]).status.success());
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let ls = String::from_utf8_lossy(&rig.cave(&["ls"]).stdout).into_owned();
+        if ls
+            .lines()
+            .any(|l| l.starts_with("proj") && l.contains("suspended"))
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "not suspended: {ls}");
+        thread::sleep(Duration::from_millis(500));
+    }
+
     eprintln!("cave stop: {suspended:?}; resumed and ran a command: {resumed:?}");
 }
 

@@ -5,6 +5,11 @@
 //! when the process exits, whether asked to or not, so a crashed VMM leaves
 //! the VM stopped and the next `start` launches a new one.
 //!
+//! A running VM is in use while it has an agent connection open (a `cave`
+//! command, an SDK or MCP call, or a forwarded port's connection). One
+//! left unused for its `idle_suspend` time is suspended
+//! ([`Vms::suspend_idle`]).
+//!
 //! Snapshots and restores of a project's VM are in [`snapshots`].
 
 use std::collections::HashMap;
@@ -48,6 +53,81 @@ mod snapshots;
 pub struct Prepared {
     pub config: VmmConfig,
     pub policy: Policy,
+    /// Suspend the VM after this long unused; `None` never does.
+    pub idle_suspend: Option<Duration>,
+}
+
+/// A monotonic clock, faked in tests.
+pub trait Clock: Send + Sync {
+    /// The time since some fixed point.
+    fn now(&self) -> Duration;
+}
+
+/// The real clock.
+pub struct SystemClock(Instant);
+
+impl Default for SystemClock {
+    fn default() -> SystemClock {
+        SystemClock(Instant::now())
+    }
+}
+
+impl Clock for SystemClock {
+    fn now(&self) -> Duration {
+        self.0.elapsed()
+    }
+}
+
+/// How much a running VM is used.
+struct Activity {
+    clock: Arc<dyn Clock>,
+    usage: Mutex<Usage>,
+}
+
+struct Usage {
+    open: usize,
+    /// When it was last used.
+    last: Duration,
+}
+
+impl Activity {
+    fn new(clock: Arc<dyn Clock>) -> Activity {
+        let last = clock.now();
+        Activity {
+            clock,
+            usage: Mutex::new(Usage { open: 0, last }),
+        }
+    }
+
+    fn touch(&self) {
+        self.usage.lock().expect("usage lock").last = self.clock.now();
+    }
+
+    fn idle_for(&self) -> Option<Duration> {
+        let usage = self.usage.lock().expect("usage lock");
+        (usage.open == 0).then(|| self.clock.now().saturating_sub(usage.last))
+    }
+}
+
+/// Keeps a VM counted as in use until it is dropped.
+pub struct InUse(Arc<Activity>);
+
+impl InUse {
+    fn new(activity: &Arc<Activity>) -> InUse {
+        let mut usage = activity.usage.lock().expect("usage lock");
+        usage.open += 1;
+        usage.last = activity.clock.now();
+        drop(usage);
+        InUse(Arc::clone(activity))
+    }
+}
+
+impl Drop for InUse {
+    fn drop(&mut self) {
+        let mut usage = self.0.usage.lock().expect("usage lock");
+        usage.open -= 1;
+        usage.last = self.0.clock.now();
+    }
 }
 
 /// Prepares VMs to boot.
@@ -81,6 +161,8 @@ struct Running {
     stop_requested: Arc<AtomicBool>,
     /// Stop listening when the VM stops.
     forwards: Vec<Forward>,
+    idle_suspend: Option<Duration>,
+    activity: Arc<Activity>,
 }
 
 struct Vm {
@@ -113,6 +195,7 @@ pub struct Vms {
     launcher: Arc<dyn Launcher>,
     source: Arc<dyn VmSource>,
     vms: Mutex<HashMap<PathBuf, Arc<Vm>>>,
+    clock: Arc<dyn Clock>,
 }
 
 fn error(code: ErrorCode, message: impl Into<String>) -> ErrorMessage {
@@ -141,7 +224,15 @@ impl Vms {
             launcher,
             source,
             vms: Mutex::new(HashMap::new()),
+            clock: Arc::new(SystemClock::default()),
         }
+    }
+
+    /// Uses `clock` for idle times, in tests.
+    #[must_use]
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Vms {
+        self.clock = clock;
+        self
     }
 
     fn vm(&self, id: &VmId) -> Result<Arc<Vm>, ErrorMessage> {
@@ -175,6 +266,7 @@ impl Vms {
         let vm = self.vm(id)?;
         let mut slot = vm.idle_slot();
         if let Slot::Running(running) = &mut *slot {
+            running.activity.touch();
             // Forwarding goes through the agent, so `-p` on a running VM
             // adds forwards without a restart.
             add_forwards(&vm, running, ports)?;
@@ -248,12 +340,69 @@ impl Vms {
             policy: prepared.policy,
             stop_requested,
             forwards: Vec::new(),
+            idle_suspend: prepared.idle_suspend,
+            activity: Arc::new(Activity::new(Arc::clone(&self.clock))),
         })
     }
 
-    /// A new connection to a running VM's guest agent.
-    pub fn agent_connection(&self, id: &VmId) -> Result<UnixStream, ErrorMessage> {
+    /// A new connection to a running VM's guest agent. The VM counts as
+    /// in use until the [`InUse`] is dropped.
+    pub fn agent_connection(&self, id: &VmId) -> Result<(UnixStream, InUse), ErrorMessage> {
         agent_connection(&*self.vm(id)?)
+    }
+
+    /// Suspends every running VM left unused for its `idle_suspend` time,
+    /// and returns them. A VM that cannot be suspended keeps running and
+    /// is tried again on the next call.
+    pub fn suspend_idle(&self) -> Vec<VmId> {
+        let vms: Vec<Arc<Vm>> = self
+            .vms
+            .lock()
+            .expect("vms lock")
+            .values()
+            .cloned()
+            .collect();
+        let idle: Vec<VmId> = vms
+            .iter()
+            .filter(|vm| match &*vm.slot.lock().expect("vm lock") {
+                Slot::Running(running) => running.idle_suspend.is_some_and(|limit| {
+                    running
+                        .activity
+                        .idle_for()
+                        .is_some_and(|idle| idle >= limit)
+                }),
+                Slot::Stopped | Slot::Busy => false,
+            })
+            .map(|vm| vm.id.clone())
+            .collect();
+        idle.into_iter()
+            .filter(|id| match self.suspend(id) {
+                Ok(suspended) => suspended,
+                Err(e) => {
+                    eprintln!(
+                        "cave-daemon: {} was idle but could not be suspended: {}",
+                        display_name(id),
+                        e.message
+                    );
+                    false
+                }
+            })
+            .collect()
+    }
+
+    /// Calls [`Vms::suspend_idle`] every `interval` on its own thread for
+    /// as long as the daemon runs.
+    pub fn watch_idle(self: &Arc<Self>, interval: Duration) {
+        let vms = Arc::downgrade(self);
+        thread::spawn(move || {
+            loop {
+                thread::sleep(interval);
+                let Some(vms) = vms.upgrade() else {
+                    return;
+                };
+                vms.suspend_idle();
+            }
+        });
     }
 
     /// Stops a VM. Stopping a stopped VM is not an error.
@@ -502,7 +651,7 @@ fn remove_state(state: &Path) -> Result<(), ErrorMessage> {
     }
 }
 
-fn agent_connection(vm: &Vm) -> Result<UnixStream, ErrorMessage> {
+fn agent_connection(vm: &Vm) -> Result<(UnixStream, InUse), ErrorMessage> {
     let mut slot = vm.idle_slot();
     let Slot::Running(running) = &mut *slot else {
         return Err(error(
@@ -511,13 +660,14 @@ fn agent_connection(vm: &Vm) -> Result<UnixStream, ErrorMessage> {
         )
         .with_fix("start it with `cave run`"));
     };
-    running.link.agent_connect().map_err(|e| match e {
+    let stream = running.link.agent_connect().map_err(|e| match e {
         LinkError::Vmm(e) => e,
         e => error(
             ErrorCode::Internal,
             format!("cannot reach the VMM of {}: {e}", display_name(&vm.id)),
         ),
-    })
+    })?;
+    Ok((stream, InUse::new(&running.activity)))
 }
 
 fn bind_all(ports: &[PortMap]) -> Result<Vec<Bound>, ErrorMessage> {
@@ -529,7 +679,8 @@ fn bind_all(ports: &[PortMap]) -> Result<Vec<Bound>, ErrorMessage> {
 fn serve_all(vm: &Arc<Vm>, bound: Vec<Bound>) -> Vec<Forward> {
     let weak = Arc::downgrade(vm);
     let connect: forward::Connect = Arc::new(move || match weak.upgrade() {
-        Some(vm) => agent_connection(&vm),
+        Some(vm) => agent_connection(&vm)
+            .map(|(stream, in_use)| (stream, Box::new(in_use) as forward::Held)),
         None => Err(error(ErrorCode::NotRunning, "the VM is gone")),
     });
     bound
