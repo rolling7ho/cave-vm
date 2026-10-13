@@ -623,7 +623,28 @@ impl Vms {
             entries.extend(snapshots::list(&project));
         }
         entries.sort_by(|a, b| (&a.project, &a.name).cmp(&(&b.project, &b.name)));
+        self.set_sizes(&mut entries);
         entries
+    }
+
+    /// Fills in each entry's size, counting blocks shared through APFS
+    /// clones once, in the first row that uses them [A9].
+    fn set_sizes(&self, entries: &mut [ListEntry]) {
+        let groups: Vec<Vec<PathBuf>> = entries
+            .iter()
+            .map(|e| {
+                let state = Path::new(&e.project).join(STATE_DIR);
+                match e.kind {
+                    EntryKind::Vm => crate::gc::vm_paths(&state),
+                    EntryKind::Fork => vec![crate::snapshot::fork_dir(&state, &e.name)],
+                    EntryKind::Snapshot => vec![crate::snapshot::dir(&state, &e.name)],
+                }
+            })
+            .collect();
+        let sizes = crate::gc::sizes(&self.home.images(), &groups);
+        for (entry, size) in entries.iter_mut().zip(sizes) {
+            entry.size = size;
+        }
     }
 
     /// The forks of `project` the daemon knows.

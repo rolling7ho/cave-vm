@@ -204,3 +204,26 @@ fn shared_blocks_are_counted_once_and_only_safe_things_are_offered() {
     assert!(again.reclaimable.is_empty(), "{:?}", again.reclaimable);
     fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn list_sizes_count_shared_blocks_in_the_first_row() {
+    let root = temp("sizes");
+    let (images, project) = setup(&root);
+    let state = project.join(STATE_DIR);
+    let groups = vec![
+        vm_paths(&state),
+        vec![snapshot::dir(&state, "named")],
+        vec![snapshot::dir(&state, "auto-1")],
+        vec![snapshot::fork_dir(&state, "fork-1")],
+    ];
+    let sizes = sizes(&images, &groups);
+    let kib = |b: u64| b / 1024;
+    // The disk's own MiB; the named snapshot shares all of it; the others
+    // each add their own MiB. Manifests add a few hundred bytes.
+    assert_eq!(
+        sizes.iter().map(|&s| kib(s)).collect::<Vec<_>>(),
+        [1024, 0, 1024, 1024],
+        "{sizes:?}"
+    );
+    fs::remove_dir_all(&root).unwrap();
+}

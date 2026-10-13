@@ -557,7 +557,7 @@ pub(super) fn stopped_forks(project: &str, running: &[String]) -> Vec<ListEntry>
                     VmState::Stopped
                 }),
                 auto: false,
-                size: snapshot::size(&dir),
+                size: 0,
                 created_unix,
                 name,
             }
@@ -580,7 +580,7 @@ pub(super) fn list(project: &str) -> Vec<ListEntry> {
                 kind: EntryKind::Snapshot,
                 state: None,
                 auto: manifest.as_ref().is_some_and(|m| m.auto),
-                size: snapshot::size(&dir),
+                size: 0,
                 created_unix: manifest.map_or(0, |m| m.created_unix),
                 name,
             }

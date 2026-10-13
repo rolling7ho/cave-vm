@@ -259,7 +259,8 @@ pub fn ipv4_addresses() -> io::Result<Vec<Ipv4Addr>> {
 }
 
 /// Where a file's data sits on its volume: one `(offset, length)` per
-/// contiguous run, in file order. Holes have none. Two files sharing APFS
+/// contiguous run, in file order. Holes have none, and neither does data
+/// not yet flushed. Two files sharing APFS
 /// clone blocks report the same runs for them, so counting runs once
 /// counts shared blocks once.
 pub fn physical_extents(file: &File) -> io::Result<Vec<(u64, u64)>> {
@@ -300,12 +301,16 @@ pub fn physical_extents(file: &File) -> io::Result<Vec<(u64, u64)>> {
             if length <= 0 {
                 break;
             }
-            let (device, length) = (device as u64, length as u64);
+            at = at.saturating_add(length);
+            // Data written but not flushed yet has no place on the volume
+            // (a negative offset), so it takes no blocks yet.
+            let (Ok(device), Ok(length)) = (u64::try_from(device), u64::try_from(length)) else {
+                continue;
+            };
             match runs.last_mut() {
-                Some((start, len)) if *start + *len == device => *len += length,
+                Some((start, len)) if start.checked_add(*len) == Some(device) => *len += length,
                 _ => runs.push((device, length)),
             }
-            at += length as i64;
         }
         offset = hole;
     }
@@ -466,6 +471,12 @@ mod tests {
             .map(|r| r.1)
             .sum();
         assert_eq!(shared, 3 << 20, "{before:?} {after:?}");
+        // Data not flushed yet has no place, and is skipped.
+        let unflushed = dir.join("unflushed");
+        let mut file = File::create(&unflushed).unwrap();
+        file.write_all(&[3u8; 1 << 20]).unwrap();
+        let runs = physical_extents(&file).unwrap();
+        assert!(runs.iter().map(|r| r.1).sum::<u64>() <= 1 << 20, "{runs:?}");
         // A sparse file has no runs for its holes.
         let sparse = dir.join("sparse");
         let file = File::create(&sparse).unwrap();

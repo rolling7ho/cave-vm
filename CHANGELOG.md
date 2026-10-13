@@ -6,6 +6,8 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Fixed
 
+- `cave ls` sizes count blocks shared through APFS clones once, in the first row that uses them, and leave out blocks a disk shares with its base image, as `docs/cli.md` says. Before, a snapshot counted the whole disk it was cloned from.
+- `cave gc` failed with a lost connection while a VM was running: data the VM had written but not flushed has no place on the volume yet, and its negative offset overflowed. It is now skipped.
 - A fork made from a snapshot sometimes never answered and fell back to a disk boot after 50 seconds. The daemon cloned the snapshot's memory file before the VMM's last writes to it reached the disk, and an APFS clone takes only what is on disk. The daemon now flushes each file before it clones it.
 - A restore drives every interrupt line to match its device before the guest runs. A vCPU that acknowledged an interrupt could pause for the snapshot before lowering the line, so the line was restored high with nothing pending.
 - After a restore, `cave-vmm` tries the guest agent again after 100 ms rather than 2 s when a connection gets no answer, doubling the wait each time. The first connection is sometimes lost to the guest's vsock reset, which made a restore or fork take 2 s longer.
