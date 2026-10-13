@@ -110,8 +110,12 @@ pub fn stop(fork: Option<String>) -> Result<()> {
         println!("{name} is not running");
         return Ok(());
     }
+    let started = std::time::Instant::now();
     Connection::call(&Request::Stop { vm })?;
-    println!("Stopped {name}");
+    println!(
+        "Suspended {name} ({})",
+        crate::policy::seconds(started.elapsed())
+    );
     Ok(())
 }
 

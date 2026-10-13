@@ -19,6 +19,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- `cave stop` suspends the VM (D20): the daemon saves it, memory and all, to `.cave/suspended/` and stops it, `cave ls` shows it as suspended, and the next start resumes it with its processes and deletes the suspension. A start that turns the network off or on boots from the disk instead. A VM that cannot be saved keeps running. Snapshots and forks of a suspended VM take its memory (P4.7a).
 - A gate 3 end-to-end test (`crates/cli/tests/e2e.rs`, `#[ignore]`d) runs the real `cave`, daemon and VMM against a locally built image: init, run and the image pin, exec and exit codes, every denied LAN range and the Mac refused at once, `cave shell`, a forwarded port, `cave cp` both ways, recovery from a killed VMM, and `cave rm`. It uses no network.
 - `cave fork [name] [--from <snapshot>]`. An ignored end-to-end test forks a real VM both ways and checks that parent and forks run on their own, each with the process from before, and prints how long a fork takes (P4.6b).
 - The daemon's `fork` request: a fork of a project's VM in `.cave/forks/<name>`, named `fork-1`, `fork-2` and so on by default, made from a fresh snapshot of the VM or from a named snapshot through APFS clones, and started from that memory. Requests with `fork` set act on it, `list` shows forks whether or not the daemon has run them, and `remove` with a fork's name stops and deletes it. Removing the project's VM stops its forks first (P4.6a).

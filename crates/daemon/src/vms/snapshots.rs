@@ -25,12 +25,17 @@ use crate::image::ImageRef;
 use crate::project::STATE_DIR;
 use crate::snapshot::{self, Manifest};
 
+/// The folder a VM is suspended to; see [`suspend_dir`].
+const SUSPEND_DIR: &str = "suspended";
+
 /// How long a VMM may take to save a snapshot. It writes out guest memory,
 /// so this grows with the VM's memory.
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Where [`Vms::take`] saves.
 enum Dest<'a> {
+    /// The VM's suspension, which its next start resumes.
+    Suspend,
     /// A snapshot by this name, or the default one.
     Snapshot(Option<&'a str>),
     /// The folder of the new fork by this name.
@@ -104,10 +109,24 @@ impl Vms {
         auto: bool,
         running: Option<&mut Running>,
     ) -> Result<(String, u64), ErrorMessage> {
+        // A suspended VM's snapshot is its suspension, memory and all.
+        let suspended = match (&running, &dest) {
+            (Some(_), _) | (None, Dest::Suspend) => None,
+            (None, _) => {
+                let dir = suspend_dir(&vm.id);
+                snapshot::read_manifest(&dir).ok().map(|m| (dir, m))
+            }
+        };
         let policy = match &running {
             Some(running) => running.policy.clone(),
+            None if matches!(dest, Dest::Suspend) => {
+                return Err(error(
+                    ErrorCode::NotRunning,
+                    format!("{} is not running", display_name(&vm.id)),
+                ));
+            }
             None => {
-                if !disk::path(state).is_file() {
+                if suspended.is_none() && !disk::path(state).is_file() {
                     return Err(error(
                         ErrorCode::NotFound,
                         format!("{} has no VM to snapshot yet", display_name(&vm.id)),
@@ -120,6 +139,7 @@ impl Vms {
         let created_unix = now_unix();
         let (name, dir) = match dest {
             Dest::Fork(name) => (name.to_string(), snapshot::fork_dir(state, name)),
+            Dest::Suspend => (display_name(&vm.id), suspend_dir(&vm.id)),
             Dest::Snapshot(Some(name)) if snapshot::taken(state, name) => {
                 return Err(already_exists(name));
             }
@@ -145,9 +165,9 @@ impl Vms {
         // An unfinished snapshot of the same name, left by a crash, goes.
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).map_err(|e| failed("create the snapshot folder", &e))?;
-        let has_memory = running.is_some();
-        let saved = match running {
-            Some(running) => running
+        let has_memory = running.is_some() || suspended.as_ref().is_some_and(|(_, m)| m.has_memory);
+        let saved = match (running, &suspended) {
+            (Some(running), _) => running
                 .link
                 .request(
                     &ToVmm::Snapshot {
@@ -160,7 +180,17 @@ impl Vms {
                     FromVmm::Ok => Ok(()),
                     other => Err(failed("snapshot the VM", &format!("{other:?}"))),
                 }),
-            None => clone_flushed(&disk::path(state), &dir.join(snapshot::DISK_FILE))
+            (None, Some((from, manifest))) => {
+                let mut files = vec![snapshot::DISK_FILE];
+                if manifest.has_memory {
+                    files.extend([snapshot::MEMORY_FILE, snapshot::STATE_FILE]);
+                }
+                files
+                    .into_iter()
+                    .try_for_each(|file| clone_flushed(&from.join(file), &dir.join(file)))
+                    .map_err(|e| failed("copy the suspended VM", &e))
+            }
+            (None, None) => clone_flushed(&disk::path(state), &dir.join(snapshot::DISK_FILE))
                 .map_err(|e| failed("clone the disk", &e)),
         };
         let manifest = Manifest {
@@ -170,9 +200,11 @@ impl Vms {
             cave_version: env!("CARGO_PKG_VERSION").to_string(),
             host_os: snapshot::host_os_build().unwrap_or_else(|_| "unknown".into()),
             image: policy.image,
-            cpus: policy.cpus,
-            memory_bytes: policy.memory_bytes,
-            net: policy.net,
+            cpus: suspended.as_ref().map_or(policy.cpus, |(_, m)| m.cpus),
+            memory_bytes: suspended
+                .as_ref()
+                .map_or(policy.memory_bytes, |(_, m)| m.memory_bytes),
+            net: suspended.as_ref().map_or(policy.net, |(_, m)| m.net),
             credentials: Vec::new(),
             has_memory,
             auto,
@@ -204,6 +236,8 @@ impl Vms {
         self.stop(id)?;
         let vm = self.vm(id)?;
         let slot = vm.idle_slot();
+        // The VM is rolled back past its suspension, saved above if any.
+        let _ = fs::remove_dir_all(suspend_dir(id));
         if !matches!(*slot, Slot::Stopped) {
             return Err(error(
                 ErrorCode::Busy,
@@ -292,6 +326,60 @@ impl Vms {
         };
         let prepared = self.source.prepare(&vm.id, None, ports)?;
         Ok((self.launch(vm, prepared)?, Some(why)))
+    }
+
+    /// Suspends a running VM (D20): saves it, memory and all, where its
+    /// next start resumes it, and stops it. Returns false if it was not
+    /// running.
+    pub fn suspend(&self, id: &VmId) -> Result<bool, ErrorMessage> {
+        let vm = self.vm(id)?;
+        if !matches!(*vm.idle_slot(), Slot::Running(_)) {
+            return Ok(false);
+        }
+        let state = Path::new(&id.project).join(STATE_DIR);
+        // A VM that cannot be saved keeps running rather than lose its
+        // processes.
+        self.take(id, &state, Dest::Suspend, false).map_err(|e| {
+            let message = format!(
+                "could not suspend {}: {}; it is still running",
+                display_name(id),
+                e.message
+            );
+            ErrorMessage { message, ..e }
+        })?;
+        self.stop(id)?;
+        Ok(true)
+    }
+
+    /// Starts a stopped VM: resumes its suspension if it has one, or boots
+    /// it. A suspension is used once. A network mode that needs another
+    /// set of devices (`off` against `nat` or `lan`) cannot resume, so
+    /// the VM boots from its disk.
+    pub(super) fn boot(
+        &self,
+        vm: &std::sync::Arc<Vm>,
+        net: Option<cave_vm_proto::daemon::NetMode>,
+        ports: &[cave_vm_proto::daemon::PortMap],
+    ) -> Result<Running, ErrorMessage> {
+        use cave_vm_proto::daemon::NetMode;
+        let dir = suspend_dir(&vm.id);
+        let Ok(mut manifest) = snapshot::read_manifest(&dir) else {
+            let prepared = self.source.prepare(&vm.id, net, ports)?;
+            return self.launch(vm, prepared);
+        };
+        let booted = match net {
+            Some(net) if (net == NetMode::Off) != (manifest.net == NetMode::Off) => self
+                .source
+                .prepare(&vm.id, Some(net), ports)
+                .and_then(|prepared| self.launch(vm, prepared)),
+            _ => {
+                manifest.net = net.unwrap_or(manifest.net);
+                self.boot_from(vm, &dir, &manifest, ports, None)
+                    .map(|(running, _)| running)
+            }
+        }?;
+        let _ = fs::remove_dir_all(&dir);
+        Ok(booted)
     }
 
     /// Makes fork `name` of a project's VM, or `fork-1`, `fork-2` and so on,
@@ -438,10 +526,18 @@ pub(super) fn stopped_forks(project: &str, running: &[String]) -> Vec<ListEntry>
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map_or(0, |d| d.as_secs());
+            let fork = VmId {
+                project: project.to_string(),
+                fork: Some(name.clone()),
+            };
             ListEntry {
                 project: project.to_string(),
                 kind: EntryKind::Fork,
-                state: Some(VmState::Stopped),
+                state: Some(if is_suspended(&fork) {
+                    VmState::Suspended
+                } else {
+                    VmState::Stopped
+                }),
                 auto: false,
                 size: snapshot::size(&dir),
                 created_unix,
@@ -515,6 +611,21 @@ fn pick(state: &Path, name: Option<&str>) -> Result<(String, Manifest), ErrorMes
         // Only damaged ones: say what is wrong with one.
         None => Err(manifest(&names[0]).expect_err("damaged")),
     }
+}
+
+/// Where a VM is suspended to: `.cave/suspended/` for the project's VM, and
+/// the same name in a fork's folder for a fork.
+pub(super) fn suspend_dir(id: &VmId) -> PathBuf {
+    let state = Path::new(&id.project).join(STATE_DIR);
+    match &id.fork {
+        None => state.join(SUSPEND_DIR),
+        Some(name) => snapshot::fork_dir(&state, name).join(SUSPEND_DIR),
+    }
+}
+
+/// Whether a VM has a suspension to resume.
+pub(super) fn is_suspended(id: &VmId) -> bool {
+    suspend_dir(id).join(snapshot::MANIFEST_FILE).is_file()
 }
 
 /// A project's `.cave/`, for a request on its own VM.

@@ -19,7 +19,13 @@ The manifest is written to a temporary file and renamed into place, so a crash l
 
 ## Forks
 
-A fork lives in `.cave/forks/<name>/` (D18). It is made as a snapshot folder: a fresh snapshot of the VM written straight there, or APFS clones of the files of the snapshot given with `--from`, with the manifest renamed to the fork. The fork boots from that memory with `disk.img` as its own disk. Once it has booted, `memory` and `state` are deleted and the manifest says `has_memory: false`, since the disk moves on from them; a fork that is stopped and started again boots from its disk.
+A fork lives in `.cave/forks/<name>/` (D18). It is made as a snapshot folder: a fresh snapshot of the VM written straight there, or APFS clones of the files of the snapshot given with `--from`, with the manifest renamed to the fork. The fork boots from that memory with `disk.img` as its own disk. Once it has booted, `memory` and `state` are deleted and the manifest says `has_memory: false`, since the disk moves on from them; a fork that is stopped is suspended like any VM (below).
+
+## Suspensions
+
+`cave stop` suspends a VM (D20): the daemon saves it as a snapshot folder named `suspended`, in `.cave/suspended/` for the project's VM and `.cave/forks/<name>/suspended/` for a fork, then stops the VMM. `cave ls` shows the VM as suspended. The next start resumes from that folder with processes intact and deletes it, so a suspension is used once. It is not a snapshot: `cave restore` cannot name it, and a restore deletes it.
+
+A start that changes the network between `off` and `nat` or `lan` cannot resume, because the VM would need another set of devices, so it boots from the disk and the processes are lost. A snapshot of a suspended VM copies the suspension, memory included.
 
 ## Manifest
 

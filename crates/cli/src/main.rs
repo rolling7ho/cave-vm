@@ -117,7 +117,7 @@ enum Cmd {
         #[arg(long)]
         fork: Option<String>,
     },
-    /// Stop this project's VM now.
+    /// Suspend this project's VM now.
     Stop {
         #[arg(long)]
         fork: Option<String>,
