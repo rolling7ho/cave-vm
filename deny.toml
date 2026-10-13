@@ -16,6 +16,8 @@ allow = [
     "BSD-3-Clause",
     "ISC",
     "Unicode-3.0",
+    # smoltcp and managed (NAT stack, D23): public-domain equivalent.
+    "0BSD",
 ]
 confidence-threshold = 0.9
 unused-allowed-license = "allow"

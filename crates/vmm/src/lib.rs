@@ -13,6 +13,7 @@ pub mod fdt;
 pub mod kernel;
 pub mod layout;
 pub mod memory;
+pub mod nat;
 pub mod psci;
 #[cfg(target_os = "macos")]
 pub mod runner;
