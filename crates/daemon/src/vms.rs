@@ -36,6 +36,7 @@ const WATCH_INTERVAL: Duration = Duration::from_millis(20);
 
 /// What a VM needs to boot, from its project: read from `cave.toml` and
 /// `.cave/` by the real source, and made up by tests.
+#[derive(Debug)]
 pub struct Prepared {
     pub config: VmmConfig,
     pub policy: Policy,

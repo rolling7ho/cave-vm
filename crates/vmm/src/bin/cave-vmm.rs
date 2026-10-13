@@ -67,7 +67,7 @@ mod vmm {
             Err(e) => {
                 note(format!(
                     "standard input is not the daemon's socket ({e}); \
-                     cave-vmm is started by cave-vm-daemon, not by hand"
+                     cave-vmm is started by cave-daemon, not by hand"
                 ));
                 return ExitCode::FAILURE;
             }
