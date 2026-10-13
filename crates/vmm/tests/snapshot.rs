@@ -79,3 +79,78 @@ fn memory_round_trips_through_a_sparse_file() {
     assert_eq!(buf[0], 0);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn a_running_machine_is_snapshotted_with_its_disk_and_runs_on() {
+    use cave_vm_vmm::backend::mock::{Event, Step};
+    use cave_vm_vmm::runner::{self, Machine, Stop};
+
+    let dir = std::env::temp_dir().join(format!("cave-snapshot-take-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let disk = dir.join("disk.raw");
+    std::fs::write(&disk, b"disk contents").unwrap();
+    let snap = dir.join("snap");
+
+    let mut mock = MockBackend::new();
+    mock.create_irqchip().unwrap();
+    let mock = mock;
+    mock.set_now(5_000);
+    mock.script(0, [Step::until_kicked(), Step::until_kicked()]);
+    let size = 0x10_0000;
+    let memory = GuestMemory::new(vec![Region::anonymous(RAM_BASE, size).unwrap()]).unwrap();
+    memory.write(RAM_BASE + 0x100, b"guest").unwrap();
+    let machine = Machine::new(Vec::new(), None, 1);
+    let runs = || {
+        mock.events()
+            .iter()
+            .filter(|e| **e == Event::Run { vcpu: 0 })
+            .count()
+    };
+    std::thread::scope(|s| {
+        let vcpu = s.spawn(|| {
+            let mut vcpu = mock.create_vcpu(0).unwrap();
+            vcpu.set_reg(Reg::PC, 0x4000_0040).unwrap();
+            runner::run(&mock, &mut vcpu, &machine)
+        });
+        while runs() == 0 {
+            std::thread::yield_now();
+        }
+        snapshot::take(&snap, &machine, &mock, &memory, &disk).unwrap();
+        // It runs on after the snapshot.
+        while runs() < 2 {
+            std::thread::yield_now();
+        }
+        machine.request_stop();
+        assert_eq!(vcpu.join().unwrap().unwrap(), Stop::Canceled);
+    });
+
+    let state = snapshot::load_state(&snap).unwrap();
+    assert_eq!(state.memory_size, size);
+    assert_eq!(state.vcpus.len(), 1);
+    assert!(state.vcpus[0].regs.contains(&(Reg::PC, 0x4000_0040)));
+    assert_eq!(state.vcpus[0].guest_counter, 5_000);
+    let restored = snapshot::load_memory(&snap, size).unwrap();
+    let mut buf = [0u8; 5];
+    restored.read(RAM_BASE + 0x100, &mut buf).unwrap();
+    assert_eq!(&buf, b"guest");
+    assert_eq!(
+        std::fs::read(snap.join(snapshot::DISK_FILE)).unwrap(),
+        b"disk contents"
+    );
+
+    // A second snapshot into the same folder replaces the files, and a VM
+    // still mapping the old memory keeps its copy.
+    memory.write(RAM_BASE + 0x100, b"again").unwrap();
+    let paused = Machine::new(Vec::new(), None, 1);
+    paused.request_stop();
+    assert!(snapshot::take(&snap, &paused, &mock, &memory, &disk).is_err());
+    let state = snapshot::load_state(&snap).unwrap();
+    snapshot::save(&snap, &state, &memory).unwrap();
+    restored.read(RAM_BASE + 0x100, &mut buf).unwrap();
+    assert_eq!(&buf, b"guest");
+    let fresh = snapshot::load_memory(&snap, size).unwrap();
+    fresh.read(RAM_BASE + 0x100, &mut buf).unwrap();
+    assert_eq!(&buf, b"again");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

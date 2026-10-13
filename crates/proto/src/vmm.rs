@@ -23,6 +23,10 @@ pub struct VmmConfig {
     pub memory_bytes: u64,
     pub cpus: u32,
     pub net: NetMode,
+    /// A snapshot folder to restore instead of booting, an absolute path.
+    /// The disk must already be the snapshot's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore: Option<String>,
 }
 
 /// What the daemon sends.
@@ -35,6 +39,11 @@ pub enum ToVmm {
     },
     AgentConnect,
     Ping,
+    /// Pauses the VM, saves it into `dir` (an absolute path to a folder),
+    /// and lets it run on. Replied to with `ok`.
+    Snapshot {
+        dir: String,
+    },
     Stop,
     /// A `type` this build does not know; never returned by
     /// [`frame::decode`].
@@ -75,6 +84,14 @@ impl frame::Message for ToVmm {
             ToVmm::Boot { config } if config.cpus == 0 || config.memory_bytes == 0 => {
                 Err("\"cpus\" and \"memory_bytes\" must be more than zero".into())
             }
+            ToVmm::Boot { config }
+                if config.restore.as_ref().is_some_and(|d| !d.starts_with('/')) =>
+            {
+                Err("\"restore\" must be an absolute path".into())
+            }
+            ToVmm::Snapshot { dir } if !dir.starts_with('/') => {
+                Err("\"dir\" must be an absolute path".into())
+            }
             _ => Ok(()),
         }
     }
@@ -99,6 +116,7 @@ mod tests {
             memory_bytes: 2 << 30,
             cpus: 2,
             net: NetMode::Nat,
+            restore: None,
         }
     }
 
@@ -110,7 +128,31 @@ mod tests {
             value,
             json!({"type": "boot", "config": {"kernel": "/k/Image", "disk": "/p/.cave/disk.img", "memory_bytes": 2147483648u64, "cpus": 2, "net": "nat"}})
         );
-        for message in [boot, ToVmm::AgentConnect, ToVmm::Ping, ToVmm::Stop] {
+        let restore = ToVmm::Boot {
+            config: VmmConfig {
+                restore: Some("/p/.cave/snapshots/s".into()),
+                ..config()
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&restore).unwrap()["config"]["restore"],
+            "/p/.cave/snapshots/s"
+        );
+        let snapshot = ToVmm::Snapshot {
+            dir: "/p/.cave/snapshots/s".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&snapshot).unwrap(),
+            json!({"type": "snapshot", "dir": "/p/.cave/snapshots/s"})
+        );
+        for message in [
+            boot,
+            restore,
+            snapshot,
+            ToVmm::AgentConnect,
+            ToVmm::Ping,
+            ToVmm::Stop,
+        ] {
             let frame = encode(&message).unwrap();
             assert_eq!(decode::<ToVmm>(&frame[4..]).unwrap(), message);
         }
@@ -141,6 +183,18 @@ mod tests {
         let mut bad = config();
         bad.cpus = 0;
         let frame = encode(&ToVmm::Boot { config: bad }).unwrap();
+        assert!(matches!(
+            decode::<ToVmm>(&frame[4..]),
+            Err(FrameError::BadMessage { .. })
+        ));
+        let mut bad = config();
+        bad.restore = Some("snap".into());
+        let frame = encode(&ToVmm::Boot { config: bad }).unwrap();
+        assert!(matches!(
+            decode::<ToVmm>(&frame[4..]),
+            Err(FrameError::BadMessage { .. })
+        ));
+        let frame = encode(&ToVmm::Snapshot { dir: "snap".into() }).unwrap();
         assert!(matches!(
             decode::<ToVmm>(&frame[4..]),
             Err(FrameError::BadMessage { .. })
