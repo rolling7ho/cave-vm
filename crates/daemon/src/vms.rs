@@ -179,10 +179,13 @@ impl Vms {
         ports: &[PortMap],
     ) -> Result<Running, ErrorMessage> {
         let prepared = self.source.prepare(&vm.id, net, ports)?;
-        let Launched { child, control } = self.launcher.launch(&vm.dir).map_err(|e| {
-            error(ErrorCode::Internal, format!("cannot start the VMM: {e}"))
-                .with_fix("Run `cave doctor` to check the installation.")
-        })?;
+        let Launched { child, control } =
+            self.launcher
+                .launch(&vm.dir, &prepared.config)
+                .map_err(|e| {
+                    error(ErrorCode::Internal, format!("cannot start the VMM: {e}"))
+                        .with_fix("Run `cave doctor` to check the installation.")
+                })?;
         let pid = child.id();
         let child = Arc::new(Mutex::new(child));
         let stop_requested = Arc::new(AtomicBool::new(false));

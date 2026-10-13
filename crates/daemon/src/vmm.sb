@@ -1,0 +1,26 @@
+;; The VMM's sandbox profile (design, "Security": the VMM process can reach
+;; only .cave/ and the shared image cache). The daemon starts each VMM under
+;; it with sandbox-exec, filling in the parameters.
+(version 1)
+(deny default)
+;; What any process needs to start and run: system libraries, dyld, basic
+;; sysctls. Hypervisor.framework needs nothing more.
+(import "bsd.sb")
+
+;; The VMM executable itself.
+(allow process-exec file-read* (literal (param "VMM")))
+
+;; The project's .cave/ folder: its disk, and later its snapshots.
+(allow file-read* file-write* (subpath (param "PROJECT_STATE")))
+
+;; The shared image cache, and the kernel, which normally lives there.
+(allow file-read* (subpath (param "IMAGE_CACHE")))
+(allow file-read* (literal (param "KERNEL")))
+
+;; The Mac's DNS servers, for the gateway's DNS forwarding.
+(allow file-read* (literal "/private/var/run/resolv.conf"))
+
+;; The userspace NAT: outbound connections and datagrams for the guest, and
+;; the replies to its UDP flows. Nothing listens.
+(allow network-outbound)
+(allow network-inbound (local udp "*:*"))
