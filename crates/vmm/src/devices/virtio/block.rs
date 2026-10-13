@@ -5,8 +5,10 @@
 //! before it. `File::sync_all` is `F_FULLFSYNC` on macOS, so a flush
 //! reaches stable storage, not just the drive's cache.
 //!
-//! Discard is not offered yet: punching holes in the image file needs a
-//! system call std does not wrap (ROADMAP P3.3).
+//! Discard punches holes in the image file, so blocks the guest frees go
+//! back to the Mac. Only whole 4 KiB blocks can be punched; the device
+//! advertises that alignment, and the parts of a range outside it are left
+//! as they are, which discard allows.
 
 use std::fs::File;
 use std::io;
@@ -27,6 +29,7 @@ pub mod features {
     pub const RO: u64 = 1 << 5;
     pub const BLK_SIZE: u64 = 1 << 6;
     pub const FLUSH: u64 = 1 << 9;
+    pub const DISCARD: u64 = 1 << 13;
 }
 
 /// Request types.
@@ -35,6 +38,7 @@ mod req {
     pub const OUT: u32 = 1;
     pub const FLUSH: u32 = 4;
     pub const GET_ID: u32 = 8;
+    pub const DISCARD: u32 = 11;
 }
 
 /// Request status bytes.
@@ -44,6 +48,8 @@ mod status {
     pub const UNSUPP: u8 = 2;
 }
 
+/// Configuration space up to `discard_sector_alignment`.
+const CONFIG_SIZE: usize = 48;
 /// Size of the request header: type, reserved, sector.
 const HEADER_SIZE: u64 = 16;
 /// Length of the device ID string.
@@ -51,6 +57,14 @@ const ID_LEN: usize = 20;
 /// Most data segments in one request the driver may use, advertised as
 /// `seg_max`; the header and status take two more descriptors.
 const SEG_MAX: u32 = QUEUE_SIZE as u32 - 2;
+/// Most ranges in one discard request, advertised as `max_discard_seg`.
+const MAX_DISCARD_SEG: u32 = 32;
+/// Size of one discard range: sector, number of sectors, flags.
+const DISCARD_RANGE_SIZE: u64 = 16;
+/// The `unmap` flag of a discard range, the only flag defined for it.
+const DISCARD_UNMAP: u32 = 1;
+/// Discard alignment: the APFS block size, the unit holes are punched in.
+pub const DISCARD_ALIGN: u64 = 4096;
 
 /// Storage behind a block device. [`File`] implements it for raw images;
 /// tests use their own.
@@ -61,6 +75,9 @@ pub trait Disk: Send {
     fn write_at(&mut self, offset: u64, data: &[u8]) -> io::Result<()>;
     /// Makes every completed write durable.
     fn flush(&mut self) -> io::Result<()>;
+    /// Says `len` bytes at `offset` are no longer needed. Afterwards they
+    /// may read as zeroes or keep their old contents.
+    fn discard(&mut self, offset: u64, len: u64) -> io::Result<()>;
 }
 
 impl Disk for File {
@@ -74,6 +91,15 @@ impl Disk for File {
 
     fn flush(&mut self) -> io::Result<()> {
         self.sync_all()
+    }
+
+    fn discard(&mut self, offset: u64, len: u64) -> io::Result<()> {
+        let start = offset.next_multiple_of(DISCARD_ALIGN);
+        let end = (offset + len) / DISCARD_ALIGN * DISCARD_ALIGN;
+        if end > start {
+            crate::host::punch_hole(self, start, end - start)?;
+        }
+        Ok(())
     }
 }
 
@@ -124,13 +150,17 @@ impl Block {
         Ok(Block::new(Box::new(file), size, read_only, id))
     }
 
-    fn config(&self) -> [u8; 24] {
-        let mut config = [0u8; 24];
+    fn config(&self) -> [u8; CONFIG_SIZE] {
+        let mut config = [0u8; CONFIG_SIZE];
         config[0..8].copy_from_slice(&self.capacity.to_le_bytes());
         // size_max (8..12) is not offered.
         config[12..16].copy_from_slice(&SEG_MAX.to_le_bytes());
         // geometry (16..20) is not offered.
         config[20..24].copy_from_slice(&(SECTOR_SIZE as u32).to_le_bytes());
+        // topology, writeback and num_queues (24..36) are not offered.
+        config[36..40].copy_from_slice(&u32::MAX.to_le_bytes());
+        config[40..44].copy_from_slice(&MAX_DISCARD_SEG.to_le_bytes());
+        config[44..48].copy_from_slice(&((DISCARD_ALIGN / SECTOR_SIZE) as u32).to_le_bytes());
         config
     }
 
@@ -236,6 +266,14 @@ fn serve(
             Ok(()) => (status::OK, 0),
             Err(_) => (status::IOERR, 0),
         },
+        req::DISCARD => {
+            let len = chain.readable_len() - HEADER_SIZE;
+            if read_only {
+                (status::IOERR, 0)
+            } else {
+                (discard(disk, mem, chain, capacity, len)?, 0)
+            }
+        }
         req::GET_ID => {
             let n = (ID_LEN as u64).min(status_at);
             chain.write_at(mem, 0, &id[..n as usize])?;
@@ -245,6 +283,44 @@ fn serve(
     };
     chain.write_at(mem, status_at, &[result])?;
     Ok((data_written + 1) as u32)
+}
+
+/// Serves a discard request's ranges, all checked before any is applied.
+fn discard(
+    disk: &mut dyn Disk,
+    mem: &GuestMemory,
+    chain: &DescriptorChain,
+    capacity: u64,
+    len: u64,
+) -> queue::Result<u8> {
+    let count = len / DISCARD_RANGE_SIZE;
+    if count == 0 || !len.is_multiple_of(DISCARD_RANGE_SIZE) || count > u64::from(MAX_DISCARD_SEG) {
+        return Ok(status::IOERR);
+    }
+    let mut ranges = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let mut raw = [0u8; DISCARD_RANGE_SIZE as usize];
+        chain.read_at(mem, HEADER_SIZE + i * DISCARD_RANGE_SIZE, &mut raw)?;
+        let sector = u64::from_le_bytes(raw[0..8].try_into().expect("8 bytes"));
+        let sectors = u32::from_le_bytes(raw[8..12].try_into().expect("4 bytes"));
+        let flags = u32::from_le_bytes(raw[12..16].try_into().expect("4 bytes"));
+        if flags & !DISCARD_UNMAP != 0 {
+            return Ok(status::UNSUPP);
+        }
+        if sector
+            .checked_add(u64::from(sectors))
+            .is_none_or(|end| end > capacity)
+        {
+            return Ok(status::IOERR);
+        }
+        ranges.push((sector * SECTOR_SIZE, u64::from(sectors) * SECTOR_SIZE));
+    }
+    for (offset, len) in ranges {
+        if disk.discard(offset, len).is_err() {
+            return Ok(status::IOERR);
+        }
+    }
+    Ok(status::OK)
 }
 
 /// Largest piece of a request copied at once, so a big request does not
@@ -300,6 +376,8 @@ impl VirtioDevice for Block {
         let mut f = features::SEG_MAX | features::BLK_SIZE | features::FLUSH;
         if self.read_only {
             f |= features::RO;
+        } else {
+            f |= features::DISCARD;
         }
         f
     }
@@ -351,6 +429,7 @@ mod tests {
         Read(u64, usize),
         Write(u64, Vec<u8>),
         Flush,
+        Discard(u64, u64),
     }
 
     /// A disk in memory that records every operation.
@@ -384,6 +463,10 @@ mod tests {
         }
         fn flush(&mut self) -> io::Result<()> {
             self.log.lock().unwrap().push(Op::Flush);
+            Ok(())
+        }
+        fn discard(&mut self, offset: u64, len: u64) -> io::Result<()> {
+            self.log.lock().unwrap().push(Op::Discard(offset, len));
             Ok(())
         }
     }
@@ -600,6 +683,91 @@ mod tests {
         assert_eq!(driver.written(&mem, rd, 0, 512), vec![0x5a; 512]);
         let on_disk = std::fs::read(&path).unwrap();
         assert_eq!(&on_disk[3 * 512..4 * 512], &[0x5a; 512][..]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    fn range(sector: u64, sectors: u32, flags: u32) -> Vec<u8> {
+        let mut r = sector.to_le_bytes().to_vec();
+        r.extend_from_slice(&sectors.to_le_bytes());
+        r.extend_from_slice(&flags.to_le_bytes());
+        r
+    }
+
+    #[test]
+    fn discard_is_offered_with_its_limits() {
+        let r = rig();
+        assert_ne!(r.block.features() & features::DISCARD, 0);
+        let mut limits = [0u8; 12];
+        r.block.read_config(36, &mut limits);
+        assert_eq!(
+            u32::from_le_bytes(limits[0..4].try_into().unwrap()),
+            u32::MAX
+        );
+        assert_eq!(u32::from_le_bytes(limits[4..8].try_into().unwrap()), 32);
+        assert_eq!(u32::from_le_bytes(limits[8..12].try_into().unwrap()), 8);
+        let read_only = rig_with(8, true, false);
+        assert_eq!(read_only.block.features() & features::DISCARD, 0);
+    }
+
+    #[test]
+    fn discard_passes_each_range_to_the_disk() {
+        let mut r = rig();
+        let mut ranges = range(0, 2, 0);
+        ranges.extend_from_slice(&range(4, 4, DISCARD_UNMAP));
+        let head = r.submit(&[&header(req::DISCARD, 0), &ranges], &[1]);
+        r.block.queue_notify(0);
+        assert_eq!(r.status(head, 1), status::OK);
+        assert_eq!(
+            *r.log.lock().unwrap(),
+            vec![Op::Discard(0, 1024), Op::Discard(2048, 2048)]
+        );
+    }
+
+    #[test]
+    fn bad_discards_touch_nothing() {
+        let mut r = rig();
+        // The second range runs past the end, so the first is not applied.
+        let mut past_end = range(0, 1, 0);
+        past_end.extend_from_slice(&range(6, 4, 0));
+        let a = r.submit(&[&header(req::DISCARD, 0), &past_end], &[1]);
+        let flags = r.submit(&[&header(req::DISCARD, 0), &range(0, 1, 2)], &[1]);
+        let empty = r.submit(&[&header(req::DISCARD, 0)], &[1]);
+        let ragged = r.submit(&[&header(req::DISCARD, 0), &[0; 10]], &[1]);
+        r.block.queue_notify(0);
+        assert_eq!(r.status(a, 1), status::IOERR);
+        assert_eq!(r.status(flags, 1), status::UNSUPP);
+        assert_eq!(r.status(empty, 1), status::IOERR);
+        assert_eq!(r.status(ragged, 1), status::IOERR);
+        assert!(r.log.lock().unwrap().is_empty());
+
+        let mut ro = rig_with(8, true, false);
+        let head = ro.submit(&[&header(req::DISCARD, 0), &range(0, 1, 0)], &[1]);
+        ro.block.queue_notify(0);
+        assert_eq!(ro.status(head, 1), status::IOERR);
+    }
+
+    #[test]
+    fn discard_on_a_file_punches_the_aligned_blocks() {
+        use std::os::unix::fs::MetadataExt;
+        let path = std::env::temp_dir().join(format!("cave-blk-discard-{}", std::process::id()));
+        std::fs::write(&path, vec![0xeeu8; 64 << 10]).unwrap();
+        let blocks = std::fs::metadata(&path).unwrap().blocks();
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        // 1 KiB in, to 1 KiB short of the end: only the whole 4 KiB blocks
+        // between go.
+        Disk::discard(&mut file, 1024, (64 << 10) - 2048).unwrap();
+        // A range inside one block punches nothing and is still fine.
+        Disk::discard(&mut file, 100, 200).unwrap();
+        let data = std::fs::read(&path).unwrap();
+        assert!(data[..4096].iter().all(|&b| b == 0xee));
+        assert!(data[4096..60 << 10].iter().all(|&b| b == 0));
+        assert!(data[60 << 10..].iter().all(|&b| b == 0xee));
+        assert!(std::fs::metadata(&path).unwrap().blocks() < blocks);
+        assert_eq!(data.len(), 64 << 10);
         std::fs::remove_file(&path).unwrap();
     }
 
