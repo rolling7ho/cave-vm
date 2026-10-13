@@ -23,10 +23,7 @@ use cave_vm_vmm::{disk, host};
 use super::{Running, Slot, Vm, Vms, bind_all, display_name, error, now_unix, serve_all};
 use crate::image::ImageRef;
 use crate::project::STATE_DIR;
-use crate::snapshot::{self, Manifest};
-
-/// The folder a VM is suspended to; see [`suspend_dir`].
-const SUSPEND_DIR: &str = "suspended";
+use crate::snapshot::{self, Manifest, SUSPEND_DIR};
 
 /// How long a VMM may take to save a snapshot. It writes out guest memory,
 /// so this grows with the VM's memory.
@@ -595,26 +592,7 @@ pub(super) fn list(project: &str) -> Vec<ListEntry> {
 /// leaving those named in `spare`. Snapshots taken by name are never
 /// deleted. Best effort: one that cannot be deleted is tried next time.
 fn prune(state: &Path, keep: u32, spare: &[&str]) {
-    let mut auto: Vec<(u64, std::time::SystemTime, String)> = snapshot::names(state)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|name| {
-            let dir = snapshot::dir(state, &name);
-            let manifest = snapshot::read_manifest(&dir).ok()?;
-            // The manifest is written last, to the nanosecond, which
-            // orders snapshots taken in the same second.
-            let written = fs::metadata(dir.join(snapshot::MANIFEST_FILE))
-                .and_then(|m| m.modified())
-                .ok()?;
-            manifest
-                .auto
-                .then_some((manifest.created_unix, written, name))
-        })
-        .collect();
-    // Newest first.
-    auto.sort_by(|a, b| b.cmp(a));
-    let keep = usize::try_from(keep).unwrap_or(usize::MAX);
-    for (_, _, name) in auto.into_iter().skip(keep) {
+    for name in snapshot::beyond_retention(state, keep) {
         if !spare.contains(&name.as_str()) {
             let _ = fs::remove_dir_all(snapshot::dir(state, &name));
         }

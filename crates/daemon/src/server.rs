@@ -132,6 +132,7 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                     reason: forked.fallback,
                 })
         }
+        Request::Gc { apply } => vms.gc(apply).map(Reply::Usage),
         Request::Images => vms.images().map(|images| Reply::Images { images }),
         Request::Restore { vm, name } => {
             vms.restore(&vm, name.as_deref())

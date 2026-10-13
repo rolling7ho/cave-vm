@@ -19,6 +19,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- `cave gc [--yes] [--json]`: disk usage for the image cache and each project's disk, snapshots and forks, with blocks that APFS clones share counted once, and what is safe to delete (unused images, automatic snapshots beyond `keep`, unfinished snapshot folders), deleted after asking. Sizes come from each file's physical extents (`host::physical_extents` in `cave-vm-vmm`, through `F_LOG2PHYS_EXT`). The daemon now records each cached image's name for it (P4.9).
 - `[snapshots]` in `cave.toml` now applies: `auto = false` stops `cave restore` from saving the state before it, and only the newest `keep` automatic snapshots are kept, the oldest deleted after each new one. Snapshots taken by name and the one being restored are never deleted (P4.8).
 - Every running VM is suspended, all at once, when the Mac is about to sleep, through IOKit's system power notifications (`host::on_system_sleep` in `cave-vm-vmm`). A suspension outlives a reboot, and the next command resumes it. A test confirms the daemon can register for the notifications (assumption A10); whether a suspend fits in the time macOS allows before sleeping is checked by hand with `pmset sleepnow` (P4.7c).
 - A VM unused for its `idle_suspend` time (30 minutes by default) is suspended, as `cave stop` would. It is in use while a command, shell, file copy or forwarded connection is open, and `cave run` counts as use. The daemon checks every 10 seconds; tests drive it with a fake clock (P4.7b).

@@ -11,7 +11,8 @@ use std::thread;
 
 use cave_vm_proto::agent::Stream;
 use cave_vm_proto::daemon::{
-    EntryKind, ListEntry, NetMode, Policy, PortMap, Reply, Request, Storage, VmState,
+    EntryKind, ListEntry, NetMode, Policy, PortMap, Reclaimable, Reply, Request, Storage, Usage,
+    VmState,
 };
 use cave_vm_proto::{ErrorCode, ErrorMessage, VERSIONS, read_frame, write_frame};
 
@@ -140,6 +141,15 @@ fn handle(state: &Mutex<State>, request: Request) -> Reply {
             s.running = false;
             Reply::Ok
         }
+        Request::Gc { apply } => Reply::Usage(Usage {
+            images: Vec::new(),
+            projects: Vec::new(),
+            reclaimable: vec![Reclaimable {
+                what: "unused images".into(),
+                size: 3 << 29,
+            }],
+            reclaimed: apply.then_some(3 << 29),
+        }),
         _ => Reply::Error(ErrorMessage::new(ErrorCode::BadRequest, "not in the fake")),
     }
 }
@@ -567,6 +577,31 @@ fn rm_without_a_terminal_needs_yes() {
         state.lock().unwrap().requests.as_slice(),
         [Request::Remove { name: None, .. }]
     ));
+}
+
+#[test]
+fn gc_without_a_terminal_needs_yes() {
+    let s = Scratch::new();
+    let state = fake_daemon(&s);
+    let out = s.cave(&s.project(), &["gc"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stdout(&out).contains("Reclaimable   1.5 GB   unused images 1.5 GB"));
+    assert!(stderr(&out).contains("cave gc needs a terminal to ask first"));
+    assert!(matches!(
+        state.lock().unwrap().requests.as_slice(),
+        [Request::Gc { apply: false }]
+    ));
+
+    let out = s.cave(&s.project(), &["gc", "--yes"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stdout(&out).ends_with("Deleted 1.5 GB\n"),
+        "{}",
+        stdout(&out)
+    );
+    let out = s.cave(&s.project(), &["gc", "--json"]);
+    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(doc["reclaimable"][0]["what"], "unused images");
 }
 
 #[test]

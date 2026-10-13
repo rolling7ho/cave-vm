@@ -258,6 +258,60 @@ pub fn ipv4_addresses() -> io::Result<Vec<Ipv4Addr>> {
     Ok(addrs)
 }
 
+/// Where a file's data sits on its volume: one `(offset, length)` per
+/// contiguous run, in file order. Holes have none. Two files sharing APFS
+/// clone blocks report the same runs for them, so counting runs once
+/// counts shared blocks once.
+pub fn physical_extents(file: &File) -> io::Result<Vec<(u64, u64)>> {
+    let fd = file.as_raw_fd();
+    let seek = |offset: i64, whence: i32| -> io::Result<Option<i64>> {
+        // SAFETY: lseek only moves the file offset of a descriptor `file`
+        // keeps open.
+        let r = unsafe { libc::lseek(fd, offset, whence) };
+        if r >= 0 {
+            return Ok(Some(r));
+        }
+        let e = io::Error::last_os_error();
+        // ENXIO: no data at or after `offset`.
+        if e.raw_os_error() == Some(libc::ENXIO) {
+            Ok(None)
+        } else {
+            Err(e)
+        }
+    };
+    let mut runs: Vec<(u64, u64)> = Vec::new();
+    let mut offset = 0;
+    while let Some(data) = seek(offset, libc::SEEK_DATA)? {
+        let hole = seek(data, libc::SEEK_HOLE)?.unwrap_or(data);
+        let mut at = data;
+        while at < hole {
+            let mut map = libc::log2phys {
+                l2p_flags: 0,
+                l2p_contigbytes: hole - at,
+                l2p_devoffset: at,
+            };
+            // SAFETY: F_LOG2PHYS_EXT reads the file offset and length from
+            // `map` and writes the device offset and the contiguous length
+            // back into it; `map` outlives the call.
+            if unsafe { libc::fcntl(fd, libc::F_LOG2PHYS_EXT, &raw mut map) } == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            let (device, length) = (map.l2p_devoffset, map.l2p_contigbytes);
+            if length <= 0 {
+                break;
+            }
+            let (device, length) = (device as u64, length as u64);
+            match runs.last_mut() {
+                Some((start, len)) if *start + *len == device => *len += length,
+                _ => runs.push((device, length)),
+            }
+            at += length as i64;
+        }
+        offset = hole;
+    }
+    Ok(runs)
+}
+
 /// The IOKit and CoreFoundation calls [`on_system_sleep`] makes, from
 /// `<IOKit/pwr_mgt/IOPMLib.h>` and `<CoreFoundation/CFRunLoop.h>`. The
 /// `libc` crate does not cover them.
@@ -383,6 +437,44 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn clones_share_physical_extents_until_written() {
+        let dir = temp("extents");
+        let (src, dst) = (dir.join("src"), dir.join("dst"));
+        let mut data = vec![7u8; 4 << 20];
+        fs::write(&src, &data).unwrap();
+        File::open(&src).unwrap().sync_all().unwrap();
+        clonefile(&src, &dst).unwrap();
+        let extents = |p: &Path| physical_extents(&File::open(p).unwrap()).unwrap();
+        let before = extents(&src);
+        let total: u64 = before.iter().map(|r| r.1).sum();
+        assert_eq!(total, 4 << 20, "{before:?}");
+        assert_eq!(extents(&dst), before);
+        // Rewriting the first megabyte of the clone gives it its own blocks
+        // there and leaves the rest shared.
+        data[..1 << 20].fill(9);
+        let file = fs::OpenOptions::new().write(true).open(&dst).unwrap();
+        std::os::unix::fs::FileExt::write_all_at(&file, &data[..1 << 20], 0).unwrap();
+        file.sync_all().unwrap();
+        let after = extents(&dst);
+        assert_ne!(after, before);
+        let shared: u64 = after
+            .iter()
+            .filter(|run| before.iter().any(|b| b.0 <= run.0 && run.0 < b.0 + b.1))
+            .map(|r| r.1)
+            .sum();
+        assert_eq!(shared, 3 << 20, "{before:?} {after:?}");
+        // A sparse file has no runs for its holes.
+        let sparse = dir.join("sparse");
+        let file = File::create(&sparse).unwrap();
+        file.set_len(1 << 30).unwrap();
+        std::os::unix::fs::FileExt::write_all_at(&file, &[1u8; 16384], 1 << 29).unwrap();
+        file.sync_all().unwrap();
+        let runs = extents(&sparse);
+        assert_eq!(runs.iter().map(|r| r.1).sum::<u64>(), 16384, "{runs:?}");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

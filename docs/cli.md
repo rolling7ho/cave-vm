@@ -373,7 +373,9 @@ Reclaimable   2.3 GB   unused images 1.9 GB, old automatic snapshots 0.4 GB
 Delete 2.3 GB? [y/N]
 ```
 
-Shared APFS clone blocks are reported once, not double-counted [A9].
+Shared APFS clone blocks are reported once, not double-counted [A9]. Sizes come from where each file's blocks sit on the volume, and each block counts in the first row that uses it: a project's disk counts only what its VM wrote over the base image, and a snapshot only what changed since the disk it was cloned from. A project's suspension counts with its snapshots. Each reclaimable entry is what deleting it frees on top of the entries before it, so they add up to the total.
+
+Leftovers from crashed VMM processes are snapshot, fork and suspension folders with no manifest, listed as `unfinished snapshots` once they are 10 minutes old. Nothing of a VM that is starting, stopping or being snapshotted is offered. With nothing to delete it prints `Nothing to reclaim`. Without a terminal it needs `--yes`. `--json` prints the daemon's `usage` reply ([protocol](protocol.md#reply-objects)), after deleting when `--yes` is given.
 
 ### cave inspect
 
