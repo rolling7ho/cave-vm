@@ -74,6 +74,14 @@ impl Connection {
         write_frame(&mut self.stream, request).map_err(daemon_gone)
     }
 
+    /// A second handle that sends on this connection, for a thread that
+    /// streams input while this one reads.
+    pub fn sender(&self) -> Result<Connection> {
+        Ok(Connection {
+            stream: self.stream.try_clone()?,
+        })
+    }
+
     /// The next message from the daemon.
     pub fn receive(&mut self) -> Result<Reply> {
         match read_frame::<_, Reply>(&mut self.stream) {

@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use cave_vm_proto::agent::Stream;
 use cave_vm_proto::daemon::{
     EntryKind, ListEntry, NetMode, Policy, PortMap, Reply, Request, Storage, VmState,
 };
@@ -146,9 +147,50 @@ fn serve(mut stream: UnixStream, state: Arc<Mutex<State>>) {
     let reply = hello.accept(VERSIONS, "fake daemon").unwrap();
     write_frame(&mut stream, &Reply::Hello(reply)).unwrap();
     while let Ok(Some(request)) = read_frame::<_, Request>(&mut stream) {
+        if let Request::Exec { exec, .. } = &request {
+            state.lock().unwrap().requests.push(request.clone());
+            fake_exec(&mut stream, &exec.argv);
+            return;
+        }
         let reply = handle(&state, request);
         if write_frame(&mut stream, &reply).is_err() {
             return;
+        }
+    }
+}
+
+/// A fake guest command: `cat` echoes stdin to stdout and says "done" on
+/// stderr, `false` exits 1, `crash` is killed, anything else is not found.
+fn fake_exec(stream: &mut UnixStream, argv: &[String]) {
+    let send = |stream: &mut UnixStream, reply: Reply| write_frame(stream, &reply).unwrap();
+    let output = |s: Stream, data: &[u8]| Reply::Output {
+        stream: s,
+        data: data.to_vec().into(),
+    };
+    let exit = |code: Option<i32>, signal: Option<&str>| Reply::Exit {
+        code,
+        signal: signal.map(Into::into),
+    };
+    match argv[0].as_str() {
+        "cat" => {
+            let mut input = Vec::new();
+            while let Ok(Some(request)) = read_frame::<_, Request>(stream) {
+                match request {
+                    Request::Input { data } => input.extend_from_slice(&data.0),
+                    Request::InputEnd => break,
+                    other => panic!("{other:?}"),
+                }
+            }
+            send(stream, output(Stream::Stdout, &input));
+            send(stream, output(Stream::Stderr, b"done\n"));
+            send(stream, exit(Some(0), None));
+        }
+        "false" => send(stream, exit(Some(1), None)),
+        "crash" => send(stream, exit(None, Some("KILL"))),
+        other => {
+            let message = format!("command not found in the VM: {other}\n");
+            send(stream, output(Stream::Stderr, message.as_bytes()));
+            send(stream, exit(Some(127), None));
         }
     }
 }
@@ -407,4 +449,85 @@ fn a_daemon_that_cannot_start_names_the_program() {
     let err = stderr(&out);
     assert!(err.contains("cannot start the cave daemon"), "{err}");
     assert!(err.contains("no-daemon-here"), "{err}");
+}
+
+fn cave_with_stdin(s: &Scratch, args: &[&str], input: &[u8]) -> Output {
+    use std::io::Write;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_cave"))
+        .args(args)
+        .current_dir(s.project())
+        .env("HOME", s.home())
+        .env("CAVE_HOME", s.data())
+        .env("CAVE_DAEMON", s.root.join("no-daemon-here"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn exec_streams_stdin_and_output_and_exits_with_the_code() {
+    let s = Scratch::new();
+    let state = fake_daemon(&s);
+    let out = cave_with_stdin(&s, &["exec", "--", "cat", "-n"], b"hello\n");
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "hello\n");
+    // Set up on first use and booted, then the command's own stderr.
+    let err = stderr(&out);
+    assert!(
+        err.contains("Set up this folder as a cave project"),
+        "{err}"
+    );
+    assert!(err.contains("proj: started in"), "{err}");
+    assert!(err.ends_with("done\n"), "{err}");
+    let execs: Vec<_> = state
+        .lock()
+        .unwrap()
+        .requests
+        .iter()
+        .filter_map(|r| match r {
+            Request::Exec { exec, .. } => Some(exec.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(execs.len(), 1);
+    assert_eq!(execs[0].argv, ["cat", "-n"]);
+    assert!(execs[0].stdin);
+    assert_eq!(execs[0].cwd, None);
+
+    // Already running: no policy this time.
+    let out = s.cave(&s.project(), &["exec", "--", "false"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(stderr(&out), "");
+}
+
+#[test]
+fn exec_exit_codes_follow_the_shell() {
+    let s = Scratch::new();
+    fake_daemon(&s);
+    let out = s.cave(&s.project(), &["exec", "--", "crash"]);
+    assert_eq!(out.status.code(), Some(137));
+    let out = s.cave(&s.project(), &["exec", "--", "nope"]);
+    assert_eq!(out.status.code(), Some(127));
+    assert!(stderr(&out).contains("command not found in the VM: nope"));
+}
+
+#[test]
+fn exec_needs_a_command_after_the_separator() {
+    let s = Scratch::new();
+    let out = s.cave(&s.project(), &["exec"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("missing command after --"));
+    assert!(stderr(&out).contains("fix: cave exec -- uname -a"));
+}
+
+#[test]
+fn exec_fails_with_125_when_cave_does() {
+    let s = Scratch::new();
+    let out = s.cave(&s.project(), &["exec", "--", "uname"]);
+    assert_eq!(out.status.code(), Some(125), "{}", stderr(&out));
+    assert!(stderr(&out).contains("cannot start the cave daemon"));
 }

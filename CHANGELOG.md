@@ -16,6 +16,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- `cave exec -- <cmd>`: runs one command in the VM, booting it first if needed, with stdin passed through, stdout and stderr kept separate, and the command's exit code (128 plus the signal number when a signal ended it, 125 when cave itself fails) (P3.11b).
 - `cave`: the command line's first commands, `init`, `run` (prints the startup policy and echoes widening flags), `stop` and `ls`, with project discovery, errors that say how to fix the problem, and a daemon client that starts the daemon on first use (P3.11a).
 - `cave-vm-daemon`: connections to a running VM's guest agent, received from its VMM as file descriptors over the control link (`Vms::agent_connection`, D26). Asking for one on a stopped VM says to start it with `cave run`.
 - `cave-vm-daemon`: the daemon socket (`daemon.sock`, user-only) with the hello handshake, one VMM process per VM with `start`, `stop` and `list`, crash detection so the next `start` relaunches a crashed VMM, and startup cleanup of VMM processes an earlier daemon left behind. The VMM control link and its messages (`cave-vm-proto::vmm`) are specified in `docs/protocol.md` (P3.10a).

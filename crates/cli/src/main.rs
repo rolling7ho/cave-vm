@@ -5,6 +5,7 @@
 mod client;
 mod commands;
 mod error;
+mod exec;
 mod init;
 mod policy;
 mod project;
@@ -57,6 +58,14 @@ enum Cmd {
         #[arg(long)]
         fork: Option<String>,
     },
+    /// Run one command in the VM.
+    Exec {
+        #[arg(long)]
+        fork: Option<String>,
+        /// The command and its arguments, after `--`.
+        #[arg(last = true, value_name = "CMD")]
+        argv: Vec<String>,
+    },
     /// Stop this project's VM now.
     Stop {
         #[arg(long)]
@@ -88,6 +97,10 @@ fn main() -> ExitCode {
             });
             commands::run(net, ports, fork)
         }
+        Cmd::Exec { fork, argv } => match exec::run(fork, argv) {
+            Ok(code) => return ExitCode::from(code),
+            Err(e) => Err(e),
+        },
         Cmd::Stop { fork } => commands::stop(fork),
         Cmd::Ls { all, json } => commands::ls(all, json),
     };
