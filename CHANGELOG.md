@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Fixed
 
+- A fork made from a snapshot sometimes never answered and fell back to a disk boot after 50 seconds. The daemon cloned the snapshot's memory file before the VMM's last writes to it reached the disk, and an APFS clone takes only what is on disk. The daemon now flushes each file before it clones it.
 - A restore drives every interrupt line to match its device before the guest runs. A vCPU that acknowledged an interrupt could pause for the snapshot before lowering the line, so the line was restored high with nothing pending.
 - After a restore, `cave-vmm` tries the guest agent again after 100 ms rather than 2 s when a connection gets no answer, doubling the wait each time. The first connection is sometimes lost to the guest's vsock reset, which made a restore or fork take 2 s longer.
 - `cave-vmm` keeps each agent connection it hands to the daemon open until the daemon's next request. Closing it right after sending it lost connections on macOS under load: the daemon got a connection that ended at the first reply.

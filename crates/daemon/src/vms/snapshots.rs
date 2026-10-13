@@ -160,7 +160,7 @@ impl Vms {
                     FromVmm::Ok => Ok(()),
                     other => Err(failed("snapshot the VM", &format!("{other:?}"))),
                 }),
-            None => host::clonefile(&disk::path(state), &dir.join(snapshot::DISK_FILE))
+            None => clone_flushed(&disk::path(state), &dir.join(snapshot::DISK_FILE))
                 .map_err(|e| failed("clone the disk", &e)),
         };
         let manifest = Manifest {
@@ -583,7 +583,7 @@ fn copy_snapshot(
     }
     let copied = files
         .into_iter()
-        .try_for_each(|file| host::clonefile(&src.join(file), &dst.join(file)))
+        .try_for_each(|file| clone_flushed(&src.join(file), &dst.join(file)))
         .and_then(|()| {
             snapshot::write_manifest(
                 dst,
@@ -616,7 +616,17 @@ fn replace(src: &Path, dst: &Path) -> Result<(), ErrorMessage> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent).map_err(failed)?;
     }
-    host::clonefile(src, dst).map_err(failed)
+    clone_flushed(src, dst).map_err(failed)
+}
+
+/// Makes `dst` an APFS clone of `src` with everything written to `src`.
+/// A clone takes the blocks on disk, so pages written but still in the
+/// cache, such as a VMM's last writes, are flushed first; that is cheap
+/// once they are. Without it a fork's memory sometimes lacked pages and
+/// the guest hung.
+fn clone_flushed(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::File::open(src)?.sync_all()?;
+    host::clonefile(src, dst)
 }
 
 fn absolute(path: &Path) -> String {
