@@ -475,6 +475,8 @@ Decided by [D19](../ROADMAP.md#decisions). The design lists `cave export` with `
 
 Output: `Exported 1,204 files (38 MB) to ./my-project-export-2026-10-12`.
 
+The copy goes through `tar` in the VM, as `cave cp` copies folders. Without a snapshot it boots or resumes the VM if needed. A snapshot is read through a temporary fork named `export-<number>`, started from it and removed when the export ends. A folder that already has files in it is refused rather than written over, and a failed export removes the folder it created.
+
 ### cave agent
 
 ```

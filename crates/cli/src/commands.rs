@@ -119,7 +119,7 @@ pub fn stop(fork: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn folder_name(path: &Path) -> String {
+pub fn folder_name(path: &Path) -> String {
     path.file_name().map_or_else(
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),

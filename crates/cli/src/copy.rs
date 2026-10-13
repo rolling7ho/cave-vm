@@ -173,6 +173,15 @@ fn to_vm_one(vm: &VmId, src: &Path, dest: &str, into: bool) -> Result<()> {
     write_file(vm, src, &target, meta.permissions().mode() & 0o777)
 }
 
+/// Copies the contents of folder `src` in the VM into `dest` on the Mac,
+/// creating it, for `cave export`.
+pub fn from_vm_folder(vm: &VmId, src: &str, dest: &Path) -> Result<()> {
+    if !is_vm_dir(vm, src)? {
+        return Err(CliError::new(format!("{src} is not a folder in the VM")));
+    }
+    from_vm_one(vm, src, dest, false)
+}
+
 fn from_vm_one(vm: &VmId, src: &str, dest: &Path, into: bool) -> Result<()> {
     let name = vm_name(src);
     if is_vm_dir(vm, src)? {
