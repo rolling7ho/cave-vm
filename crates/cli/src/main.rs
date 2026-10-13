@@ -4,6 +4,7 @@
 
 mod client;
 mod commands;
+mod copy;
 mod error;
 mod exec;
 mod init;
@@ -68,6 +69,11 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Copy files in and out; a path starting with `:` is in the VM.
+    Cp {
+        #[arg(value_name = "PATH", required = true)]
+        paths: Vec<String>,
+    },
     /// Run one command in the VM.
     Exec {
         #[arg(long)]
@@ -112,6 +118,7 @@ fn main() -> ExitCode {
             });
             commands::run(net, ports, fork)
         }
+        Cmd::Cp { paths } => copy::run(paths),
         Cmd::Exec { fork, argv } => match exec::run(fork, argv) {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),

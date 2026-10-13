@@ -96,6 +96,22 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
             }
             return relay(stream, vms, &vm, &Message::Exec(exec));
         }
+        Request::FileRead { vm, path } => {
+            return relay(stream, vms, &vm, &Message::FileRead { path });
+        }
+        Request::FileWrite {
+            vm,
+            path,
+            mode,
+            create_dirs,
+        } => {
+            let request = Message::FileWrite {
+                path,
+                mode,
+                create_dirs,
+            };
+            return relay(stream, vms, &vm, &request);
+        }
         Request::Shell { vm, pty } => return relay(stream, vms, &vm, &Message::PtyOpen(pty)),
         Request::Start { vm, net, ports } => vms.start(&vm, net, &ports).map(Reply::Policy),
         Request::Remove { vm, name: None } => vms.remove(&vm).map(|()| Reply::Ok),

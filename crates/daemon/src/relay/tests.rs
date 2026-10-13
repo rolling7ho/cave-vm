@@ -139,3 +139,100 @@ fn an_agent_that_closes_mid_command_is_an_error_with_a_fix() {
     drop(client);
     daemon.join().unwrap().unwrap();
 }
+
+#[test]
+fn file_reads_and_writes_end_with_their_last_message() {
+    // A read ends at `file_end`.
+    let (mut client, mut daemon_side) = UnixStream::pair().unwrap();
+    let (daemon_agent, agent) = UnixStream::pair().unwrap();
+    let read_request = Message::FileRead {
+        path: "/workspace/a".into(),
+    };
+    let expected = read_request.clone();
+    let agent = fake_agent(agent, move |agent| {
+        assert_eq!(read_msg(agent), Some(expected));
+        write_frame(
+            agent,
+            &Message::FileInfo {
+                size: 2,
+                mode: 0o644,
+            },
+        )
+        .unwrap();
+        write_frame(
+            agent,
+            &Message::FileData {
+                data: b"hi".to_vec().into(),
+            },
+        )
+        .unwrap();
+        write_frame(
+            agent,
+            &Message::FileEnd {
+                sha256: "ab".into(),
+            },
+        )
+        .unwrap();
+    });
+    let daemon = thread::spawn(move || run(&mut daemon_side, daemon_agent, &read_request));
+    assert_eq!(
+        read_reply(&mut client),
+        Some(Reply::FileInfo {
+            size: 2,
+            mode: 0o644
+        })
+    );
+    assert!(matches!(
+        read_reply(&mut client),
+        Some(Reply::FileData { .. })
+    ));
+    assert_eq!(
+        read_reply(&mut client),
+        Some(Reply::FileEnd {
+            sha256: "ab".into()
+        })
+    );
+    agent.join().unwrap();
+    daemon.join().unwrap().unwrap();
+
+    // A write relays the data up and ends at `file_written`.
+    let (mut client, mut daemon_side) = UnixStream::pair().unwrap();
+    let (daemon_agent, agent) = UnixStream::pair().unwrap();
+    let write_request = Message::FileWrite {
+        path: "/workspace/b".into(),
+        mode: Some(0o600),
+        create_dirs: true,
+    };
+    let agent = fake_agent(agent, |agent| {
+        assert!(matches!(read_msg(agent), Some(Message::FileWrite { .. })));
+        assert!(matches!(read_msg(agent), Some(Message::FileData { .. })));
+        assert_eq!(
+            read_msg(agent),
+            Some(Message::FileEnd {
+                sha256: "cd".into()
+            })
+        );
+        write_frame(agent, &Message::FileWritten { size: 3 }).unwrap();
+    });
+    let daemon = thread::spawn(move || run(&mut daemon_side, daemon_agent, &write_request));
+    write_frame(
+        &mut client,
+        &Request::FileData {
+            data: b"abc".to_vec().into(),
+        },
+    )
+    .unwrap();
+    write_frame(
+        &mut client,
+        &Request::FileEnd {
+            sha256: "cd".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        read_reply(&mut client),
+        Some(Reply::FileWritten { size: 3 })
+    );
+    agent.join().unwrap();
+    daemon.join().unwrap().unwrap();
+}

@@ -1,6 +1,8 @@
-//! `exec` and `shell`: the client's request goes to the guest agent over a
-//! fresh agent connection, and the stream messages are relayed both ways
-//! until the agent sends `exit` (docs/protocol.md, "exec and shell").
+//! `exec`, `shell`, `file_read` and `file_write`: the client's request goes
+//! to the guest agent over a fresh agent connection, and the stream
+//! messages are relayed both ways until the agent ends the operation with
+//! `exit`, `file_end`, `file_written` or `error` (docs/protocol.md, "exec
+//! and shell").
 //!
 //! If the client goes away first, the agent connection is closed, and the
 //! agent kills the program.
@@ -61,7 +63,7 @@ pub(crate) fn open(agent: &mut UnixStream, request: &Message) -> Result<(), Erro
 }
 
 /// A client stream message for the agent, or `None` for one that does not
-/// belong in `exec` or `shell`.
+/// belong in a relayed operation.
 fn from_client(request: Request) -> Option<Message> {
     Some(match request {
         Request::Input { data } => Message::Input { data },
@@ -69,6 +71,8 @@ fn from_client(request: Request) -> Option<Message> {
         Request::Signal { signal } => Message::Signal { signal },
         Request::PtyData { data } => Message::PtyData { data },
         Request::PtyResize { cols, rows } => Message::PtyResize { cols, rows },
+        Request::FileData { data } => Message::FileData { data },
+        Request::FileEnd { sha256 } => Message::FileEnd { sha256 },
         _ => return None,
     })
 }
@@ -80,6 +84,10 @@ fn to_client(message: Message) -> (Reply, bool) {
         Message::Output { stream, data } => (Reply::Output { stream, data }, false),
         Message::PtyData { data } => (Reply::PtyData { data }, false),
         Message::Exit { code, signal } => (Reply::Exit { code, signal }, true),
+        Message::FileInfo { size, mode } => (Reply::FileInfo { size, mode }, false),
+        Message::FileData { data } => (Reply::FileData { data }, false),
+        Message::FileEnd { sha256 } => (Reply::FileEnd { sha256 }, true),
+        Message::FileWritten { size } => (Reply::FileWritten { size }, true),
         Message::Error(e) => (Reply::Error(e), true),
         other => (
             Reply::Error(agent_failed(format!("it sent {other:?} during a command"))),
@@ -88,7 +96,8 @@ fn to_client(message: Message) -> (Reply, bool) {
     }
 }
 
-/// Runs `request` (an agent `exec` or `pty_open`) on `agent` and relays it
+/// Runs `request` (an agent `exec`, `pty_open`, `file_read` or
+/// `file_write`) on `agent` and relays it
 /// to and from `client` until it ends. Errors before the program starts go
 /// to the client as an `error` reply.
 pub fn run(client: &mut UnixStream, mut agent: UnixStream, request: &Message) -> io::Result<()> {

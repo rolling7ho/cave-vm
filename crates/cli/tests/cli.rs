@@ -564,3 +564,20 @@ fn rm_without_a_terminal_needs_yes() {
         [Request::Remove { name: None, .. }]
     ));
 }
+
+#[test]
+fn cp_needs_exactly_one_side_in_the_vm() {
+    let s = Scratch::new();
+    let out = s.cave(&s.project(), &["cp", "a", "b"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("one side of cave cp must be in the VM"));
+    assert!(stderr(&out).contains("fix: Prefix the VM path with `:`"));
+
+    let out = s.cave(&s.project(), &["cp", ":a", ":b"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("not within the VM"));
+
+    let out = s.cave(&s.project(), &["cp", ":a"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("needs a source and a destination"));
+}
