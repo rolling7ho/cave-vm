@@ -112,6 +112,25 @@ pub fn new_session_on_stdin(command: &mut Command) {
     }
 }
 
+/// Makes `command` run as `uid` and `gid` with exactly `groups` as its
+/// supplementary groups. Needs root. std's own `uid` would drop the
+/// supplementary groups, and its other hooks run after it gives up root,
+/// so all three calls happen here.
+pub fn run_as(command: &mut Command, uid: u32, gid: u32, groups: Vec<u32>) {
+    let groups: Vec<libc::gid_t> = groups.into_iter().map(|g| g as libc::gid_t).collect();
+    // SAFETY: the closure runs in the child between fork and exec. It only
+    // calls setgroups, setgid and setuid, which are async-signal-safe, and
+    // allocates nothing: `groups` was built before the fork and is only
+    // read.
+    unsafe {
+        command.pre_exec(move || {
+            check(libc::setgroups(groups.len() as _, groups.as_ptr()))?;
+            check(libc::setgid(gid as libc::gid_t))?;
+            check(libc::setuid(uid as libc::uid_t))
+        });
+    }
+}
+
 /// Waits until child `pid` exits without reaping it, so its pid stays
 /// reserved (and safe to signal) until the caller reaps it.
 pub fn wait_exit_keep(pid: u32) -> io::Result<()> {
