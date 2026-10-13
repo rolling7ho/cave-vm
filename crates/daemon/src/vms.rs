@@ -645,6 +645,35 @@ impl Vms {
         }
     }
 
+    /// Disk usage and what is safe to delete (`cave gc`); with `apply`,
+    /// deletes it.
+    pub fn gc(&self, apply: bool) -> Result<cave_vm_proto::daemon::Usage, ErrorMessage> {
+        let projects = self
+            .home
+            .projects()
+            .map_err(|e| error(ErrorCode::Io, format!("cannot list the VM folders: {e}")))?;
+        let vms: Vec<Arc<Vm>> = self
+            .vms
+            .lock()
+            .expect("vms lock")
+            .values()
+            .cloned()
+            .collect();
+        let projects: Vec<crate::gc::Project> = projects
+            .into_iter()
+            .filter(|p| p.is_dir())
+            .map(|path| crate::gc::Project {
+                busy: vms.iter().any(|vm| {
+                    Path::new(&vm.id.project) == path
+                        && matches!(*vm.slot.lock().expect("vm lock"), Slot::Busy)
+                }),
+                path,
+            })
+            .collect();
+        let survey = crate::gc::survey(&self.home.images(), &projects, SystemTime::now());
+        Ok(if apply { survey.apply() } else { survey.usage })
+    }
+
     /// The base images and how many known projects use each.
     pub fn images(&self) -> Result<Vec<ImageInfo>, ErrorMessage> {
         let projects = self

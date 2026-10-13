@@ -32,7 +32,7 @@ fn run() -> std::io::Result<()> {
     let home = Home::from_env()?;
     let exe = std::env::current_exe()?;
     let vmm = exe.with_file_name("cave-vmm");
-    let images = home.root().join("images");
+    let images = home.images();
     std::fs::create_dir_all(&images)?;
     let cache = Cache::new(&images);
     cache.remove_partials()?;

@@ -60,6 +60,11 @@ impl Home {
         self.root.join("vms")
     }
 
+    /// The shared image cache.
+    pub fn images(&self) -> PathBuf {
+        self.root.join("images")
+    }
+
     /// The folder for one VM's runtime state, created if needed. It is named
     /// by a hash of the project path and fork, so `.cave/` never holds the
     /// absolute path.

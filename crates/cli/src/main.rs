@@ -7,6 +7,7 @@ mod commands;
 mod copy;
 mod error;
 mod exec;
+mod gc;
 mod init;
 mod policy;
 mod project;
@@ -106,6 +107,15 @@ enum Cmd {
         #[arg(last = true, value_name = "CMD")]
         argv: Vec<String>,
     },
+    /// Show disk usage and reclaim what is safe to delete.
+    Gc {
+        /// Delete without asking, for scripts.
+        #[arg(long)]
+        yes: bool,
+        /// One JSON document, for scripts.
+        #[arg(long)]
+        json: bool,
+    },
     /// List the base images.
     Images {
         /// One JSON document, for scripts.
@@ -154,6 +164,7 @@ fn main() -> ExitCode {
             Err(e) => Err(e),
         },
         Cmd::Fork { name, from } => snapshot::fork(name, from),
+        Cmd::Gc { yes, json } => gc::run(yes, json),
         Cmd::Images { json } => commands::images(json),
         Cmd::Restore { name, fork } => snapshot::restore(name, fork),
         Cmd::Rm { name, yes } => remove::run(name, yes),

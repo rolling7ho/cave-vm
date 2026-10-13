@@ -24,6 +24,14 @@ use crate::vms::{AutoSnapshots, Prepared, VmSource};
 /// The project's machine-specific folder.
 pub const STATE_DIR: &str = ".cave";
 
+/// The extension of the file next to a cached disk image that holds the
+/// image's name.
+pub const NAME_RECORD: &str = "name";
+
+/// The extension of the file next to a cached disk image that holds its
+/// kernel's digest.
+pub const KERNEL_RECORD: &str = "kernel";
+
 /// Reads projects from disk, and images from `origin` into `cache`.
 pub struct ProjectSource {
     pub cache: Cache,
@@ -47,7 +55,7 @@ fn config_error(e: config::ConfigError) -> ErrorMessage {
 impl ProjectSource {
     /// The kernel digest recorded for the disk image `disk`.
     fn kernel_record(&self, disk: &Digest) -> PathBuf {
-        self.cache.path(disk).with_extension("kernel")
+        self.cache.path(disk).with_extension(KERNEL_RECORD)
     }
 
     fn known_kernel(&self, disk: &Digest) -> Option<Digest> {
@@ -96,6 +104,13 @@ impl ProjectSource {
         let _ = fs::write(
             self.kernel_record(&entry.disk.digest),
             entry.kernel.digest.hex(),
+        );
+        // Best effort too: `cave gc` names the image by it.
+        let _ = fs::write(
+            self.cache
+                .path(&entry.disk.digest)
+                .with_extension(NAME_RECORD),
+            &entry.name,
         );
         Ok((image.pinned(entry.disk.digest), disk, kernel))
     }

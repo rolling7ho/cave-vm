@@ -38,10 +38,13 @@ pub const MEMORY_FILE: &str = "memory";
 pub const STATE_FILE: &str = "state";
 
 /// The folder in `.cave/` that holds snapshots.
-const SNAPSHOTS_DIR: &str = "snapshots";
+pub const SNAPSHOTS_DIR: &str = "snapshots";
 /// The folder in `.cave/` that holds forks, whose names share one
 /// namespace with snapshots (`docs/cli.md`).
-const FORKS_DIR: &str = "forks";
+pub const FORKS_DIR: &str = "forks";
+
+/// A suspended VM's folder, in `.cave/` or in its fork's folder (D20).
+pub const SUSPEND_DIR: &str = "suspended";
 
 /// The longest snapshot or fork name.
 pub const MAX_NAME_LEN: usize = 64;
@@ -381,6 +384,34 @@ pub fn names(state_dir: &Path) -> io::Result<Vec<String>> {
     };
     names.sort();
     Ok(names)
+}
+
+/// The automatic snapshots in a project's `.cave/` beyond the newest
+/// `keep`, oldest last. Snapshots taken by name are never among them.
+pub fn beyond_retention(state_dir: &Path, keep: u32) -> Vec<String> {
+    let mut auto: Vec<(u64, std::time::SystemTime, String)> = names(state_dir)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|name| {
+            let dir = dir(state_dir, &name);
+            let manifest = read_manifest(&dir).ok()?;
+            // The manifest is written last, to the nanosecond, which
+            // orders snapshots taken in the same second.
+            let written = fs::metadata(dir.join(MANIFEST_FILE))
+                .and_then(|m| m.modified())
+                .ok()?;
+            manifest
+                .auto
+                .then_some((manifest.created_unix, written, name))
+        })
+        .collect();
+    // Newest first.
+    auto.sort_by(|a, b| b.cmp(a));
+    let keep = usize::try_from(keep).unwrap_or(usize::MAX);
+    auto.into_iter()
+        .skip(keep)
+        .map(|(_, _, name)| name)
+        .collect()
 }
 
 /// This Mac's macOS build, such as `26A434`.

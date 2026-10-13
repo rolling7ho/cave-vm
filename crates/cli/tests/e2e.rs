@@ -413,6 +413,28 @@ fn snapshot_and_restore() {
     // cave rm removes one snapshot.
     assert!(rig.cave(&["rm", "--yes", "before"]).status.success());
     assert!(!rig.project().join(".cave/snapshots/before").exists());
+
+    // cave gc counts the image once and the project's own blocks, and
+    // offers nothing that is in use.
+    let out = rig.cave(&["gc", "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let usage: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    eprintln!("cave gc: {usage}");
+    let image = &usage["images"][0];
+    assert_eq!(image["in_use"], true, "{usage}");
+    let project = &usage["projects"][0];
+    let disk = project["disk"].as_u64().unwrap();
+    let snapshots = project["snapshots"].as_u64().unwrap();
+    // The VM's own writes, far less than the 20 GB disk or the image.
+    assert!(
+        disk > 0 && disk < image["size"].as_u64().unwrap(),
+        "{usage}"
+    );
+    assert!(snapshots > 0, "{usage}");
 }
 
 #[test]
