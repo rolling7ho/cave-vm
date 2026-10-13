@@ -7,6 +7,7 @@ mod commands;
 mod copy;
 mod error;
 mod exec;
+mod export;
 mod gc;
 mod init;
 mod policy;
@@ -107,6 +108,14 @@ enum Cmd {
         #[arg(last = true, value_name = "CMD")]
         argv: Vec<String>,
     },
+    /// Copy the project out of the VM, or a snapshot, into a folder.
+    Export {
+        /// A snapshot from `cave ls`; the running VM when left out.
+        snapshot: Option<String>,
+        /// The folder; ./<project>-export-<date> when left out.
+        #[arg(short = 'o', value_name = "DIR")]
+        out: Option<std::path::PathBuf>,
+    },
     /// Show disk usage and reclaim what is safe to delete.
     Gc {
         /// Delete without asking, for scripts.
@@ -163,6 +172,7 @@ fn main() -> ExitCode {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
+        Cmd::Export { snapshot, out } => export::run(snapshot, out),
         Cmd::Fork { name, from } => snapshot::fork(name, from),
         Cmd::Gc { yes, json } => gc::run(yes, json),
         Cmd::Images { json } => commands::images(json),

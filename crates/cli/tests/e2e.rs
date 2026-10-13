@@ -439,6 +439,74 @@ fn snapshot_and_restore() {
 
 #[test]
 #[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn export_copies_the_project_out_of_the_vm_and_a_snapshot() {
+    let rig = Rig::new();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    rig.exec(
+        &[
+            "sh",
+            "-c",
+            "mkdir -p src .git && echo one > src/app.txt && echo ref > .git/HEAD \
+             && printf '\\000\\377' > data.bin && sync",
+        ],
+        0,
+    );
+    let out = rig.cave(&["snapshot", "first"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    rig.exec(&["sh", "-c", "echo two > src/app.txt"], 0);
+
+    // The running VM, into the default folder.
+    let out = rig.cave(&["export"]);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.starts_with("Exported 3 files ("), "{stdout}");
+    let dir = rig
+        .project()
+        .join(stdout.trim().rsplit(" to ").next().unwrap());
+    assert!(
+        dir.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("proj-export-20")
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("src/app.txt")).unwrap(),
+        "two\n"
+    );
+    assert_eq!(fs::read_to_string(dir.join(".git/HEAD")).unwrap(), "ref\n");
+    assert_eq!(fs::read(dir.join("data.bin")).unwrap(), [0, 255]);
+    // It does not write over a folder with files in it.
+    let out = rig.cave(&["export"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("already exists"));
+
+    // A snapshot, through a fork that is gone afterwards.
+    let out = rig.cave(&["export", "first", "-o", "old"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let old = rig.project().join("old");
+    assert_eq!(
+        fs::read_to_string(old.join("src/app.txt")).unwrap(),
+        "one\n"
+    );
+    let ls = String::from_utf8_lossy(&rig.cave(&["ls"]).stdout).into_owned();
+    assert!(!ls.contains("export-"), "{ls}");
+    assert_eq!(rig.exec(&["cat", "src/app.txt"], 0), "two\n");
+}
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
 fn stop_suspends_and_the_next_command_resumes() {
     let rig = Rig::new();
     assert!(rig.cave(&["init", "--sealed"]).status.success());
