@@ -20,8 +20,12 @@ use crate::relay;
 /// How often a listener checks whether it should stop.
 const ACCEPT_POLL: Duration = Duration::from_millis(50);
 
+/// Kept while a forwarded connection is open: what counts the VM as in
+/// use.
+pub type Held = Box<dyn Send>;
+
 /// Opens a new agent connection to the VM.
-pub type Connect = Arc<dyn Fn() -> Result<UnixStream, ErrorMessage> + Send + Sync>;
+pub type Connect = Arc<dyn Fn() -> Result<(UnixStream, Held), ErrorMessage> + Send + Sync>;
 
 /// A listener on the Mac port, bound but not serving yet, so a port that
 /// is in use is reported before the VM boots.
@@ -119,7 +123,7 @@ impl Bound {
 fn carry(tcp: TcpStream, connect: &Connect, port: u16) -> Result<(), ErrorMessage> {
     let io_error = |e: io::Error| ErrorMessage::new(ErrorCode::Io, e.to_string());
     tcp.set_nonblocking(false).map_err(io_error)?;
-    let mut agent = connect()?;
+    let (mut agent, _held) = connect()?;
     relay::open(&mut agent, &Message::PortForward { port })?;
     match relay::read_agent(&mut agent)? {
         Message::PortForwardOk => {}

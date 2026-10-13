@@ -166,7 +166,7 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
 /// Relays an agent operation for a running VM.
 fn relay(mut stream: UnixStream, vms: &Vms, vm: &VmId, request: &Message) -> io::Result<()> {
     match vms.agent_connection(vm) {
-        Ok(agent) => relay::run(&mut stream, agent, request),
+        Ok((agent, _in_use)) => relay::run(&mut stream, agent, request),
         Err(e) => send_error(&mut stream, e),
     }
 }

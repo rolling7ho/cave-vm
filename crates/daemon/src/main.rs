@@ -5,6 +5,7 @@
 
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use cave_vm_daemon::home::Home;
 use cave_vm_daemon::image::Cache;
@@ -13,6 +14,9 @@ use cave_vm_daemon::launch::ProcessLauncher;
 use cave_vm_daemon::project::ProjectSource;
 use cave_vm_daemon::server;
 use cave_vm_daemon::vms::Vms;
+
+/// How often the daemon looks for VMs to suspend for being unused.
+const IDLE_CHECK: Duration = Duration::from_secs(10);
 
 fn main() -> ExitCode {
     match run() {
@@ -39,6 +43,7 @@ fn run() -> std::io::Result<()> {
     let mut launcher = ProcessLauncher::new(vmm);
     launcher.sandbox = Some(images);
     let vms = Arc::new(Vms::new(home.clone(), Arc::new(launcher), Arc::new(source)));
+    vms.watch_idle(IDLE_CHECK);
     let killed = vms.clean_up()?;
     if killed > 0 {
         eprintln!("cave-daemon: stopped {killed} VMM processes left by an earlier daemon");

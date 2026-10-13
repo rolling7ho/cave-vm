@@ -51,7 +51,7 @@ fn fake_agents(asked: Arc<Mutex<Vec<u16>>>, refuse: bool) -> Connect {
                 }
             }
         });
-        Ok(ours)
+        Ok((ours, Box::new(()) as Held))
     })
 }
 

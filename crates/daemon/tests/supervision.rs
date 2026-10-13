@@ -8,15 +8,15 @@ use std::os::fd::AsFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use cave_vm_daemon::home::Home;
 use cave_vm_daemon::launch::{Launcher, ProcessLauncher};
 use cave_vm_daemon::server;
-use cave_vm_daemon::vms::{Prepared, VmSource, Vms};
+use cave_vm_daemon::vms::{Clock, Prepared, VmSource, Vms};
 use cave_vm_proto::daemon::{
     EntryKind, NetMode, Policy, PortMap, Reply, Request, Storage, VmId, VmState,
 };
@@ -189,6 +189,7 @@ fn config(vm: &VmId) -> VmmConfig {
 #[derive(Default)]
 struct Source {
     prepared: AtomicUsize,
+    idle_suspend: Mutex<Option<Duration>>,
 }
 
 impl VmSource for Source {
@@ -213,7 +214,25 @@ impl VmSource for Source {
                 ttl_seconds: None,
                 widened: Vec::new(),
             },
+            idle_suspend: *self.idle_suspend.lock().unwrap(),
         })
+    }
+}
+
+/// A clock that moves only when a test moves it.
+#[derive(Default)]
+struct FakeClock(AtomicU64);
+
+impl FakeClock {
+    fn advance(&self, by: Duration) {
+        self.0
+            .fetch_add(u64::try_from(by.as_millis()).unwrap(), Ordering::SeqCst);
+    }
+}
+
+impl Clock for FakeClock {
+    fn now(&self) -> Duration {
+        Duration::from_millis(self.0.load(Ordering::SeqCst))
     }
 }
 
@@ -221,6 +240,7 @@ struct Rig {
     home: Home,
     vms: Arc<Vms>,
     source: Arc<Source>,
+    clock: Arc<FakeClock>,
 }
 
 impl Drop for Rig {
@@ -243,15 +263,20 @@ fn home(name: &str) -> Home {
 fn rig(name: &str, mode: &str) -> Rig {
     let home = home(name);
     let source = Arc::new(Source::default());
-    let vms = Arc::new(Vms::new(
-        home.clone(),
-        Arc::new(fake_launcher(mode)),
-        source.clone(),
-    ));
+    let clock = Arc::new(FakeClock::default());
+    let vms = Arc::new(
+        Vms::new(home.clone(), Arc::new(fake_launcher(mode)), source.clone())
+            .with_clock(clock.clone()),
+    );
     let listener = server::bind(&home).unwrap();
     let serving = Arc::clone(&vms);
     thread::spawn(move || server::serve(&listener, &serving));
-    Rig { home, vms, source }
+    Rig {
+        home,
+        vms,
+        source,
+        clock,
+    }
 }
 
 /// The VM of this test's own project folder, named after the test's
@@ -495,13 +520,15 @@ fn the_sandboxed_vmm_reaches_only_its_project_state_and_the_image_cache() {
 #[test]
 fn agent_connections_come_from_the_running_vmm() {
     let r = rig("agent", NORMAL);
-    let err = r.vms.agent_connection(&vm()).unwrap_err();
+    let Err(err) = r.vms.agent_connection(&vm()) else {
+        panic!("a connection to a stopped VM")
+    };
     assert_eq!(err.code, ErrorCode::NotRunning);
     assert!(err.fix.unwrap().contains("cave run"));
 
     assert!(matches!(r.start(), Reply::Policy(_)));
     for _ in 0..2 {
-        let mut agent = r.vms.agent_connection(&vm()).unwrap();
+        let (mut agent, _in_use) = r.vms.agent_connection(&vm()).unwrap();
         agent.write_all(b"hello").unwrap();
         let mut back = [0u8; 5];
         agent.read_exact(&mut back).unwrap();
@@ -908,6 +935,53 @@ fn stop_suspends_and_the_next_start_resumes() {
         Reply::Restored { .. }
     ));
     assert!(!suspended.exists());
+}
+
+#[test]
+fn an_unused_vm_is_suspended_after_its_idle_time() {
+    let r = rig("idle", NORMAL);
+    let (id, project) = snapshot_project(&r);
+    let minutes = |n: u64| Duration::from_secs(n * 60);
+    let start = || {
+        r.request(Request::Start {
+            vm: id.clone(),
+            net: None,
+            ports: Vec::new(),
+        })
+    };
+    *r.source.idle_suspend.lock().unwrap() = Some(minutes(30));
+    assert!(matches!(start(), Reply::Policy(_)));
+    r.clock.advance(minutes(29));
+    assert!(r.vms.suspend_idle().is_empty());
+
+    // An open agent connection keeps it in use, however long.
+    let connection = r.vms.agent_connection(&id).unwrap();
+    r.clock.advance(minutes(120));
+    assert!(r.vms.suspend_idle().is_empty());
+    // The idle time counts from when it closed.
+    drop(connection);
+    r.clock.advance(minutes(29));
+    assert!(r.vms.suspend_idle().is_empty());
+    r.clock.advance(minutes(1));
+    assert_eq!(r.vms.suspend_idle(), std::slice::from_ref(&id));
+    assert!(project.join(".cave/suspended/memory").exists());
+    assert_eq!(r.state(), Some(VmState::Suspended));
+
+    // `cave run` on a running VM counts as use.
+    assert!(matches!(start(), Reply::Policy(_)));
+    assert!(project.join(".cave/restored-from").exists());
+    r.clock.advance(minutes(20));
+    assert!(matches!(start(), Reply::Policy(_)));
+    r.clock.advance(minutes(20));
+    assert!(r.vms.suspend_idle().is_empty());
+    r.clock.advance(minutes(10));
+    assert_eq!(r.vms.suspend_idle(), std::slice::from_ref(&id));
+
+    // `idle_suspend = "off"`: never.
+    *r.source.idle_suspend.lock().unwrap() = None;
+    assert!(matches!(start(), Reply::Policy(_)));
+    r.clock.advance(minutes(24 * 60));
+    assert!(r.vms.suspend_idle().is_empty());
 }
 
 impl Rig {
