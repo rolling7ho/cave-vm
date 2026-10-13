@@ -258,6 +258,30 @@ fn waiting_for_the_agent_retries_until_it_answers() {
 }
 
 #[test]
+fn a_connection_that_is_never_answered_is_tried_again_soon() {
+    let attempts = AtomicU32::new(0);
+    let silent = std::sync::Mutex::new(Vec::new());
+    let connect = || {
+        if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            // As after a restore: the guest never sees this one.
+            let (ours, theirs) = UnixStream::pair()?;
+            silent.lock().unwrap().push(theirs);
+            Ok(ours)
+        } else {
+            Ok(agent())
+        }
+    };
+    let start = Instant::now();
+    wait_for_agent(&connect, &|| false, Duration::from_secs(5)).unwrap();
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert!(
+        start.elapsed() < Duration::from_millis(500),
+        "{:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
 fn waiting_for_the_agent_gives_up() {
     let start = Instant::now();
     let refuse = || Err(io::ErrorKind::ConnectionRefused.into());

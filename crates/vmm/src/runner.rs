@@ -151,7 +151,15 @@ impl<W: Write> Devices<W> {
     }
 
     /// Restores each virtio device from a snapshot taken of a machine with
-    /// the same devices in the same slots.
+    /// the same devices in the same slots. Call it after the UART's
+    /// [`set_state`](Pl011::set_state).
+    ///
+    /// Every interrupt line, the UART's included, is driven on the next
+    /// sync. The restored interrupt controller can disagree with a device:
+    /// a vCPU that acknowledged an interrupt parks for the snapshot before
+    /// it lowers the line, so the line is saved high with nothing pending.
+    /// Left high, the guest takes interrupts its driver does not claim,
+    /// and Linux turns the line off for good.
     pub fn restore_virtio(&mut self, saved: &[TransportState]) -> std::result::Result<(), String> {
         if saved.len() != self.virtio.len() {
             return Err(format!(
@@ -162,6 +170,10 @@ impl<W: Write> Devices<W> {
         }
         for (transport, state) in self.virtio.iter_mut().zip(saved) {
             transport.restore(state)?;
+        }
+        self.uart_irq = !self.uart.irq_level();
+        for (transport, line) in self.virtio.iter().zip(&mut self.virtio_irq) {
+            *line = !transport.interrupt().level();
         }
         Ok(())
     }
