@@ -9,7 +9,11 @@ pub mod backend;
 pub mod boot;
 #[cfg(target_os = "macos")]
 pub mod devices;
+#[cfg(target_os = "macos")]
+pub mod disk;
 pub mod fdt;
+#[cfg(target_os = "macos")]
+pub mod host;
 pub mod kernel;
 pub mod layout;
 pub mod memory;

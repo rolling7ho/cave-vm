@@ -17,6 +17,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `cave-vm-proto`: the length-prefixed JSON frame codec, the `hello` version handshake, `error` messages and every guest agent message from `docs/protocol.md` (P3.1).
 - `cave-vm-agent`: the guest agent's exec with streamed output, stdin and signals, checked file reads and atomic file writes, port forwarding to guest loopback, and the control connection for ping, snapshot preparation and clock sync after restore (P3.6a).
 - Userspace network stack in `cave-vm-vmm` (`nat`), built on smoltcp: the guest gets a fixed address on 192.168.127.0/24, the gateway answers ARP and ping, and frames with another hardware or IP address are dropped (P3.7b).
+- Project disks in `cave-vm-vmm`: a 20 GB sparse `.cave/disk.img` created as an APFS clone of the base image, growable but never shrunk, with no absolute paths stored (P3.4). A `host` module wraps `clonefile` and `statfs` (D24).
 - `cave-vm-agent`: the pty shell with resize and signals, the vsock listener on port 1024, and `image/agent/build.sh`, which builds the agent as a static aarch64 musl binary in an Apple container (P3.6b).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
