@@ -16,6 +16,9 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `cave-vm-daemon`: the daemon socket (`daemon.sock`, user-only) with the hello handshake, one VMM process per VM with `start`, `stop` and `list`, crash detection so the next `start` relaunches a crashed VMM, and startup cleanup of VMM processes an earlier daemon left behind. The VMM control link and its messages (`cave-vm-proto::vmm`) are specified in `docs/protocol.md` (P3.10a).
 - `cave-vm-proto`: the daemon API requests and replies, with the reply objects written down in `docs/protocol.md` (P3.1b).
 - `cave-vm-proto`: the length-prefixed JSON frame codec, the `hello` version handshake, `error` messages and every guest agent message from `docs/protocol.md` (P3.1).
+- `cave-vm-agent`: the guest agent's exec with streamed output, stdin and signals, checked file reads and atomic file writes, port forwarding to guest loopback, and the control connection for ping, snapshot preparation and clock sync after restore (P3.6a).
+- Userspace network stack in `cave-vm-vmm` (`nat`), built on smoltcp: the guest gets a fixed address on 192.168.127.0/24, the gateway answers ARP and ping, and frames with another hardware or IP address are dropped (P3.7b).
+- Project disks in `cave-vm-vmm`: a 20 GB sparse `.cave/disk.img` created as an APFS clone of the base image, growable but never shrunk, with no absolute paths stored (P3.4). A `host` module wraps `clonefile` and `statfs` (D24).
 - Image names and digests (`debian@sha256:...`) and the shared image cache in `cave-vm-daemon`: downloads are hashed as they are written and kept only when size and SHA-256 match, so an interrupted or wrong download leaves nothing behind (P3.12a).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
