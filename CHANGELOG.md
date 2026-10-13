@@ -23,6 +23,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - virtio-net device in `cave-vm-vmm`: frames from the guest go to a backend trait, and frames for the guest are delivered from any thread with a bounded backlog. No offloads; the link is always up (P3.7a).
 - virtio-vsock device in `cave-vm-vmm` with no socket files (D26): the VMM opens connections to guest ports as Unix socket pairs, and guest connections to the host go to a handler per port, with credit-based flow control and per-connection threads so a slow peer never blocks a vCPU (P3.5).
 - Decision 0008 (D26): vsock connections without socket files, after socket paths in `.cave/` hit macOS's 104-byte limit.
+- `cave-vm-agent`: the pty shell with resize and signals, the vsock listener on port 1024, and `image/agent/build.sh`, which builds the agent as a static aarch64 musl binary in an Apple container (P3.6b).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
