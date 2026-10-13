@@ -12,3 +12,4 @@ publish.workspace = true
 cave-vm-hvf = { path = "../hvf" }
 vm-fdt = "0.3.0"
 libc = "0.2.190"
+smoltcp = { version = "0.14.0", default-features = false, features = ["std", "medium-ethernet", "proto-ipv4", "socket-tcp", "socket-udp", "auto-icmp-echo-reply"] }
