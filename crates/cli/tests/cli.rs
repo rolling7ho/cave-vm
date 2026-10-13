@@ -531,3 +531,12 @@ fn exec_fails_with_125_when_cave_does() {
     assert_eq!(out.status.code(), Some(125), "{}", stderr(&out));
     assert!(stderr(&out).contains("cannot start the cave daemon"));
 }
+
+#[test]
+fn shell_without_a_terminal_points_at_exec() {
+    let s = Scratch::new();
+    let out = s.cave(&s.project(), &["shell"]);
+    assert_eq!(out.status.code(), Some(125), "{}", stderr(&out));
+    assert!(stderr(&out).contains("cave shell needs a terminal"));
+    assert!(stderr(&out).contains("cave exec -- <cmd>"));
+}
