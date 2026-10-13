@@ -30,6 +30,9 @@ const NORMAL: &str = "normal";
 const FAIL_BOOT: &str = "fail-boot";
 const CRASH_AFTER_BOOT: &str = "crash-after-boot";
 const IGNORE_HANGUP: &str = "ignore-hangup";
+/// Boots only if it can use its disk's folder and the kernel but cannot
+/// read `CAVE_FAKE_SECRET` or write next to it.
+const SANDBOX_CHECK: &str = "sandbox-check";
 
 /// Not a test: the fake VMM's entry point when this binary is started as
 /// one. As a test it returns at once.
@@ -58,6 +61,7 @@ fn fake_vmm() {
                 ErrorCode::Internal,
                 "the kernel did not start",
             )),
+            ToVmm::Boot { config } if mode == SANDBOX_CHECK => sandbox_check(&config),
             ToVmm::Boot { .. } => FromVmm::Booted,
             ToVmm::Ping => FromVmm::Pong,
             ToVmm::AgentConnect => {
@@ -86,6 +90,37 @@ fn fake_vmm() {
     }
 }
 
+/// What the sandboxed fake VMM can and cannot reach.
+fn sandbox_check(config: &VmmConfig) -> FromVmm {
+    let disk = std::path::Path::new(&config.disk);
+    let secret = PathBuf::from(std::env::var_os("CAVE_FAKE_SECRET").unwrap());
+    // What went wrong when each check fails.
+    let checks = [
+        ("could not write its disk", fs::write(disk, b"disk").is_ok()),
+        ("could not read its disk", fs::read(disk).is_ok()),
+        (
+            "could not read the kernel",
+            fs::read(&config.kernel).is_ok(),
+        ),
+        ("read a file outside", fs::read(&secret).is_err()),
+        (
+            "wrote a file outside",
+            fs::write(secret.with_extension("new"), b"x").is_err(),
+        ),
+        (
+            "listed a folder outside",
+            fs::read_dir(secret.parent().unwrap()).is_err(),
+        ),
+    ];
+    match checks.iter().find(|(_, ok)| !ok) {
+        None => FromVmm::Booted,
+        Some((what, _)) => FromVmm::Error(ErrorMessage::new(
+            ErrorCode::Internal,
+            format!("the sandboxed VMM {what}"),
+        )),
+    }
+}
+
 fn fake_launcher(mode: &str) -> ProcessLauncher {
     let mut launcher = ProcessLauncher::new(std::env::current_exe().unwrap());
     launcher.args = ["fake_vmm", "--exact", "--nocapture", "--test-threads=1"]
@@ -93,6 +128,16 @@ fn fake_launcher(mode: &str) -> ProcessLauncher {
         .to_vec();
     launcher.envs = vec![("CAVE_FAKE_VMM".into(), mode.into())];
     launcher
+}
+
+fn config(vm: &VmId) -> VmmConfig {
+    VmmConfig {
+        kernel: "/fake/Image".into(),
+        disk: format!("{}/.cave/disk.img", vm.project),
+        memory_bytes: 2 << 30,
+        cpus: 2,
+        net: NetMode::Nat,
+    }
 }
 
 /// Counts preparations and makes up a config and policy.
@@ -111,13 +156,7 @@ impl VmSource for Source {
         self.prepared.fetch_add(1, Ordering::SeqCst);
         let net = net.unwrap_or(NetMode::Nat);
         Ok(Prepared {
-            config: VmmConfig {
-                kernel: "/fake/Image".into(),
-                disk: format!("{}/.cave/disk.img", vm.project),
-                memory_bytes: 2 << 30,
-                cpus: 2,
-                net,
-            },
+            config: VmmConfig { net, ..config(vm) },
             policy: Policy {
                 name: "app".into(),
                 image: "base".into(),
@@ -302,7 +341,7 @@ fn startup_cleanup_kills_a_vmm_left_by_an_earlier_daemon() {
     let dir = home.vm_dir(&vm()).unwrap();
     // An earlier daemon started this VMM and then died: its control link is
     // gone, but this VMM ignores that.
-    let mut launched = launcher.launch(&dir).unwrap();
+    let mut launched = launcher.launch(&dir, &config(&vm())).unwrap();
     fs::write(dir.join("vmm.pid"), launched.child.id().to_string()).unwrap();
     drop(launched.control);
     thread::sleep(Duration::from_millis(200));
@@ -351,6 +390,49 @@ fn unsupported_and_malformed_requests_are_errors() {
         Reply::Error(e) => assert!(e.message.contains("absolute"), "{}", e.message),
         other => panic!("{other:?}"),
     }
+}
+
+/// The VMM sandbox (P3.13): a VMM started under the profile reaches its
+/// project's `.cave/`, the image cache and the kernel, and nothing else.
+#[test]
+fn the_sandboxed_vmm_reaches_only_its_project_state_and_the_image_cache() {
+    let home = home("sandbox");
+    let root = home.root().canonicalize().unwrap();
+    let state = root.join("project/.cave");
+    let images = root.join("images");
+    let outside = root.join("someone");
+    for dir in [&state, &images, &outside] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    fs::write(images.join("Image"), b"kernel").unwrap();
+    let secret = outside.join("secret.txt");
+    fs::write(&secret, b"do not read").unwrap();
+
+    let mut launcher = fake_launcher(SANDBOX_CHECK);
+    launcher
+        .envs
+        .push(("CAVE_FAKE_SECRET".into(), secret.clone().into()));
+    launcher.sandbox = Some(images.clone());
+    let config = VmmConfig {
+        kernel: images.join("Image").to_string_lossy().into_owned(),
+        disk: state.join("disk.img").to_string_lossy().into_owned(),
+        ..config(&vm())
+    };
+    let dir = home.vm_dir(&vm()).unwrap();
+    let mut launched = launcher.launch(&dir, &config).unwrap();
+    let mut link = launched.control;
+    write_frame(&mut link, &ToVmm::Hello(Hello::client(VERSIONS, "test"))).unwrap();
+    assert!(matches!(
+        read_frame(&mut link).unwrap(),
+        Some(FromVmm::Hello(_))
+    ));
+    write_frame(&mut link, &ToVmm::Boot { config }).unwrap();
+    let reply: Option<FromVmm> = read_frame(&mut link).unwrap();
+    assert_eq!(reply, Some(FromVmm::Booted));
+    assert!(!secret.with_extension("new").exists());
+    write_frame(&mut link, &ToVmm::Stop).unwrap();
+    let _ = launched.child.wait();
+    let _ = fs::remove_dir_all(home.root());
 }
 
 #[test]

@@ -44,11 +44,11 @@ fn run() -> std::io::Result<()> {
     let home = Home::from_env()?;
     let exe = std::env::current_exe()?;
     let vmm = exe.with_file_name("cave-vmm");
-    let vms = Arc::new(Vms::new(
-        home.clone(),
-        Arc::new(ProcessLauncher::new(vmm)),
-        Arc::new(NotYet),
-    ));
+    let images = home.root().join("images");
+    std::fs::create_dir_all(&images)?;
+    let mut launcher = ProcessLauncher::new(vmm);
+    launcher.sandbox = Some(images);
+    let vms = Arc::new(Vms::new(home.clone(), Arc::new(launcher), Arc::new(NotYet)));
     let killed = vms.clean_up()?;
     if killed > 0 {
         eprintln!("cave-daemon: stopped {killed} VMM processes left by an earlier daemon");
