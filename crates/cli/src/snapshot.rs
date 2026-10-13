@@ -1,4 +1,4 @@
-//! `cave snapshot` and `cave restore` (docs/cli.md).
+//! `cave snapshot`, `cave restore` and `cave fork` (docs/cli.md).
 
 use std::time::Instant;
 
@@ -55,7 +55,34 @@ pub fn restore(name: Option<String>, fork: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// The warning for a restore that booted from the disk (docs/cli.md).
+/// `cave fork [name] [--from <snapshot>]`.
+pub fn fork(name: Option<String>, from: Option<String>) -> Result<()> {
+    let project = project::require()?;
+    let started = Instant::now();
+    let Reply::Forked { name, from, reason } = Connection::call(&Request::Fork {
+        vm: vm_id(&project, None),
+        name,
+        from,
+    })?
+    else {
+        return Err(CliError::new("the daemon sent an unexpected reply to fork"));
+    };
+    if let Some(reason) = &reason {
+        eprintln!("{}", fallback_warning(&from, reason));
+    }
+    println!("{}", forked(&name, &from, started.elapsed()));
+    Ok(())
+}
+
+fn forked(name: &str, from: &str, elapsed: std::time::Duration) -> String {
+    format!(
+        "Forked {name} from {from} ({}). Use it with: cave shell --fork {name}",
+        policy::seconds(elapsed)
+    )
+}
+
+/// The warning for a restore or fork that booted from the disk
+/// (docs/cli.md).
 fn fallback_warning(name: &str, reason: &str) -> String {
     format!(
         "warning: could not load the memory state of {name} ({reason})\n  \
@@ -97,6 +124,14 @@ mod tests {
         assert_eq!(
             restored("before", Duration::from_millis(800), None),
             "Restored before (0.8s)"
+        );
+        assert_eq!(
+            forked(
+                "fork-1",
+                "my-project-2026-10-12-debian",
+                Duration::from_millis(300)
+            ),
+            "Forked fork-1 from my-project-2026-10-12-debian (0.3s). Use it with: cave shell --fork fork-1"
         );
     }
 }
