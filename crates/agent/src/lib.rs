@@ -16,6 +16,8 @@ pub mod pty;
 pub mod session;
 pub mod stream;
 pub mod sys;
+pub mod user;
 
 pub use session::{Config, serve};
 pub use stream::Stream;
+pub use user::User;

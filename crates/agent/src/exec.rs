@@ -86,6 +86,9 @@ pub fn run(req: Exec, mut reader: Box<dyn Stream>, out: Out, config: &Config) ->
         return Ok(());
     };
     let mut command = Command::new(&req.argv[0]);
+    if let Some(user) = &config.user {
+        user.apply(&mut command);
+    }
     command
         .args(&req.argv[1..])
         .current_dir(&cwd)
