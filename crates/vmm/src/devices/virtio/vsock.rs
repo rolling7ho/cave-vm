@@ -34,6 +34,9 @@ pub const RX_QUEUE: u16 = 0;
 pub const TX_QUEUE: u16 = 1;
 pub const EVENT_QUEUE: u16 = 2;
 
+/// `virtio_vsock_event` id: every connection was reset, as after a restore.
+const EVENT_TRANSPORT_RESET: u32 = 0;
+
 /// The host's context ID.
 pub const HOST_CID: u64 = 2;
 
@@ -299,9 +302,9 @@ fn write_packet(
 pub struct Vsock {
     shared: Arc<Shared>,
     tx: Option<ActiveQueue>,
-    /// The event queue, kept for snapshots until transport resets use it
-    /// (P4.3).
-    event: Option<Queue>,
+    event: Option<ActiveQueue>,
+    /// A transport reset is waiting for an event buffer.
+    reset_pending: bool,
 }
 
 impl Vsock {
@@ -323,6 +326,7 @@ impl Vsock {
             shared,
             tx: None,
             event: None,
+            reset_pending: false,
         }
     }
 
@@ -344,6 +348,42 @@ impl Vsock {
 
     fn config(&self) -> [u8; 8] {
         self.shared.cid.to_le_bytes()
+    }
+
+    /// Delivers a waiting transport reset, if the driver has posted an
+    /// event buffer.
+    fn send_events(&mut self) {
+        let Some(active) = &mut self.event else {
+            return;
+        };
+        if !self.reset_pending || active.broken {
+            return;
+        }
+        let chain = match active.queue.pop(&active.memory) {
+            Ok(Some(chain)) => chain,
+            Ok(None) => return,
+            Err(_) => {
+                active.broken = true;
+                return;
+            }
+        };
+        let id = EVENT_TRANSPORT_RESET.to_le_bytes();
+        let written = match chain.write_at(&active.memory, 0, &id) {
+            Ok(n) if n == id.len() => n as u32,
+            _ => 0,
+        };
+        if active
+            .queue
+            .add_used(&active.memory, chain.head, written)
+            .is_err()
+        {
+            active.broken = true;
+            return;
+        }
+        self.reset_pending = false;
+        if active.queue.needs_interrupt(&active.memory).unwrap_or(true) {
+            active.interrupt.raise(interrupt::USED_BUFFER);
+        }
     }
 
     /// Handles every packet waiting in the transmit queue.
@@ -725,7 +765,7 @@ impl VirtioDevice for Vsock {
             broken: false,
         };
         self.tx = Some(active(tx));
-        self.event = Some(event);
+        self.event = Some(active(event));
         let mut state = self.shared.lock();
         state.rx = Some(active(rx));
         Ok(())
@@ -735,8 +775,7 @@ impl VirtioDevice for Vsock {
         match index {
             RX_QUEUE => fill(&mut self.shared.lock()),
             TX_QUEUE => self.transmit(),
-            // Events go from the device to the driver only (transport
-            // resets after a restore, phase 4).
+            EVENT_QUEUE => self.send_events(),
             _ => {}
         }
     }
@@ -744,6 +783,7 @@ impl VirtioDevice for Vsock {
     fn reset(&mut self) {
         self.tx = None;
         self.event = None;
+        self.reset_pending = false;
         let mut state = self.shared.lock();
         state.rx = None;
         state.backlog.clear();
@@ -755,17 +795,26 @@ impl VirtioDevice for Vsock {
     }
 
     /// Connections to the host are not saved: they end with the process,
-    /// and the guest learns of it from a transport reset (P4.3).
+    /// and the guest learns of it from a transport reset.
     fn save_queues(&self) -> Vec<Queue> {
         let rx = self.shared.lock().rx.as_ref().map(|a| a.queue.clone());
         [
             rx,
             self.tx.as_ref().map(|a| a.queue.clone()),
-            self.event.clone(),
+            self.event.as_ref().map(|a| a.queue.clone()),
         ]
         .into_iter()
         .flatten()
         .collect()
+    }
+
+    /// The guest's connections were to a VMM that is gone. A transport
+    /// reset makes the driver reset every connected socket, so programs
+    /// see an error instead of a hang; listening sockets, such as the
+    /// agent's, keep listening.
+    fn restored(&mut self) {
+        self.reset_pending = true;
+        self.send_events();
     }
 }
 

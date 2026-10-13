@@ -421,3 +421,39 @@ fn a_restored_device_continues_from_the_saved_queues() {
     assert_eq!(request.op, op::REQUEST);
     assert_eq!(r.dev.save_queues()[RX_QUEUE as usize].next_used, 2);
 }
+
+#[test]
+fn a_restore_sends_a_transport_reset_when_an_event_buffer_is_posted() {
+    let mem = guest_memory();
+    let rxq = DriverQueue::at(&mem, 64, 0);
+    let txq = DriverQueue::at(&mem, 64, 1);
+    let mut evq = DriverQueue::at(&mem, 8, 2);
+    let interrupt = Interrupt::new();
+    let mut dev = Vsock::new(GUEST_CID);
+    dev.activate(Activation {
+        memory: mem.clone(),
+        queues: vec![rxq.device_queue(), txq.device_queue(), evq.device_queue()],
+        features: 0,
+        interrupt: interrupt.clone(),
+    })
+    .unwrap();
+    // No event buffer yet: the reset waits for one.
+    dev.restored();
+    assert!(evq.used(&mem).is_empty());
+    assert!(!interrupt.level());
+
+    let head = evq.add(&mem, &[], &[4]);
+    dev.queue_notify(EVENT_QUEUE);
+    assert_eq!(evq.used(&mem), vec![(u32::from(head), 4)]);
+    assert_eq!(
+        evq.written(&mem, head, 0, 4),
+        EVENT_TRANSPORT_RESET.to_le_bytes()
+    );
+    assert!(interrupt.level());
+
+    // Sent once.
+    evq.add(&mem, &[], &[4]);
+    dev.queue_notify(EVENT_QUEUE);
+    assert!(evq.used(&mem).is_empty());
+    assert_eq!(dev.save_queues()[EVENT_QUEUE as usize].next_used, 1);
+}

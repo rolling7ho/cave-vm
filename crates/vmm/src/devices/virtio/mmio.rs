@@ -171,7 +171,10 @@ impl MmioTransport {
                 interrupt: self.interrupt.clone(),
             };
             match self.device.activate(activation) {
-                Ok(()) => self.activated = true,
+                Ok(()) => {
+                    self.activated = true;
+                    self.device.restored();
+                }
                 Err(_) => self.needs_reset(),
             }
         }
@@ -436,6 +439,9 @@ mod tests {
         }
         fn save_queues(&self) -> Vec<Queue> {
             self.active.as_ref().unwrap().queues.clone()
+        }
+        fn restored(&mut self) {
+            self.log.lock().unwrap().push("restored".into());
         }
     }
 
@@ -709,7 +715,7 @@ mod tests {
             vec![(u32::from(first), 3), (u32::from(second), 3)]
         );
         assert_eq!(&q0.written(&mem, second, 0, 3), b"TWO");
-        assert_eq!(*log.lock().unwrap(), ["activate", "notify 0"]);
+        assert_eq!(*log.lock().unwrap(), ["activate", "restored", "notify 0"]);
     }
 
     #[test]
