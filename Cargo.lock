@@ -39,6 +39,9 @@ version = "0.0.0"
 [[package]]
 name = "cave-vm-daemon"
 version = "0.0.0"
+dependencies = [
+ "sha2",
+]
 
 [[package]]
 name = "cave-vm-hvf"
