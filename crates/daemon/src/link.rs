@@ -1,11 +1,15 @@
 //! The daemon's end of a VMM control link (docs/protocol.md, "VMM control").
 
-use std::io;
+use std::io::{self, Read};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
+use cave_vm_proto::frame::decode;
 use cave_vm_proto::vmm::{FromVmm, ToVmm};
-use cave_vm_proto::{ErrorMessage, FrameError, Hello, VERSIONS, read_frame, write_frame};
+use cave_vm_proto::{
+    ErrorMessage, FrameError, Hello, MAX_FRAME, VERSIONS, read_frame, write_frame,
+};
+use cave_vm_vmm::host;
 
 /// How long most requests may take.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -68,6 +72,46 @@ impl VmmLink {
             Ok(None) => Err(LinkError::Io(io::ErrorKind::UnexpectedEof.into())),
             Err(FrameError::Io(e)) => Err(LinkError::Io(e)),
             Err(e) => Err(LinkError::Frame(e)),
+        }
+    }
+
+    /// A new connection to the guest agent: the VMM answers
+    /// `agent_connect` with the connection attached as a file descriptor
+    /// (D26). The caller speaks the agent protocol on it from the handshake.
+    pub fn agent_connect(&mut self) -> Result<UnixStream, LinkError> {
+        self.stream
+            .set_read_timeout(Some(REPLY_TIMEOUT))
+            .map_err(LinkError::Io)?;
+        write_frame(&mut self.stream, &ToVmm::AgentConnect).map_err(LinkError::Frame)?;
+        // The descriptor comes with the first bytes of the reply.
+        let mut head = [0u8; 4];
+        let mut got = 0;
+        let mut fd = None;
+        while got < head.len() {
+            let (n, received) =
+                host::recv_with_fd(&self.stream, &mut head[got..]).map_err(LinkError::Io)?;
+            if n == 0 {
+                return Err(LinkError::Io(io::ErrorKind::UnexpectedEof.into()));
+            }
+            fd = fd.or(received);
+            got += n;
+        }
+        let len = u32::from_be_bytes(head) as usize;
+        if len > MAX_FRAME {
+            return Err(LinkError::Frame(FrameError::TooLarge(len)));
+        }
+        let mut body = vec![0u8; len];
+        self.stream.read_exact(&mut body).map_err(LinkError::Io)?;
+        match decode::<FromVmm>(&body).map_err(LinkError::Frame)? {
+            FromVmm::AgentConnection => match fd {
+                Some(fd) => Ok(UnixStream::from(fd)),
+                None => Err(LinkError::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "agent_connection came without a connection",
+                ))),
+            },
+            FromVmm::Error(e) => Err(LinkError::Vmm(e)),
+            other => Err(LinkError::Unexpected(other)),
         }
     }
 
