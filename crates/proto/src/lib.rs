@@ -3,11 +3,13 @@
 //! The wire format is specified in `docs/protocol.md`: frames of a 4-byte
 //! big-endian length and a JSON object ([`frame`]), a `hello` handshake that
 //! picks the protocol version ([`handshake`]), and the messages themselves.
-//! [`agent`] has the guest agent link's messages.
+//! [`agent`] has the guest agent link's messages, and [`daemon`] the daemon
+//! API's requests and replies.
 
 #![deny(unsafe_code)]
 
 pub mod agent;
+pub mod daemon;
 mod data;
 pub mod error;
 pub mod frame;
