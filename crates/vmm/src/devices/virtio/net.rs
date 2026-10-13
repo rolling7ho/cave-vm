@@ -75,11 +75,16 @@ impl ActiveQueue {
 struct Rx {
     active: Option<ActiveQueue>,
     backlog: VecDeque<Vec<u8>>,
+    /// Frames wait in the backlog while a snapshot is taken.
+    paused: bool,
 }
 
 impl Rx {
     /// Moves frames from the backlog into free receive buffers.
     fn fill(&mut self) {
+        if self.paused {
+            return;
+        }
         let Some(active) = &mut self.active else {
             return;
         };
@@ -274,6 +279,16 @@ impl VirtioDevice for Net {
         let mut rx = self.rx.lock().expect("net rx lock");
         rx.active = None;
         rx.backlog.clear();
+    }
+
+    fn pause(&mut self) {
+        self.rx.lock().expect("net rx lock").paused = true;
+    }
+
+    fn resume(&mut self) {
+        let mut rx = self.rx.lock().expect("net rx lock");
+        rx.paused = false;
+        rx.fill();
     }
 
     /// Frames waiting in the backlog are not saved: they are dropped, as
@@ -525,6 +540,21 @@ mod tests {
         assert_eq!(
             r.rxq.used(&r.mem),
             vec![(u32::from(rx1), len), (u32::from(rx2), len + 1)]
+        );
+    }
+
+    #[test]
+    fn frames_wait_while_paused() {
+        let mut r = rig();
+        let head = r.rxq.add(&r.mem, &[], &[2048]);
+        r.net.queue_notify(RX_QUEUE);
+        r.net.pause();
+        assert!(r.receiver.deliver(&frame(60)));
+        assert!(r.rxq.used(&r.mem).is_empty(), "guest memory untouched");
+        r.net.resume();
+        assert_eq!(
+            r.rxq.used(&r.mem),
+            vec![(u32::from(head), (HEADER_SIZE + 60) as u32)]
         );
     }
 }

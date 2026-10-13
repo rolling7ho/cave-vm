@@ -14,13 +14,17 @@
 //! power state of every vCPU lives in [`Machine`] too. vCPU 0 runs with
 //! [`run`]; the others with [`run_secondary`], which waits for the guest to
 //! start them with `CPU_ON`.
+//!
+//! [`Machine::pause`] stops every vCPU between exits, so no MMIO access is
+//! half done, and has each save its own state on its own thread, for a
+//! snapshot of a running VM. [`Machine::resume`] lets them go on.
 
 use std::fmt;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::backend::{self, Backend, BackendVcpu, DataAccess, Exit, Kick, Reg, SysReg, Trap};
 use crate::boot;
@@ -28,6 +32,7 @@ use crate::devices::pl011::Pl011;
 use crate::devices::virtio::mmio::{MmioTransport, TransportState};
 use crate::layout;
 use crate::psci;
+use crate::snapshot::{self, VcpuState};
 
 /// Interrupt ID of the EL1 virtual timer (PPI 11).
 pub const VTIMER_INTID: u32 = 27;
@@ -35,6 +40,8 @@ pub const VTIMER_INTID: u32 = 27;
 const MAX_WFI_SLEEP: Duration = Duration::from_millis(10);
 /// How often a powered-off vCPU checks whether the machine is stopping.
 const POWER_POLL: Duration = Duration::from_millis(20);
+/// Longest [`Machine::pause`] waits for every vCPU to stop and save.
+const PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 // CNTV_CTL_EL0 bits.
 const CNTV_ENABLE: u64 = 1 << 0;
@@ -82,6 +89,8 @@ pub enum Error {
     },
     /// An exit reason the VMM does not know.
     UnknownExit(u32),
+    /// The vCPUs could not all be paused for a snapshot.
+    Pause(String),
 }
 
 impl fmt::Display for Error {
@@ -96,6 +105,7 @@ impl fmt::Display for Error {
                 )
             }
             Error::UnknownExit(reason) => write!(f, "unknown vCPU exit reason {reason}"),
+            Error::Pause(why) => write!(f, "cannot pause the VM: {why}"),
         }
     }
 }
@@ -124,6 +134,14 @@ impl<W: Write> Devices<W> {
     /// The virtio device in `slot`.
     pub fn virtio(&self, slot: u32) -> Option<&MmioTransport> {
         self.virtio.get(slot as usize)
+    }
+
+    fn pause_virtio(&mut self) {
+        self.virtio.iter_mut().for_each(MmioTransport::pause);
+    }
+
+    fn resume_virtio(&mut self) {
+        self.virtio.iter_mut().for_each(MmioTransport::resume);
     }
 
     /// Each virtio device's state, by slot, for a snapshot. The vCPUs must
@@ -174,6 +192,19 @@ struct CpuTable {
     system: Option<Stop>,
 }
 
+/// A pause for a snapshot, shared by [`Machine::pause`] and the vCPUs.
+#[derive(Default)]
+struct PauseTable {
+    /// vCPUs stopped at the top of their loop.
+    parked: u32,
+    /// The host time every vCPU saves its timer with, set once all are
+    /// parked, so no vCPU can have seen a later guest time.
+    save_at: Option<u64>,
+    /// Each vCPU's state, once saved.
+    saved: Vec<Option<VcpuState>>,
+    error: Option<String>,
+}
+
 /// The devices, vCPU power states and settings the run loops share.
 pub struct Machine<W: Write> {
     devices: Mutex<Devices<W>>,
@@ -182,6 +213,11 @@ pub struct Machine<W: Write> {
     cpus: Mutex<CpuTable>,
     power_changed: Condvar,
     stop: Arc<AtomicBool>,
+    /// Set while a pause is asked for or in place; the vCPUs check it at
+    /// the top of their loop.
+    pause_requested: AtomicBool,
+    pause: Mutex<PauseTable>,
+    pause_changed: Condvar,
 }
 
 impl<W: Write> Machine<W> {
@@ -205,6 +241,9 @@ impl<W: Write> Machine<W> {
             }),
             power_changed: Condvar::new(),
             stop: Arc::new(AtomicBool::new(false)),
+            pause_requested: AtomicBool::new(false),
+            pause: Mutex::new(PauseTable::default()),
+            pause_changed: Condvar::new(),
         }
     }
 
@@ -260,6 +299,125 @@ impl<W: Write> Machine<W> {
         assert_eq!(power.len(), table.power.len(), "one state per vCPU");
         table.power.copy_from_slice(power);
         self.power_changed.notify_all();
+    }
+
+    fn pause_table(&self) -> MutexGuard<'_, PauseTable> {
+        self.pause.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Pauses every vCPU between exits and the devices' own threads, and
+    /// returns each vCPU's state with its power state, for a snapshot. The
+    /// VM stays paused, with its memory, interrupt controller and devices
+    /// unchanging, until [`Machine::resume`]. Call it from a thread that
+    /// runs no vCPU, while every vCPU thread is in its run loop.
+    pub fn pause<B: Backend>(&self, backend: &B) -> Result<Vec<VcpuState>> {
+        let cpus = self.cpus();
+        let deadline = Instant::now() + PAUSE_TIMEOUT;
+        {
+            let mut table = self.pause_table();
+            if self.stopping().is_some() {
+                return Err(Error::Pause("the VM is stopping".into()));
+            }
+            if self.pause_requested.load(Ordering::Acquire) {
+                return Err(Error::Pause("it is already paused".into()));
+            }
+            table.save_at = None;
+            table.saved = vec![None; cpus as usize];
+            table.error = None;
+            self.pause_requested.store(true, Ordering::SeqCst);
+        }
+        self.kick_all();
+        let result = self.wait_for_parked(backend, cpus, deadline);
+        match result {
+            Ok(mut states) => {
+                for (state, power) in states.iter_mut().zip(self.power()) {
+                    state.power = power;
+                }
+                self.devices().pause_virtio();
+                Ok(states)
+            }
+            Err(e) => {
+                self.resume_vcpus();
+                Err(e)
+            }
+        }
+    }
+
+    fn wait_for_parked<B: Backend>(
+        &self,
+        backend: &B,
+        cpus: u32,
+        deadline: Instant,
+    ) -> Result<Vec<VcpuState>> {
+        let mut table = self.pause_table();
+        loop {
+            if let Some(why) = table.error.take() {
+                return Err(Error::Pause(why));
+            }
+            if self.stopping().is_some() {
+                return Err(Error::Pause("the VM is stopping".into()));
+            }
+            if table.save_at.is_none() && table.parked == cpus {
+                table.save_at = Some(backend.now_ticks());
+                self.pause_changed.notify_all();
+            }
+            if table.saved.iter().all(Option::is_some) {
+                return Ok(table.saved.iter().flatten().cloned().collect());
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::Pause(format!(
+                    "only {} of {cpus} vCPUs stopped",
+                    table.parked
+                )));
+            }
+            table = self
+                .pause_changed
+                .wait_timeout(table, POWER_POLL)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+    }
+
+    /// Lets the devices and vCPUs run again after [`Machine::pause`].
+    pub fn resume(&self) {
+        self.devices().resume_virtio();
+        self.resume_vcpus();
+    }
+
+    fn resume_vcpus(&self) {
+        let mut table = self.pause_table();
+        self.pause_requested.store(false, Ordering::SeqCst);
+        table.save_at = None;
+        self.pause_changed.notify_all();
+    }
+
+    /// Stops vCPU `index` while a pause is asked for: it saves its state
+    /// once every vCPU has stopped, then waits for [`Machine::resume`].
+    fn park<V: BackendVcpu>(&self, vcpu: &V, index: u32) {
+        if !self.pause_requested.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut table = self.pause_table();
+        table.parked += 1;
+        self.pause_changed.notify_all();
+        while self.pause_requested.load(Ordering::SeqCst) && self.stopping().is_none() {
+            if let Some(now) = table.save_at
+                && table.saved.get(index as usize).is_some_and(Option::is_none)
+            {
+                match snapshot::save_vcpu(vcpu, now) {
+                    Ok(state) => table.saved[index as usize] = Some(state),
+                    Err(e) => table.error = Some(format!("vCPU {index}: {e}")),
+                }
+                self.pause_changed.notify_all();
+            }
+            table = self
+                .pause_changed
+                .wait_timeout(table, POWER_POLL)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        table.parked -= 1;
+        self.pause_changed.notify_all();
     }
 
     /// Why the machine as a whole stopped, if it did.
@@ -342,17 +500,20 @@ impl<W: Write> Machine<W> {
         self.cpu_table().power[index as usize] = Power::Off;
     }
 
-    /// Waits until vCPU `index` is started, returning the entry point and
-    /// context ID and marking it on, or `None` if the machine stops first.
-    fn wait_for_power_on(&self, index: u32) -> Option<(u64, u64)> {
+    /// Waits until vCPU `index` is started, marking it on, or until the
+    /// machine stops or is to pause.
+    fn wait_for_power_on(&self, index: u32) -> Wake {
         let mut table = self.cpu_table();
         loop {
             if table.system.is_some() || self.stop.load(Ordering::Acquire) {
-                return None;
+                return Wake::Stop;
+            }
+            if self.pause_requested.load(Ordering::SeqCst) {
+                return Wake::Pause;
             }
             if let Power::OnPending { entry, context } = table.power[index as usize] {
                 table.power[index as usize] = Power::On;
-                return Some((entry, context));
+                return Wake::Start { entry, context };
             }
             table = self
                 .power_changed
@@ -410,6 +571,13 @@ impl<W: Write> Machine<W> {
     }
 }
 
+/// What a powered-off vCPU woke for.
+enum Wake {
+    Start { entry: u64, context: u64 },
+    Stop,
+    Pause,
+}
+
 /// Runs vCPU 0 until the guest stops it or an error occurs.
 pub fn run<B: Backend, V: BackendVcpu, W: Write>(
     backend: &B,
@@ -434,10 +602,14 @@ pub fn run_secondary<B: Backend, V: BackendVcpu, W: Write>(
     let mut restored_on = machine.cpu_table().power[index as usize] == Power::On;
     loop {
         if !restored_on {
-            let Some((entry, context)) = machine.wait_for_power_on(index) else {
-                return Ok(machine.stopping().unwrap_or(Stop::Canceled));
-            };
-            boot::start_secondary(vcpu, entry, context)?;
+            match machine.wait_for_power_on(index) {
+                Wake::Start { entry, context } => boot::start_secondary(vcpu, entry, context)?,
+                Wake::Stop => return Ok(machine.stopping().unwrap_or(Stop::Canceled)),
+                Wake::Pause => {
+                    machine.park(vcpu, index);
+                    continue;
+                }
+            }
         }
         restored_on = false;
         match run_vcpu(backend, vcpu, index, machine)? {
@@ -458,6 +630,10 @@ fn run_vcpu<B: Backend, V: BackendVcpu, W: Write>(
         if let Some(stop) = machine.stopping() {
             machine.kick_all();
             return Ok(stop);
+        }
+        machine.park(vcpu, index);
+        if machine.stopping().is_some() {
+            continue;
         }
         machine.take_input(Duration::ZERO);
         machine.devices().sync_irqs(backend)?;

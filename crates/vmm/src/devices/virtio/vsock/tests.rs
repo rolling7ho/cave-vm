@@ -457,3 +457,14 @@ fn a_restore_sends_a_transport_reset_when_an_event_buffer_is_posted() {
     assert!(evq.used(&mem).is_empty());
     assert_eq!(dev.save_queues()[EVENT_QUEUE as usize].next_used, 1);
 }
+
+#[test]
+fn packets_wait_while_paused() {
+    let mut r = rig();
+    r.dev.pause();
+    let _host = r.dev.connector().connect(AGENT_PORT).unwrap();
+    r.no_packet();
+    r.dev.resume();
+    let (request, _) = r.next_packet();
+    assert_eq!(request.op, op::REQUEST);
+}

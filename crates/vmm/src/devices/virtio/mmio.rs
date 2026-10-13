@@ -130,6 +130,20 @@ impl MmioTransport {
         }
     }
 
+    /// Pauses the device's own threads, for a snapshot.
+    pub fn pause(&mut self) {
+        if self.activated {
+            self.device.pause();
+        }
+    }
+
+    /// Ends [`MmioTransport::pause`].
+    pub fn resume(&mut self) {
+        if self.activated {
+            self.device.resume();
+        }
+    }
+
     /// Restores saved state into a new transport over the same kind of
     /// device. An active device is activated again with its saved queues,
     /// so it carries on from the same ring positions. A device that cannot
