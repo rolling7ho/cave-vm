@@ -96,6 +96,7 @@ name = "cave-vm-daemon"
 version = "0.0.0"
 dependencies = [
  "cave-vm-proto",
+ "cave-vm-vmm",
  "serde_json",
  "sha2",
  "toml_edit",

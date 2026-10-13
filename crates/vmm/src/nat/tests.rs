@@ -500,3 +500,31 @@ fn large_transfers_arrive_intact_in_both_directions() {
     });
     assert!(reader.join().unwrap() == data);
 }
+
+#[test]
+fn run_answers_frames_queued_from_another_thread_until_closed() {
+    let mut stack = stack(Mode::Nat);
+    let frames = stack.guest_frames();
+    let (tx, rx) = mpsc::channel();
+    let started = std::time::Instant::now();
+    let runner = std::thread::spawn(move || {
+        let clock = || started.elapsed();
+        let mut deliver = |frame: &[u8]| tx.send(frame.to_vec()).unwrap();
+        stack.run(&clock, &mut deliver, &mut |_| {});
+    });
+    assert!(frames.send(&arp_request(GUEST_MAC, GUEST_IP, GATEWAY_IP)));
+    let reply = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_arp_reply(&reply);
+    frames.close();
+    runner.join().unwrap();
+    assert!(!frames.send(&arp_request(GUEST_MAC, GUEST_IP, GATEWAY_IP)));
+}
+
+#[test]
+fn queued_guest_frames_are_bounded() {
+    let stack = stack(Mode::Nat);
+    let frames = stack.guest_frames();
+    let arp = arp_request(GUEST_MAC, GUEST_IP, GATEWAY_IP);
+    let sent = (0..BACKLOG + 10).filter(|_| frames.send(&arp)).count();
+    assert_eq!(sent, BACKLOG);
+}

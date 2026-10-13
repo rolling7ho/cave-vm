@@ -4,7 +4,8 @@
 //! `vmm.log`: the guest's console, then this process's own notes.
 //!
 //! It waits for `boot`, boots the kernel with the project disk on
-//! `/dev/vda` and the vsock device, replies `booted` once the guest agent
+//! `/dev/vda`, the vsock device and, unless `net` is `off`, a network device
+//! behind the userspace NAT stack, replies `booted` once the guest agent
 //! answers, and then hands out agent connections until `stop`. If the link
 //! closes, the VM stops; if the guest powers off, the process exits.
 
@@ -26,10 +27,10 @@ mod vmm {
     use std::os::unix::net::UnixStream;
     use std::path::Path;
     use std::process::ExitCode;
-    use std::sync::Barrier;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Barrier, OnceLock};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use cave_vm_hvf::{Vm, VmConfig};
     use cave_vm_proto::daemon::NetMode;
@@ -41,9 +42,11 @@ mod vmm {
     use cave_vm_vmm::control::{self, RunningVm};
     use cave_vm_vmm::devices::virtio::block::Block;
     use cave_vm_vmm::devices::virtio::mmio::MmioTransport;
+    use cave_vm_vmm::devices::virtio::net::{Net, NetBackend, NetReceiver};
     use cave_vm_vmm::devices::virtio::vsock::{self, Vsock};
     use cave_vm_vmm::host;
     use cave_vm_vmm::kernel::BootLayout;
+    use cave_vm_vmm::nat::{self, ConnectEvent, GuestFrames, HostUdp, Policy, Stack, TcpConnector};
     use cave_vm_vmm::runner::{self, Machine};
 
     /// The guest's vsock context ID: the first one free for guests.
@@ -108,7 +111,7 @@ mod vmm {
         let mut line = String::from("console=ttyAMA0 root=/dev/vda rw panic=-1");
         if net != NetMode::Off {
             line.push(' ');
-            line.push_str(&cave_vm_vmm::nat::kernel_ip_arg());
+            line.push_str(&nat::kernel_ip_arg());
         }
         line
     }
@@ -124,18 +127,13 @@ mod vmm {
     /// Boots the VM, then serves the link until `stop` or until it closes.
     /// An `Err` goes back to the daemon as the reply to `boot`.
     fn run(link: &mut UnixStream, config: &VmmConfig) -> Result<(), ErrorMessage> {
-        if config.net != NetMode::Off {
-            // The network stack is wired in by the change after this one.
-            note("networking is not wired into cave-vmm yet; booting without it");
-        }
-        let net = NetMode::Off;
         let boot_config = BootConfig {
             kernel: read(&config.kernel, "kernel")?,
             initrd: None,
-            cmdline: cmdline(net),
+            cmdline: cmdline(config.net),
             memory_size: config.memory_bytes,
             cpus: config.cpus,
-            virtio_slots: 2,
+            virtio_slots: 2 + u32::from(config.net != NetMode::Off),
         };
         let block = Block::open(Path::new(&config.disk), false, DISK_ID).map_err(|e| {
             ErrorMessage::new(
@@ -154,6 +152,13 @@ mod vmm {
         let mut machine = Machine::new(io::stdout(), None, config.cpus);
         machine.add_virtio(MmioTransport::new(Box::new(block), prepared.memory.clone()));
         machine.add_virtio(MmioTransport::new(Box::new(vsock), prepared.memory.clone()));
+        let mut gateway = network(config.net);
+        if let Some((stack, _)) = &gateway {
+            let net = Net::new(nat::GUEST_MAC, Box::new(ToStack(stack.guest_frames())));
+            let receiver = net.receiver();
+            machine.add_virtio(MmioTransport::new(Box::new(net), prepared.memory.clone()));
+            gateway = gateway.map(|(stack, _)| (stack, Some(receiver)));
+        }
         let machine = machine;
 
         // When the guest stops by itself, closing our side of the link ends
@@ -185,14 +190,76 @@ mod vmm {
                 })
                 .collect();
             created.wait();
+            let closer = gateway.as_ref().map(|(stack, _)| stack.guest_frames());
+            if let Some((mut stack, Some(receiver))) = gateway {
+                scope.spawn(move || {
+                    let mut deliver = |frame: &[u8]| {
+                        receiver.deliver(frame);
+                    };
+                    stack.run(&clock, &mut deliver, &mut record);
+                });
+            }
 
             let outcome = serve(link, &vm_agent, &gone);
             machine.request_stop();
+            if let Some(closer) = closer {
+                closer.close();
+            }
             for thread in threads {
                 thread.join().expect("vCPU thread panicked");
             }
             outcome
         })
+    }
+
+    /// The network stack for `mode`, or none for `off`, with an empty slot
+    /// for the device's receiver.
+    fn network(mode: NetMode) -> Option<(Stack, Option<NetReceiver>)> {
+        let mode = match mode {
+            NetMode::Off => return None,
+            NetMode::Nat => nat::Mode::Nat,
+            NetMode::Lan => nat::Mode::Lan,
+        };
+        // The Mac's own addresses are denied in every mode.
+        let host_addrs = host::ipv4_addresses().unwrap_or_else(|e| {
+            note(format!(
+                "cannot list the Mac's addresses ({e}); denying loopback only"
+            ));
+            Vec::new()
+        });
+        let stack = Stack::new(
+            clock(),
+            Policy::new(mode, host_addrs),
+            Arc::new(TcpConnector::default()),
+        )
+        .with_udp(Arc::new(HostUdp), nat::host_dns_servers());
+        Some((stack, None))
+    }
+
+    /// Time since this process started, the network stack's clock.
+    fn clock() -> Duration {
+        static START: OnceLock<Instant> = OnceLock::new();
+        START.get_or_init(Instant::now).elapsed()
+    }
+
+    /// Connection attempts go to `vmm.log` until the daemon's audit log
+    /// takes them.
+    fn record(event: ConnectEvent) {
+        let verdict = match event.reason {
+            None if event.allowed => "allowed".to_string(),
+            None => "denied".to_string(),
+            Some(reason) => format!("denied ({reason})"),
+        };
+        note(format!("{:?} to {} {verdict}", event.protocol, event.dst));
+    }
+
+    /// Frames from the guest go to the network stack's thread.
+    struct ToStack(GuestFrames);
+
+    impl NetBackend for ToStack {
+        fn send(&mut self, frame: &[u8]) {
+            self.0.send(frame);
+        }
     }
 
     fn serve(link: &mut UnixStream, vm: &Booted, gone: &AtomicBool) -> Result<(), ErrorMessage> {
