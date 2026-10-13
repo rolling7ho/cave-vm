@@ -159,7 +159,7 @@ The daemon, through the VMM, keeps one connection to the agent open while the VM
 | `{"type": "ping"}` / `{"type": "pong"}` | either way | Liveness |
 | `{"type": "snapshot_prepare"}` | host to agent | A snapshot is about to be taken. The agent flushes file systems (`sync`) and answers `snapshot_ready` |
 | `{"type": "snapshot_ready"}` | agent to host | Safe to pause the VM |
-| `{"type": "restored", "time_unix_ns": 1791800569000000000}` | host to agent | Sent after a restore. The agent sets the guest clock to the host's time and answers `ok` |
+| `{"type": "restored", "time_unix_ns": 1791800569000000000}` | host to agent | Sent after a boot and after a restore, since the VM has no clock of its own. The agent sets the guest clock to the host's time and answers `ok` |
 | `{"type": "ok"}` | agent to host | Acknowledgement |
 
 After a restore the vsock transport is reset, so every connection from before the snapshot is gone. The host opens a new control connection and sends `restored` before anything else (ROADMAP P4.3).
@@ -241,7 +241,7 @@ The link uses the same framing, handshake and errors. Unlike the other links it 
 
 | Request | Fields | Reply |
 | --- | --- | --- |
-| `boot` | `config`: `kernel` and `disk` (absolute paths), `memory_bytes`, `cpus`, `net` (`"off"`, `"nat"`, `"lan"`) | `booted` once the guest agent answers `ping`, or an `error` |
+| `boot` | `config`: `kernel` and `disk` (absolute paths), `memory_bytes`, `cpus`, `net` (`"off"`, `"nat"`, `"lan"`) | `booted` once the guest agent answers `ping` and has set the guest clock (`restored`), or an `error` |
 | `agent_connect` | none | `agent_connection`, with the host end of a new connection to the guest agent attached as a file descriptor (`SCM_RIGHTS`) |
 | `ping` | none | `pong` |
 | `stop` | none | `ok`, after which the VMM stops the VM and exits |

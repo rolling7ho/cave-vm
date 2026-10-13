@@ -173,7 +173,8 @@ fn an_unreachable_agent_is_an_error_reply() {
     });
 }
 
-/// Plays an agent that answers the handshake and a control `ping`.
+/// Plays an agent that answers the handshake, a control `ping` and the
+/// clock.
 fn agent() -> UnixStream {
     let (ours, mut theirs) = UnixStream::pair().unwrap();
     thread::spawn(move || {
@@ -185,6 +186,13 @@ fn agent() -> UnixStream {
             let ping = read_frame::<_, Message>(&mut theirs).unwrap();
             assert_eq!(ping, Some(Message::Ping));
             write_frame(&mut theirs, &Message::Pong).unwrap();
+            match read_frame::<_, Message>(&mut theirs).unwrap() {
+                Some(Message::Restored { time_unix_ns }) => {
+                    assert!(time_unix_ns > 1_700_000_000_000_000_000)
+                }
+                other => panic!("{other:?}"),
+            }
+            write_frame(&mut theirs, &Message::Ok).unwrap();
         }
     });
     ours

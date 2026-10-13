@@ -9,7 +9,7 @@ use std::io;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cave_vm_proto::agent::Message;
 use cave_vm_proto::frame::encode;
@@ -155,7 +155,7 @@ const AGENT_ATTEMPT: Duration = Duration::from_secs(2);
 /// The pause between attempts while the guest boots.
 const AGENT_RETRY: Duration = Duration::from_millis(20);
 
-/// Waits until the guest agent answers `ping`, trying `connect` again
+/// Waits until the guest agent answers `ping` and has set the clock, trying `connect` again
 /// while the guest is still booting. Fails after `timeout`, or as soon as
 /// `gone` says the VM stopped.
 pub fn wait_for_agent(
@@ -189,8 +189,8 @@ pub fn wait_for_agent(
     }
 }
 
-/// The handshake, then `ping` on a control connection, as the protocol asks
-/// before `booted`.
+/// The handshake, then `ping` and the clock (`restored`) on a control
+/// connection, as the protocol asks before `booted`.
 fn greet(stream: &mut UnixStream) -> io::Result<()> {
     stream.set_read_timeout(Some(AGENT_ATTEMPT))?;
     let hello = Message::Hello(Hello::client(VERSIONS, software()));
@@ -201,8 +201,18 @@ fn greet(stream: &mut UnixStream) -> io::Result<()> {
     }
     send_agent(stream, &Message::Control)?;
     send_agent(stream, &Message::Ping)?;
+    if read_agent(stream)? != Message::Pong {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    // The VM has no clock of its own, and TLS and package managers need
+    // the right time.
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io::Error::other)?;
+    let time_unix_ns = u64::try_from(now.as_nanos()).map_err(io::Error::other)?;
+    send_agent(stream, &Message::Restored { time_unix_ns })?;
     match read_agent(stream)? {
-        Message::Pong => Ok(()),
+        Message::Ok => Ok(()),
         _ => Err(io::ErrorKind::InvalidData.into()),
     }
 }
