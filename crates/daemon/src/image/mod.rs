@@ -12,6 +12,7 @@ use std::fmt;
 use std::str::FromStr;
 
 mod cache;
+pub mod manifest;
 
 pub use cache::{Cache, FetchError, Source};
 
