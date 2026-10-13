@@ -415,6 +415,10 @@ impl VirtioDevice for Block {
     fn reset(&mut self) {
         self.active = None;
     }
+
+    fn save_queues(&self) -> Vec<Queue> {
+        self.active.iter().map(|a| a.queue.clone()).collect()
+    }
 }
 
 #[cfg(test)]
@@ -778,5 +782,48 @@ mod tests {
         r.submit(&[&header(req::IN, 0)], &[512, 1]);
         r.block.queue_notify(0);
         assert!(r.driver.used(&r.mem).is_empty());
+    }
+
+    #[test]
+    fn a_restored_device_continues_from_the_saved_queue() {
+        let mut r = rig();
+        let first = r.submit(&[&header(req::IN, 1)], &[512, 1]);
+        r.block.queue_notify(0);
+        // Made available, not yet notified, when the snapshot is taken.
+        let second = r.submit(&[&header(req::IN, 3)], &[512, 1]);
+        let saved = r.block.save_queues();
+        assert_eq!((saved[0].next_avail, saved[0].next_used), (1, 1));
+
+        let disk = RecordingDisk {
+            data: (0..8 * SECTOR_SIZE as usize)
+                .map(|i| (i / SECTOR_SIZE as usize) as u8)
+                .collect(),
+            log: Arc::clone(&r.log),
+            fail: false,
+        };
+        let mut block = Block::new(Box::new(disk), 8 * SECTOR_SIZE, false, "cave-disk");
+        block
+            .activate(Activation {
+                memory: r.mem.clone(),
+                queues: saved.clone(),
+                features: 0,
+                interrupt: Interrupt::new(),
+            })
+            .unwrap();
+        assert_eq!(block.save_queues(), saved);
+        block.queue_notify(0);
+        assert_eq!(
+            r.driver.used(&r.mem),
+            vec![(u32::from(first), 513), (u32::from(second), 513)]
+        );
+        assert_eq!(r.driver.written(&r.mem, second, 0, 512), vec![3; 512]);
+        assert_eq!(r.status(second, 513), status::OK);
+    }
+
+    #[test]
+    fn an_inactive_device_saves_no_queues() {
+        let mut r = rig();
+        r.block.reset();
+        assert!(r.block.save_queues().is_empty());
     }
 }

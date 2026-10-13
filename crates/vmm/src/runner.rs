@@ -25,7 +25,7 @@ use std::time::Duration;
 use crate::backend::{self, Backend, BackendVcpu, DataAccess, Exit, Kick, Reg, SysReg, Trap};
 use crate::boot;
 use crate::devices::pl011::Pl011;
-use crate::devices::virtio::mmio::MmioTransport;
+use crate::devices::virtio::mmio::{MmioTransport, TransportState};
 use crate::layout;
 use crate::psci;
 
@@ -124,6 +124,28 @@ impl<W: Write> Devices<W> {
     /// The virtio device in `slot`.
     pub fn virtio(&self, slot: u32) -> Option<&MmioTransport> {
         self.virtio.get(slot as usize)
+    }
+
+    /// Each virtio device's state, by slot, for a snapshot. The vCPUs must
+    /// be paused.
+    pub fn save_virtio(&self) -> Vec<TransportState> {
+        self.virtio.iter().map(MmioTransport::save).collect()
+    }
+
+    /// Restores each virtio device from a snapshot taken of a machine with
+    /// the same devices in the same slots.
+    pub fn restore_virtio(&mut self, saved: &[TransportState]) -> std::result::Result<(), String> {
+        if saved.len() != self.virtio.len() {
+            return Err(format!(
+                "the snapshot has {} virtio devices, this VM has {}",
+                saved.len(),
+                self.virtio.len()
+            ));
+        }
+        for (transport, state) in self.virtio.iter_mut().zip(saved) {
+            transport.restore(state)?;
+        }
+        Ok(())
     }
 
     /// Drives the UART's and each virtio device's interrupt line to match

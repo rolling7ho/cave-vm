@@ -255,6 +255,9 @@ impl VirtioDevice for Blank {
     }
     fn queue_notify(&mut self, _: u16) {}
     fn reset(&mut self) {}
+    fn save_queues(&self) -> Vec<cave_vm_vmm::devices::virtio::Queue> {
+        Vec::new()
+    }
 }
 
 fn blank_transport() -> MmioTransport {
@@ -368,4 +371,21 @@ fn virtio_interrupt_from_another_thread_wakes_an_idle_vcpu() {
         intid: virtio_intid(0),
         level: true
     }));
+}
+
+#[test]
+fn virtio_state_moves_to_a_machine_with_the_same_devices() {
+    let mut old = Machine::new(Vec::new(), None, 1);
+    old.add_virtio(blank_transport());
+    let saved = old.devices().save_virtio();
+    assert_eq!(saved.len(), 1);
+
+    let mut new = Machine::new(Vec::new(), None, 1);
+    new.add_virtio(blank_transport());
+    new.devices().restore_virtio(&saved).unwrap();
+    assert_eq!(new.devices().save_virtio(), saved);
+
+    let empty = Machine::new(Vec::new(), None, 1);
+    let err = empty.devices().restore_virtio(&saved).unwrap_err();
+    assert!(err.contains("1 virtio devices"), "{err}");
 }

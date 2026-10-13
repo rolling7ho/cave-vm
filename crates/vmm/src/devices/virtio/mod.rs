@@ -181,6 +181,12 @@ pub trait VirtioDevice: Send {
 
     /// Stops the device and drops its queues, on a driver reset.
     fn reset(&mut self);
+
+    /// The queues the device was activated with, in queue-index order,
+    /// with its current position in each, for a snapshot. Called only
+    /// while the device is active and the vCPUs are paused. Restore passes
+    /// them back to [`VirtioDevice::activate`].
+    fn save_queues(&self) -> Vec<Queue>;
 }
 
 /// Copies `config[offset..]` into `data`, zero-filling past the end. For

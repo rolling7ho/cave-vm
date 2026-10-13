@@ -299,6 +299,9 @@ fn write_packet(
 pub struct Vsock {
     shared: Arc<Shared>,
     tx: Option<ActiveQueue>,
+    /// The event queue, kept for snapshots until transport resets use it
+    /// (P4.3).
+    event: Option<Queue>,
 }
 
 impl Vsock {
@@ -316,7 +319,11 @@ impl Vsock {
             }),
             changed: Condvar::new(),
         });
-        Vsock { shared, tx: None }
+        Vsock {
+            shared,
+            tx: None,
+            event: None,
+        }
     }
 
     /// Opens host connections to guest ports, from any thread.
@@ -702,7 +709,8 @@ impl VirtioDevice for Vsock {
 
     fn activate(&mut self, activation: Activation) -> Result<(), ActivateError> {
         let mut queues = activation.queues.into_iter();
-        let (Some(rx), Some(tx)) = (queues.next(), queues.next()) else {
+        let (Some(rx), Some(tx), Some(event)) = (queues.next(), queues.next(), queues.next())
+        else {
             return Err(ActivateError("the vsock device needs three queues".into()));
         };
         if !rx.ready || !tx.ready {
@@ -717,6 +725,7 @@ impl VirtioDevice for Vsock {
             broken: false,
         };
         self.tx = Some(active(tx));
+        self.event = Some(event);
         let mut state = self.shared.lock();
         state.rx = Some(active(rx));
         Ok(())
@@ -734,6 +743,7 @@ impl VirtioDevice for Vsock {
 
     fn reset(&mut self) {
         self.tx = None;
+        self.event = None;
         let mut state = self.shared.lock();
         state.rx = None;
         state.backlog.clear();
@@ -742,6 +752,20 @@ impl VirtioDevice for Vsock {
             let _ = conn.stream.shutdown(Shutdown::Both);
         }
         self.shared.changed.notify_all();
+    }
+
+    /// Connections to the host are not saved: they end with the process,
+    /// and the guest learns of it from a transport reset (P4.3).
+    fn save_queues(&self) -> Vec<Queue> {
+        let rx = self.shared.lock().rx.as_ref().map(|a| a.queue.clone());
+        [
+            rx,
+            self.tx.as_ref().map(|a| a.queue.clone()),
+            self.event.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
     }
 }
 
