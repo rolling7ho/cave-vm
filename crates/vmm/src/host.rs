@@ -7,7 +7,9 @@
 #![allow(unsafe_code)]
 
 use std::ffi::CString;
+use std::fs::File;
 use std::io;
+use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
@@ -55,6 +57,32 @@ pub fn available_space(path: &Path) -> io::Result<u64> {
     Ok(stat.f_bavail.saturating_mul(u64::from(stat.f_bsize)))
 }
 
+/// Frees the blocks behind `len` bytes of `file` at `offset`, which then
+/// read as zeroes; the file keeps its size. Both must be multiples of the
+/// volume's block size (`F_PUNCHHOLE` refuses anything else with
+/// `EINVAL`).
+pub fn punch_hole(file: &File, offset: u64, len: u64) -> io::Result<()> {
+    let too_big = || {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "range is past the largest file offset",
+        )
+    };
+    let args = libc::fpunchhole_t {
+        fp_flags: 0,
+        reserved: 0,
+        fp_offset: libc::off_t::try_from(offset).map_err(|_| too_big())?,
+        fp_length: libc::off_t::try_from(len).map_err(|_| too_big())?,
+    };
+    // SAFETY: the descriptor is open for the life of `file`, and `args` is
+    // a valid fpunchhole_t that outlives the call, which only reads it.
+    let r = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_PUNCHHOLE, &args) };
+    if r == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,6 +108,36 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
         let missing = clonefile(&dir.join("nope"), &dir.join("x")).unwrap_err();
         assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn punched_range_reads_as_zeroes_and_frees_blocks() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = temp("punch");
+        let path = dir.join("img");
+        fs::write(&path, vec![0xffu8; 1 << 20]).unwrap();
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        let before = file.metadata().unwrap().blocks();
+        punch_hole(&file, 64 << 10, 512 << 10).unwrap();
+        let after = file.metadata().unwrap();
+        assert_eq!(after.len(), 1 << 20, "size is unchanged");
+        assert!(
+            after.blocks() < before,
+            "{} -> {} blocks",
+            before,
+            after.blocks()
+        );
+        let data = fs::read(&path).unwrap();
+        assert!(data[..64 << 10].iter().all(|&b| b == 0xff));
+        assert!(data[64 << 10..576 << 10].iter().all(|&b| b == 0));
+        assert!(data[576 << 10..].iter().all(|&b| b == 0xff));
+        let unaligned = punch_hole(&file, 512, 4096).unwrap_err();
+        assert_eq!(unaligned.raw_os_error(), Some(libc::EINVAL));
         fs::remove_dir_all(&dir).unwrap();
     }
 

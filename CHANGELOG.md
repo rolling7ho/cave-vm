@@ -27,6 +27,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - Decision 0008 (D26): vsock connections without socket files, after socket paths in `.cave/` hit macOS's 104-byte limit.
 - `cave-vm-agent`: the pty shell with resize and signals, the vsock listener on port 1024, and `image/agent/build.sh`, which builds the agent as a static aarch64 musl binary in an Apple container (P3.6b).
 - Outbound TCP through host sockets in the userspace network stack, with the network policy: `nat` mode denies private, link-local and shared ranges, every mode denies loopback, multicast, reserved ranges and the Mac's own addresses, and `lan` mode allows private ranges. A denied or refused connection resets the guest's, and each attempt is recorded for the audit log (P3.7c, P3.7e).
+- virtio-blk device in `cave-vm-vmm` on a raw image file: read, write, flush, device ID, and discard, which punches holes in the image so freed blocks return to the Mac (P3.3). The spike takes `--disk <file>`, and its kernel config gains virtio-mmio, virtio-blk, virtio-net and vsock.
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
