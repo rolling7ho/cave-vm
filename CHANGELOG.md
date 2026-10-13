@@ -21,6 +21,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- `scripts/bench/gate4.py`, the gate 4 benchmark: boot, snapshot, restore, fork and ten-fork times and idle memory, end to end through `cave` with the real image, compared with the targets in decision 0005. The first results are in `docs/bench/gate4.md`. Ten forks meet their target; snapshot, restore, fork and memory miss theirs (P4.11).
 - `cave export [snapshot] [-o <dir>]`: copies `/workspace` out of the VM, or out of a snapshot through a temporary fork, into a folder on the Mac, `.git` included, and says how many files and bytes it copied. An ignored end-to-end test exports a real VM and a snapshot and checks the files (P4.10).
 - `cave gc [--yes] [--json]`: disk usage for the image cache and each project's disk, snapshots and forks, with blocks that APFS clones share counted once, and what is safe to delete (unused images, automatic snapshots beyond `keep`, unfinished snapshot folders), deleted after asking. Sizes come from each file's physical extents (`host::physical_extents` in `cave-vm-vmm`, through `F_LOG2PHYS_EXT`). The daemon now records each cached image's name for it (P4.9).
 - `[snapshots]` in `cave.toml` now applies: `auto = false` stops `cave restore` from saving the state before it, and only the newest `keep` automatic snapshots are kept, the oldest deleted after each new one. Snapshots taken by name and the one being restored are never deleted (P4.8).
