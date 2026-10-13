@@ -155,14 +155,6 @@ impl VmSource for ProjectSource {
             )
             .with_fix("Run the project's own VM without --fork"));
         }
-        // Until P3.8, refuse rather than show ports that go nowhere.
-        if !ports.is_empty() {
-            return Err(ErrorMessage::new(
-                ErrorCode::BadRequest,
-                "this build of cave cannot forward ports yet",
-            )
-            .with_fix("Run without -p"));
-        }
         let project = Path::new(&vm.project);
         if !project.is_absolute() {
             return Err(ErrorMessage::new(
@@ -186,6 +178,7 @@ impl VmSource for ProjectSource {
         if net_mode == NetMode::Lan {
             widened.push("--net lan".to_string());
         }
+        widened.extend(ports.iter().map(|&p| crate::forward::flag(p)));
         let name = project
             .file_name()
             .map_or_else(|| vm.project.clone(), |n| n.to_string_lossy().into_owned());
@@ -202,7 +195,7 @@ impl VmSource for ProjectSource {
                 image: pinned.to_string(),
                 storage: settings.storage,
                 net: net_mode,
-                ports: Vec::new(),
+                ports: ports.to_vec(),
                 cpus: settings.cpus,
                 memory_bytes: settings.memory_bytes,
                 ttl_seconds: settings.ttl.map(|t| t.as_secs()),

@@ -103,12 +103,23 @@ fn a_pinned_project_starts_without_the_manifest() {
     s.source.prepare(&vm(&s.project), None, &[]).unwrap();
     fs::remove_dir_all(&s.images).unwrap();
 
+    let ports = [
+        PortMap {
+            mac: 3000,
+            vm: 3000,
+        },
+        PortMap { mac: 8080, vm: 80 },
+    ];
     let prepared = s
         .source
-        .prepare(&vm(&s.project), Some(NetMode::Lan), &[])
+        .prepare(&vm(&s.project), Some(NetMode::Lan), &ports)
         .unwrap();
     assert_eq!(prepared.config.net, NetMode::Lan);
-    assert_eq!(prepared.policy.widened, ["--net lan"]);
+    assert_eq!(prepared.policy.ports, ports);
+    assert_eq!(
+        prepared.policy.widened,
+        ["--net lan", "-p 3000", "-p 8080:80"]
+    );
     fs::remove_dir_all(&s.root).unwrap();
 }
 
@@ -136,12 +147,5 @@ fn problems_say_how_to_fix_them() {
     fs::remove_file(s.project.join(config::FILE)).unwrap();
     let err = s.source.prepare(&vm(&s.project), None, &[]).unwrap_err();
     assert!(err.fix.unwrap().contains("cave init"));
-
-    let ports = [PortMap {
-        mac: 3000,
-        vm: 3000,
-    }];
-    let err = s.source.prepare(&vm(&s.project), None, &ports).unwrap_err();
-    assert!(err.message.contains("ports"), "{err:?}");
     fs::remove_dir_all(&s.root).unwrap();
 }

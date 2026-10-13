@@ -453,3 +453,60 @@ fn agent_connections_come_from_the_running_vmm() {
     // The link still answers after handing out connections.
     assert_eq!(r.state(), Some(VmState::Running));
 }
+
+#[test]
+fn ports_listen_on_localhost_while_the_vm_runs() {
+    use std::net::{Ipv4Addr, TcpListener, TcpStream};
+    let free = || {
+        TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    };
+    let r = rig("ports", NORMAL);
+    let start = |ports: Vec<PortMap>| {
+        r.request(Request::Start {
+            vm: vm(),
+            net: None,
+            ports,
+        })
+    };
+
+    // A Mac port in use is refused before the VM boots.
+    let taken = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let busy = taken.local_addr().unwrap().port();
+    match start(vec![PortMap { mac: busy, vm: 80 }]) {
+        Reply::Error(e) => assert_eq!(e.code, ErrorCode::AlreadyExists),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(r.source.prepared.load(Ordering::SeqCst), 0);
+
+    let (a, b) = (free(), free());
+    assert!(matches!(
+        start(vec![PortMap { mac: a, vm: 80 }]),
+        Reply::Policy(_)
+    ));
+    assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, a)).is_ok());
+
+    // `-p` on a running VM adds a forward without a restart.
+    match start(vec![PortMap { mac: b, vm: 81 }]) {
+        Reply::Policy(policy) => {
+            assert_eq!(policy.ports.len(), 2, "{policy:?}");
+            assert!(policy.widened.contains(&format!("-p {b}:81")));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, b)).is_ok());
+    assert_eq!(r.source.prepared.load(Ordering::SeqCst), 1);
+    match start(vec![PortMap { mac: b, vm: 82 }]) {
+        Reply::Error(e) => assert!(e.message.contains("already forwards"), "{e:?}"),
+        other => panic!("{other:?}"),
+    }
+
+    // Stopping the VM closes the Mac ports.
+    assert_eq!(r.request(Request::Stop { vm: vm() }), Reply::Ok);
+    thread::sleep(Duration::from_millis(300));
+    assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, a)).is_err());
+    assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, b)).is_err());
+}
