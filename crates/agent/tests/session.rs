@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-use cave_vm_agent::{Config, serve};
+use cave_vm_agent::{Config, User, serve};
 use cave_vm_proto::agent::{Exec, Message, PtyOpen, Signal, Stream};
 use cave_vm_proto::{Data, ErrorCode, Hello, VERSIONS, read_frame, write_frame};
 use sha2::{Digest, Sha256};
@@ -35,10 +35,16 @@ impl Drop for Dir {
 
 /// Starts an agent session and does the handshake.
 fn connect(dir: &Dir) -> UnixStream {
+    connect_as(dir, None)
+}
+
+/// [`connect`], with commands run as `user`.
+fn connect_as(dir: &Dir, user: Option<User>) -> UnixStream {
     let (client, agent) = UnixStream::pair().unwrap();
     let config = Config {
         default_cwd: dir.0.clone(),
         software: "cave-agent test".into(),
+        user,
     };
     thread::spawn(move || serve(Box::new(agent), &config));
     client
@@ -419,6 +425,7 @@ fn protocol_errors_are_reported() {
     let config = Config {
         default_cwd: dir.0.clone(),
         software: "t".into(),
+        user: None,
     };
     thread::spawn(move || serve(Box::new(agent), &config));
     send(&mut client, Message::Ping);
@@ -432,6 +439,7 @@ fn protocol_errors_are_reported() {
     let config = Config {
         default_cwd: dir.0.clone(),
         software: "t".into(),
+        user: None,
     };
     thread::spawn(move || serve(Box::new(agent), &config));
     send(&mut client, Message::Hello(Hello::client(&[99], "cave 9")));
@@ -586,5 +594,109 @@ fn pty_with_a_missing_program_exits_127() {
             code: Some(127),
             signal: None
         }
+    );
+}
+
+/// Writes `data` to `path` through the agent and checks it was written.
+fn write_file(c: &mut UnixStream, path: &str, data: &[u8], create_dirs: bool) {
+    send(
+        c,
+        Message::FileWrite {
+            path: path.into(),
+            mode: None,
+            create_dirs,
+        },
+    );
+    send(
+        c,
+        Message::FileData {
+            data: Data(data.to_vec()),
+        },
+    );
+    send(
+        c,
+        Message::FileEnd {
+            sha256: sha256(data),
+        },
+    );
+    match recv(c) {
+        Message::FileWritten { size } => assert_eq!(size, data.len() as u64),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Needs root and a `cave` user in a `docker` group, so it runs only where
+/// `image/agent/test-as-root.sh` sets that up and sets
+/// `CAVE_AGENT_ROOT_TESTS`.
+#[test]
+fn commands_and_new_files_belong_to_the_guest_user() {
+    use std::os::unix::fs::MetadataExt;
+    if std::env::var_os("CAVE_AGENT_ROOT_TESTS").is_none() {
+        return;
+    }
+    let user = User::from_system("cave").expect("a cave user");
+    let docker = fs::read_to_string("/etc/group")
+        .unwrap()
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("docker:x:")?
+                .split(':')
+                .next()?
+                .parse::<u32>()
+                .ok()
+        })
+        .expect("a docker group");
+    let dir = Dir::new("asuser");
+
+    let mut c = connect_as(&dir, Some(user.clone()));
+    send(
+        &mut c,
+        Message::Exec(exec(&["sh", "-c", "id -u; id -G; echo $HOME $USER"])),
+    );
+    let run = collect(&mut c);
+    assert_eq!(
+        run.code,
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let out = String::from_utf8(run.stdout).unwrap();
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], user.uid.to_string());
+    let groups: Vec<u32> = lines[1].split(' ').map(|g| g.parse().unwrap()).collect();
+    assert!(groups.contains(&docker), "{out}");
+    assert!(!groups.contains(&0), "root group dropped: {out}");
+    assert_eq!(lines[2], format!("{} cave", user.home.display()));
+
+    // New files and the folders made for them are the user's.
+    let mut c = connect_as(&dir, Some(user.clone()));
+    write_file(&mut c, "made/here/new.txt", b"new", true);
+    for path in ["made", "made/here", "made/here/new.txt"] {
+        assert_eq!(
+            fs::metadata(dir.0.join(path)).unwrap().uid(),
+            user.uid,
+            "{path}"
+        );
+    }
+    // A replaced file keeps its owner.
+    fs::write(dir.0.join("root.txt"), "root's").unwrap();
+    let mut c = connect_as(&dir, Some(user.clone()));
+    write_file(&mut c, "root.txt", b"changed", false);
+    assert_eq!(fs::metadata(dir.0.join("root.txt")).unwrap().uid(), 0);
+
+    // The shell is the user's too, on a terminal it owns.
+    let mut c = connect_as(&dir, Some(user.clone()));
+    send(
+        &mut c,
+        Message::PtyOpen(pty_open(&[
+            "sh",
+            "-c",
+            "echo uid-$(id -u) tty-$(stat -c %u $(tty))",
+        ])),
+    );
+    let seen = pty_until(&mut c, "\n");
+    assert!(
+        seen.contains(&format!("uid-{} tty-{}", user.uid, user.uid)),
+        "{seen}"
     );
 }

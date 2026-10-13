@@ -21,7 +21,10 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let config = Config::default();
+    let config = Config {
+        user: cave_vm_agent::user::guest_user(),
+        ..Config::default()
+    };
     loop {
         match listener.accept() {
             Ok(conn) => {

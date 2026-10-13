@@ -17,6 +17,8 @@ pub struct Config {
     pub default_cwd: PathBuf,
     /// This agent's name and version, sent in the handshake.
     pub software: String,
+    /// Who commands run as, when not the agent itself.
+    pub user: Option<crate::User>,
 }
 
 impl Default for Config {
@@ -24,6 +26,7 @@ impl Default for Config {
         Config {
             default_cwd: PathBuf::from(cave_vm_proto::agent::DEFAULT_CWD),
             software: format!("cave-agent {}", env!("CARGO_PKG_VERSION")),
+            user: None,
         }
     }
 }

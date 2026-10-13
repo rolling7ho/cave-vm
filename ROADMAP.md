@@ -24,7 +24,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | 3 | Core VM | Gate 3 |
 | 4 | Snapshot and fork | Gate 4 (numbers from the spike) |
 | 5 | Agent layer | Gate 5 |
-| 6 | Density and polish | v1 release |
+| 6 | Density and polish | Release review by Ivan (P6.10), then the v1 release |
 
 ---
 
@@ -190,8 +190,9 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | P6.7 | Image update detector: a plain version lookup with no identifying data, never auto-updates, can be turned off in `cave.toml`. The only network request `cave` makes. | Tests with an injected fetcher; test that turning it off sends nothing. |
 | P6.8 | Ubuntu base image. | E2E boot. |
 | P6.9 | README status, docs and changelog brought up to date for release. | Quickstart works as written on a clean Mac. |
+| P6.10 | Release review, done by Ivan after P6.1 to P6.9 merge: read and edit every doc, read all the code, prepare the repository for the public (settings, issue templates, README), write the launch post, and clean up whatever is left (stale branches, issues, TODOs, scratch files). Agents fix what the review turns up, as normal PRs, but do not start the release before Ivan signs off. | Ivan signs off in the v1 milestone. |
 
-**Exit: v1 release.** Gate 5 still holds, P6.1 to P6.9 are merged, and the quickstart works as written on a clean Mac.
+**Exit: v1 release.** Gate 5 still holds, P6.1 to P6.9 are merged, the quickstart works as written on a clean Mac, and Ivan has signed off on the release review (P6.10).
 
 ---
 

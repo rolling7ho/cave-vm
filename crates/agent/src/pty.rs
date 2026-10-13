@@ -24,13 +24,18 @@ const READ_CHUNK: usize = 16 * 1024;
 const DRAIN: Duration = Duration::from_millis(200);
 
 pub fn run(req: PtyOpen, mut reader: Box<dyn Stream>, out: Out, config: &Config) -> io::Result<()> {
-    let argv = req.argv.clone().unwrap_or_else(login_shell);
+    let argv = req.argv.clone().unwrap_or_else(|| login_shell(config));
     let cwd = match exec::working_dir(req.cwd.as_deref(), &out, config)? {
         Some(cwd) => cwd,
         None => return Ok(()),
     };
     let (controller, terminal) = sys::open_pty(req.cols, req.rows)?;
     let mut command = Command::new(&argv[0]);
+    if let Some(user) = &config.user {
+        // The terminal belongs to whoever logs in on it, as login(1) does.
+        std::os::unix::fs::fchown(&terminal, Some(user.uid), None)?;
+        user.apply(&mut command);
+    }
     command
         .args(&argv[1..])
         .current_dir(&cwd)
@@ -73,8 +78,11 @@ pub fn run(req: PtyOpen, mut reader: Box<dyn Stream>, out: Out, config: &Config)
     out.finish(&exec::exit_message(status))
 }
 
-/// The agent user's shell from /etc/passwd, as a login shell.
-fn login_shell() -> Vec<String> {
+/// The user's shell from /etc/passwd, as a login shell.
+fn login_shell(config: &Config) -> Vec<String> {
+    if let Some(user) = &config.user {
+        return vec![user.shell.clone(), "-l".into()];
+    }
     let uid = sys::uid().to_string();
     let shell = fs::read_to_string("/etc/passwd")
         .ok()
