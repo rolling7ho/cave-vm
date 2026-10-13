@@ -40,6 +40,9 @@ fn fake_vmm() {
     };
     let stdin = io::stdin().as_fd().try_clone_to_owned().unwrap();
     let mut link = UnixStream::from(stdin);
+    // The last connection sent stays open here until the next request, as
+    // in cave-vmm: closing it while in flight can lose it on macOS.
+    let mut in_flight = None;
     loop {
         let message = match read_frame::<_, ToVmm>(&mut link) {
             Ok(Some(message)) => message,
@@ -48,6 +51,7 @@ fn fake_vmm() {
             },
             _ => std::process::exit(0),
         };
+        drop(in_flight.take());
         let reply = match message {
             ToVmm::Hello(hello) => FromVmm::Hello(hello.accept(VERSIONS, "fake-vmm").unwrap()),
             ToVmm::Boot { .. } if mode == FAIL_BOOT => FromVmm::Error(ErrorMessage::new(
@@ -65,6 +69,7 @@ fn fake_vmm() {
                 });
                 let frame = encode(&FromVmm::AgentConnection).unwrap();
                 host::send_with_fd(&link, &frame, ours.as_fd()).unwrap();
+                in_flight = Some(ours);
                 continue;
             }
             ToVmm::Stop => {
