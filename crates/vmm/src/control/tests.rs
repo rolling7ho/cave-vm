@@ -223,3 +223,38 @@ fn waiting_for_the_agent_gives_up() {
     let e = wait_for_agent(&refuse, &|| true, Duration::from_secs(5)).unwrap_err();
     assert!(e.message.contains("stopped"), "{}", e.message);
 }
+
+/// Connections arrive open even when many are handed out at once. Closing
+/// the VMM's end right after sending it lost connections on macOS under
+/// load, so `serve` keeps it until the next request.
+#[test]
+fn many_agent_connections_arrive_open() {
+    thread::scope(|s| {
+        for _ in 0..8 {
+            s.spawn(|| {
+                let (mut daemon, mut vmm) = UnixStream::pair().unwrap();
+                let vm = FakeVm {
+                    agents: Mutex::new(Vec::new()),
+                    fail: false,
+                };
+                thread::scope(|s| {
+                    s.spawn(|| serve(&mut vmm, &vm).unwrap());
+                    for _ in 0..50 {
+                        send(&mut daemon, &ToVmm::AgentConnect);
+                        let mut buf = [0u8; 256];
+                        let (_, fd) = host::recv_with_fd(&daemon, &mut buf).unwrap();
+                        let mut connection = UnixStream::from(fd.expect("a descriptor"));
+                        connection.write_all(b"x").unwrap();
+                        let mut agent = vm.agents.lock().unwrap().pop().unwrap();
+                        let mut got = [0u8; 1];
+                        agent.read_exact(&mut got).unwrap();
+                        agent.write_all(b"y").unwrap();
+                        connection.read_exact(&mut got).unwrap();
+                        assert_eq!(&got, b"y");
+                    }
+                    drop(daemon);
+                });
+            });
+        }
+    });
+}
