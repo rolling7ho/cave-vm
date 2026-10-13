@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Fixed
 
+- Interrupts that virtio devices raise from their own threads now wake an idle guest at once. Before, they waited for the guest's next timer tick, which delayed vsock connection setup by about 200 ms and network replies by up to a second.
 - Restored spike snapshots got no more timer interrupts once the guest went idle, so they hung at 100% CPU. `hv_gic_state_get_data` leaves out each redistributor's SGI and PPI state; snapshots now save it per vCPU (format version 3, so older spike snapshots are refused).
 - Device MMIO loads now honor sign extension (`LDRSB`, `LDRSH`, `LDRSW`) and 32-bit destination registers.
 - A virtqueue buffer whose address range would wrap past the top of the address space is an error instead of an overflow, and an oversized `QueueNum` leaves the queue invalid instead of truncating to a valid size.
@@ -18,6 +19,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `cave-vm-agent`: the guest agent's exec with streamed output, stdin and signals, checked file reads and atomic file writes, port forwarding to guest loopback, and the control connection for ping, snapshot preparation and clock sync after restore (P3.6a).
 - Userspace network stack in `cave-vm-vmm` (`nat`), built on smoltcp: the guest gets a fixed address on 192.168.127.0/24, the gateway answers ARP and ping, and frames with another hardware or IP address are dropped (P3.7b).
 - Project disks in `cave-vm-vmm`: a 20 GB sparse `.cave/disk.img` created as an APFS clone of the base image, growable but never shrunk, with no absolute paths stored (P3.4). A `host` module wraps `clonefile` and `statfs` (D24).
+- Image names and digests (`debian@sha256:...`) and the shared image cache in `cave-vm-daemon`: downloads are hashed as they are written and kept only when size and SHA-256 match, so an interrupted or wrong download leaves nothing behind (P3.12a).
 - virtio-net device in `cave-vm-vmm`: frames from the guest go to a backend trait, and frames for the guest are delivered from any thread with a bounded backlog. No offloads; the link is always up (P3.7a).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
