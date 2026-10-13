@@ -15,7 +15,7 @@ Each release carries an `images.json` asset. cave reads it from the stable URL `
   "version": 1,
   "images": [
     {
-      "name": "base",
+      "name": "debian",
       "description": "Debian 13 (trixie)",
       "disk":   { "url": "https://.../debian.img",  "sha256": "...", "size": 2080374784 },
       "kernel": { "url": "https://.../Image",       "sha256": "...", "size": 10029064 }
@@ -24,10 +24,11 @@ Each release carries an `images.json` asset. cave reads it from the stable URL `
 }
 ```
 
-- `images` lists every published version, newest first, and a release never drops older entries. The newest entry for a name is what an unpinned `image = "base"` resolves to.
+- `images` lists every published version, newest first, and a release never drops older entries. Names are image names, so `base` is looked up as `debian`, the name it stands for. The newest entry for a name is what an unpinned `image = "base"` resolves to.
 - The pin in `cave.toml` is the disk's digest (`base@sha256:<disk sha256>`). The kernel is found from the pin through the same manifest, so the one pin rebuilds the environment anywhere, as the design asks.
+- Downloads go through macOS's `/usr/bin/curl`, HTTPS only, so the daemon needs no HTTP crate.
 - Files are fetched into the image cache by digest, hashed as they are written, and kept only when size and SHA-256 match (P3.12a).
-- `CAVE_IMAGE_DIR`, when set, is a local folder used in place of the release: its `images.json` may give `url` as a file name in that folder. The image build scripts write one, so a locally built image boots with `CAVE_IMAGE_DIR=target/image`.
+- `CAVE_IMAGE_DIR`, when set, is a local folder used in place of the release: its `images.json` may give `url` as a file name in that folder. `image/manifest.sh` writes one for a local build, so it boots with `CAVE_IMAGE_DIR=target/image`.
 
 ## Consequences
 
