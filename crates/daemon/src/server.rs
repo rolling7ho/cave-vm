@@ -7,11 +7,13 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
 use std::thread;
 
-use cave_vm_proto::daemon::{Reply, Request};
+use cave_vm_proto::agent::Message;
+use cave_vm_proto::daemon::{Reply, Request, VmId};
 use cave_vm_proto::{ErrorCode, ErrorMessage, VERSIONS, read_frame, write_frame};
 
 use crate::home::Home;
 use crate::link::daemon_software;
+use crate::relay;
 use crate::vms::Vms;
 
 /// Binds the daemon socket, readable and writable by this user only. A
@@ -76,6 +78,25 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
         return Ok(());
     };
     let reply = match request {
+        Request::Exec {
+            vm,
+            exec,
+            credentials,
+        } => {
+            // Until P5.3 resolves them, refuse rather than run without them.
+            if !credentials.is_empty() {
+                return send_error(
+                    &mut stream,
+                    ErrorMessage::new(
+                        ErrorCode::BadRequest,
+                        "this daemon cannot inject credentials yet",
+                    )
+                    .with_fix("Run the command without credentials"),
+                );
+            }
+            return relay(stream, vms, &vm, &Message::Exec(exec));
+        }
+        Request::Shell { vm, pty } => return relay(stream, vms, &vm, &Message::PtyOpen(pty)),
         Request::Start { vm, net, ports } => vms.start(&vm, net, &ports).map(Reply::Policy),
         Request::Stop { vm } => vms.stop(&vm).map(|()| Reply::Ok),
         Request::List { project } => Ok(Reply::List {
@@ -93,6 +114,14 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
     };
     let reply = reply.unwrap_or_else(Reply::Error);
     write_frame(&mut stream, &reply).map_err(io::Error::other)
+}
+
+/// Relays an agent operation for a running VM.
+fn relay(mut stream: UnixStream, vms: &Vms, vm: &VmId, request: &Message) -> io::Result<()> {
+    match vms.agent_connection(vm) {
+        Ok(agent) => relay::run(&mut stream, agent, request),
+        Err(e) => send_error(&mut stream, e),
+    }
 }
 
 /// The `type` of a request, such as `exec`.

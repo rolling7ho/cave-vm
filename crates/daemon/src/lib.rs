@@ -9,5 +9,6 @@ pub mod image;
 pub mod launch;
 pub mod link;
 pub mod project;
+pub mod relay;
 pub mod server;
 pub mod vms;
