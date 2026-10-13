@@ -119,11 +119,13 @@ pub fn write(
                 hasher.update(&data.0);
                 size += data.0.len() as u64;
                 if let Err(e) = file.write_all(&data.0) {
+                    drop(temp);
                     return io_error(out, &path, &e);
                 }
             }
             Ok(Some(Message::FileEnd { sha256 })) => break sha256,
             Ok(Some(other)) => {
+                drop(temp);
                 return out.error(
                     ErrorCode::BadRequest,
                     format!("expected file_data or file_end, got {}", kind(&other)),
@@ -131,11 +133,17 @@ pub fn write(
             }
             // The client went away; the temporary file is removed.
             Ok(None) => return Ok(()),
-            Err(e) => return out.send(&Message::Error(e.to_error_message())),
+            Err(e) => {
+                drop(temp);
+                return out.send(&Message::Error(e.to_error_message()));
+            }
         }
     };
     let got = hex(&hasher.finalize());
     if !sent.eq_ignore_ascii_case(&got) {
+        // Remove the temporary file before replying, so the client never
+        // sees it once it has the answer.
+        drop(temp);
         return out.error(
             ErrorCode::Io,
             format!(
@@ -157,6 +165,7 @@ pub fn write(
         fs::rename(&temp.0, &path)
     };
     if let Err(e) = finish() {
+        drop(temp);
         return io_error(out, &path, &e);
     }
     out.send(&Message::FileWritten { size })
