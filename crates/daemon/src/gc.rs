@@ -246,6 +246,39 @@ fn unfinished(state: &Path, now: SystemTime) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The size of each group of paths, counting each block once, in the
+/// first group that uses it. Blocks the image cache in `images` holds are
+/// not counted, so a disk cloned from an image counts only what was
+/// written over it. For `cave ls`.
+pub fn sizes(images: &Path, groups: &[Vec<PathBuf>]) -> Vec<u64> {
+    let mut measured = Measured::default();
+    let mut counted = Blocks::default();
+    for file in measured.files(images) {
+        counted.add_all(&measured.runs[&file]);
+    }
+    groups
+        .iter()
+        .map(|paths| {
+            let files: Vec<PathBuf> = paths.iter().flat_map(|p| measured.files(p)).collect();
+            files
+                .iter()
+                .map(|f| counted.add_all(&measured.runs[f]))
+                .sum()
+        })
+        .collect()
+}
+
+/// The paths of a project's VM in its `.cave/`: everything but its
+/// snapshots and forks.
+pub fn vm_paths(state: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = fs::read_dir(state)
+        .map(|d| d.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    paths.retain(|p| *p != state.join(SNAPSHOTS_DIR) && *p != state.join(FORKS_DIR));
+    paths.sort();
+    paths
+}
+
 /// Surveys the image cache in `images` and `projects`.
 pub fn survey(images: &Path, projects: &[Project], now: SystemTime) -> Survey {
     let mut measured = Measured::default();
