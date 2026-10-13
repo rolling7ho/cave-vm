@@ -68,6 +68,7 @@ name = "cave-vm-vmm"
 version = "0.0.0"
 dependencies = [
  "cave-vm-hvf",
+ "libc",
  "smoltcp",
  "vm-fdt",
 ]
