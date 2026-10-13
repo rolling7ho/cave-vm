@@ -48,6 +48,17 @@ cave-vm is an open-source (Apache 2.0) microVM runtime for macOS, built for codi
 4. Implement one crate at a time.
 5. Open a small PR against main. Do not stack PRs: work that depends on an open PR waits on its branch until that PR merges (D25). Commits use Conventional Commits (`feat:`, `fix:`) and DCO sign-off (`git commit -s`).
 6. Request a review from @rolling7ho on every PR (`gh pr edit <n> --add-reviewer rolling7ho`).
+7. Watch main while PRs are open. After every merge:
+   - Update each open PR branch from main and resolve its conflicts, then run the lint and the tests before pushing.
+   - Open a PR for every waiting branch whose dependencies have now merged. Open as many as D25 allows.
+   - In your status, list each branch that still has no PR and the PR it waits on.
+8. Avoid conflicts in the first place:
+   - Before starting, check which files the open PRs change (`gh pr diff <n> --name-only`). Do not touch the same lines unless the task needs it.
+   - Change only what the task needs. Do not reformat, reorder or rename unrelated code.
+   - Add list entries (`mod` lines, dependencies, match arms) in alphabetical order, not at the end, so parallel PRs insert in different places.
+   - Put a changelog line next to the other entries for the same crate, not at the top of the section.
+   - Do not run `cargo update`. `Cargo.lock` should change only for a dependency the PR adds.
+9. Merging: when more than five open PRs written by Ivan or by an agent are waiting, the agent may merge them itself. Merge one at a time in dependency order, only with CI green, and bring the next PR up to date from main before merging it. PRs from anyone else always wait for Ivan.
 
 ## Definition of done
 
