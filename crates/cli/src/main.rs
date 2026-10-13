@@ -12,6 +12,7 @@ mod policy;
 mod project;
 mod remove;
 mod shell;
+mod snapshot;
 
 use std::process::ExitCode;
 
@@ -68,6 +69,21 @@ enum Cmd {
         /// Do not ask first, for scripts.
         #[arg(long)]
         yes: bool,
+    },
+    /// Roll the VM back to a snapshot, by default the newest.
+    Restore {
+        /// A snapshot from `cave ls`.
+        name: Option<String>,
+        #[arg(long)]
+        fork: Option<String>,
+    },
+    /// Save the VM's state.
+    Snapshot {
+        /// The snapshot's name; [ProjectFolder]-[YYYY-MM-DD]-[Distro] when
+        /// left out.
+        name: Option<String>,
+        #[arg(long)]
+        fork: Option<String>,
     },
     /// Copy files in and out; a path starting with `:` is in the VM.
     Cp {
@@ -130,11 +146,13 @@ fn main() -> ExitCode {
             Err(e) => Err(e),
         },
         Cmd::Images { json } => commands::images(json),
+        Cmd::Restore { name, fork } => snapshot::restore(name, fork),
         Cmd::Rm { name, yes } => remove::run(name, yes),
         Cmd::Shell { fork } => match shell::run(fork) {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
+        Cmd::Snapshot { name, fork } => snapshot::snapshot(name, fork),
         Cmd::Stop { fork } => commands::stop(fork),
         Cmd::Ls { all, json } => commands::ls(all, json),
     };
