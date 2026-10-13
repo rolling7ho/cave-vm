@@ -58,7 +58,7 @@ cave-vm is an open-source (Apache 2.0) microVM runtime for macOS, built for codi
    - Add list entries (`mod` lines, dependencies, match arms) in alphabetical order, not at the end, so parallel PRs insert in different places.
    - Put a changelog line next to the other entries for the same crate, not at the top of the section.
    - Do not run `cargo update`. `Cargo.lock` should change only for a dependency the PR adds.
-9. Merging: when more than five open PRs written by Ivan or by an agent are waiting, the agent may merge them itself. Merge one at a time in dependency order, only with CI green, and bring the next PR up to date from main before merging it. PRs from anyone else always wait for Ivan.
+9. Merging: the agent may merge any open PR written by Ivan or by an agent, however many are open. Merge one at a time in dependency order, only with CI green, and bring the next PR up to date from main before merging it. PRs from anyone else, such as outside contributors, wait for Ivan unless he says otherwise for that PR.
 
 ## Definition of done
 
