@@ -258,6 +258,120 @@ pub fn ipv4_addresses() -> io::Result<Vec<Ipv4Addr>> {
     Ok(addrs)
 }
 
+/// The IOKit and CoreFoundation calls [`on_system_sleep`] makes, from
+/// `<IOKit/pwr_mgt/IOPMLib.h>` and `<CoreFoundation/CFRunLoop.h>`. The
+/// `libc` crate does not cover them.
+mod power {
+    use std::ffi::c_void;
+
+    pub type IoConnect = u32;
+    pub type IoObject = u32;
+    pub type NotificationPort = *mut c_void;
+    pub type Callback =
+        extern "C" fn(refcon: *mut c_void, service: IoObject, message: u32, argument: *mut c_void);
+
+    /// `kIOMessageCanSystemSleep`: idle sleep is coming, and may be refused.
+    pub const CAN_SYSTEM_SLEEP: u32 = 0xe000_0270;
+    /// `kIOMessageSystemWillSleep`: sleep is coming and cannot be refused;
+    /// it waits for the answer, up to 30 seconds.
+    pub const SYSTEM_WILL_SLEEP: u32 = 0xe000_0280;
+
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        pub fn IORegisterForSystemPower(
+            refcon: *mut c_void,
+            port: *mut NotificationPort,
+            callback: Callback,
+            notifier: *mut IoObject,
+        ) -> IoConnect;
+        pub fn IONotificationPortGetRunLoopSource(port: NotificationPort) -> *mut c_void;
+        pub fn IOAllowPowerChange(kernel_port: IoConnect, notification: isize) -> i32;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        pub static kCFRunLoopDefaultMode: *const c_void;
+        pub fn CFRunLoopGetCurrent() -> *mut c_void;
+        pub fn CFRunLoopAddSource(run_loop: *mut c_void, source: *mut c_void, mode: *const c_void);
+        pub fn CFRunLoopRun();
+    }
+}
+
+/// What the power callback needs: the connection to answer on and what
+/// to run before the Mac sleeps.
+struct Sleeper {
+    root_port: std::sync::atomic::AtomicU32,
+    before_sleep: Box<dyn Fn() + Send + Sync>,
+}
+
+extern "C" fn power_changed(
+    refcon: *mut std::ffi::c_void,
+    _service: power::IoObject,
+    message: u32,
+    argument: *mut std::ffi::c_void,
+) {
+    // SAFETY: `refcon` is the leaked `Sleeper` that `on_system_sleep`
+    // registered, which is never freed.
+    let sleeper = unsafe { &*refcon.cast::<Sleeper>() };
+    if message != power::CAN_SYSTEM_SLEEP && message != power::SYSTEM_WILL_SLEEP {
+        return;
+    }
+    if message == power::SYSTEM_WILL_SLEEP {
+        (sleeper.before_sleep)();
+    }
+    let port = sleeper.root_port.load(std::sync::atomic::Ordering::Acquire);
+    // SAFETY: `port` is the connection IORegisterForSystemPower returned,
+    // and `argument` is the notification ID IOKit passed with the message,
+    // which IOAllowPowerChange takes as a long.
+    unsafe { power::IOAllowPowerChange(port, argument as isize) };
+}
+
+/// Runs `before_sleep` each time the Mac is about to sleep, on a thread of
+/// its own; sleep waits for it, for up to 30 seconds. Idle sleep is never
+/// refused.
+pub fn on_system_sleep(before_sleep: impl Fn() + Send + Sync + 'static) -> io::Result<()> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let sleeper: &'static Sleeper = Box::leak(Box::new(Sleeper {
+        root_port: AtomicU32::new(0),
+        before_sleep: Box::new(before_sleep),
+    }));
+    let (registered, failed) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("sleep-watch".into())
+        .spawn(move || {
+            let mut port: power::NotificationPort = std::ptr::null_mut();
+            let mut notifier: power::IoObject = 0;
+            let refcon = std::ptr::from_ref(sleeper).cast_mut().cast();
+            // SAFETY: `refcon` stays valid forever (leaked), the callback
+            // has the signature IOKit expects, and `port` and `notifier`
+            // are writable locals the call fills in.
+            let root = unsafe {
+                power::IORegisterForSystemPower(refcon, &mut port, power_changed, &mut notifier)
+            };
+            if root == 0 {
+                let _ = registered.send(Err(io::Error::other("IORegisterForSystemPower failed")));
+                return;
+            }
+            sleeper.root_port.store(root, Ordering::Release);
+            // SAFETY: `port` is the notification port the registration
+            // made, and this thread's run loop runs its source for good;
+            // the default mode is a CFString constant CoreFoundation owns.
+            unsafe {
+                let source = power::IONotificationPortGetRunLoopSource(port);
+                power::CFRunLoopAddSource(
+                    power::CFRunLoopGetCurrent(),
+                    source,
+                    power::kCFRunLoopDefaultMode,
+                );
+                let _ = registered.send(Ok(()));
+                power::CFRunLoopRun();
+            }
+        })?;
+    failed
+        .recv()
+        .unwrap_or_else(|_| Err(io::Error::other("the sleep watcher thread exited")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,6 +383,13 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn the_sleep_watcher_registers() {
+        // The callback itself runs only when the Mac sleeps, so it is
+        // checked by hand (docs/snapshots.md).
+        on_system_sleep(|| {}).unwrap();
     }
 
     #[test]
