@@ -8,6 +8,8 @@ pub mod backend;
 #[cfg(target_os = "macos")]
 pub mod boot;
 #[cfg(target_os = "macos")]
+pub mod control;
+#[cfg(target_os = "macos")]
 pub mod devices;
 #[cfg(target_os = "macos")]
 pub mod disk;

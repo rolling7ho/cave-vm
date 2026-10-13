@@ -9,8 +9,10 @@
 use std::ffi::CString;
 use std::fs::File;
 use std::io;
-use std::os::fd::AsRawFd;
+use std::net::Ipv4Addr;
+use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::net::UnixStream;
 use std::path::Path;
 
 /// `CLONE_NOFOLLOW` from `<sys/clonefile.h>`: clone a symlink itself rather
@@ -83,10 +85,184 @@ pub fn punch_hole(file: &File, offset: u64, len: u64) -> io::Result<()> {
     Ok(())
 }
 
+/// The VMM's standard input as a Unix socket: the control link the daemon
+/// starts it with (`docs/protocol.md`, "VMM control"). Fails if standard
+/// input is not a socket.
+pub fn stdin_socket() -> io::Result<UnixStream> {
+    // SAFETY: dup only reads its argument; it returns a new descriptor or
+    // -1.
+    let fd = unsafe { libc::dup(0) };
+    if fd == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `fd` is a fresh descriptor from dup that nothing else owns.
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    let mut stat: libc::stat = unsafe_zeroed_stat();
+    // SAFETY: `fd` is open and `stat` is a valid, writable stat.
+    if unsafe { libc::fstat(fd.as_raw_fd(), &mut stat) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    if stat.st_mode & libc::S_IFMT != libc::S_IFSOCK {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "standard input is not a socket; cave-vmm is started by the cave daemon",
+        ));
+    }
+    Ok(UnixStream::from(fd))
+}
+
+fn unsafe_zeroed_stat() -> libc::stat {
+    // SAFETY: stat is plain data, so all zeroes is a valid value.
+    unsafe { std::mem::zeroed() }
+}
+
+/// Room for one descriptor's control message.
+const FD_SPACE: usize = 32;
+
+/// Sends all of `data` on `socket`, with `fd` attached to its first byte
+/// (`SCM_RIGHTS`).
+pub fn send_with_fd(socket: &UnixStream, data: &[u8], fd: BorrowedFd<'_>) -> io::Result<()> {
+    // SAFETY: CMSG_SPACE only computes a size.
+    let space = unsafe { libc::CMSG_SPACE(size_of::<libc::c_int>() as _) } as usize;
+    assert!(space <= FD_SPACE, "control buffer too small");
+    let mut control = [0u64; FD_SPACE / 8];
+    let mut iov = libc::iovec {
+        iov_base: data.as_ptr() as *mut libc::c_void,
+        iov_len: data.len(),
+    };
+    // SAFETY: msghdr is plain data, so all zeroes is a valid value.
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control.as_mut_ptr().cast();
+    msg.msg_controllen = space as _;
+    // SAFETY: `msg` points at `control`, which is aligned (u64) and holds
+    // `space` bytes, so CMSG_FIRSTHDR returns a header inside it, and
+    // CMSG_DATA has room for one c_int after it.
+    unsafe {
+        let cmsg = libc::CMSG_FIRSTHDR(&msg);
+        (*cmsg).cmsg_level = libc::SOL_SOCKET;
+        (*cmsg).cmsg_type = libc::SCM_RIGHTS;
+        (*cmsg).cmsg_len = libc::CMSG_LEN(size_of::<libc::c_int>() as _) as _;
+        std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), fd.as_raw_fd());
+    }
+    // SAFETY: every pointer in `msg` is valid for the call: `iov` covers
+    // `data`, and the control buffer is filled in above.
+    let sent = unsafe { libc::sendmsg(socket.as_raw_fd(), &msg, 0) };
+    if sent == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    let sent = sent as usize;
+    if sent < data.len() {
+        // The descriptor went with the first part.
+        io::Write::write_all(&mut &*socket, &data[sent..])?;
+    }
+    Ok(())
+}
+
+/// Reads up to `buf.len()` bytes from `socket`, and the descriptor attached
+/// to them, if any. Descriptors arrive close-on-exec.
+pub fn recv_with_fd(socket: &UnixStream, buf: &mut [u8]) -> io::Result<(usize, Option<OwnedFd>)> {
+    let mut control = [0u64; FD_SPACE / 8];
+    let mut iov = libc::iovec {
+        iov_base: buf.as_mut_ptr().cast(),
+        iov_len: buf.len(),
+    };
+    // SAFETY: msghdr is plain data, so all zeroes is a valid value.
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control.as_mut_ptr().cast();
+    msg.msg_controllen = FD_SPACE as _;
+    let n = loop {
+        // SAFETY: `iov` covers `buf` and the control buffer is FD_SPACE
+        // writable bytes; recvmsg writes only within them.
+        let n = unsafe { libc::recvmsg(socket.as_raw_fd(), &mut msg, 0) };
+        if n != -1 {
+            break n as usize;
+        }
+        let err = io::Error::last_os_error();
+        if err.kind() != io::ErrorKind::Interrupted {
+            return Err(err);
+        }
+    };
+    let mut received = None;
+    // SAFETY: recvmsg filled in `msg`; CMSG_FIRSTHDR and CMSG_NXTHDR walk
+    // only the part of `control` it reported, and each SCM_RIGHTS message
+    // carries c_int descriptors this process now owns.
+    unsafe {
+        let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
+        while !cmsg.is_null() {
+            if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS {
+                let data = libc::CMSG_DATA(cmsg);
+                let len = (*cmsg).cmsg_len as usize - (data as usize - cmsg as usize);
+                for i in 0..len / size_of::<libc::c_int>() {
+                    let fd = std::ptr::read_unaligned(data.cast::<libc::c_int>().add(i));
+                    libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+                    let fd = OwnedFd::from_raw_fd(fd);
+                    // Keep the first; any others close when dropped.
+                    if received.is_none() {
+                        received = Some(fd);
+                    }
+                }
+            }
+            cmsg = libc::CMSG_NXTHDR(&msg, cmsg);
+        }
+    }
+    if msg.msg_flags & libc::MSG_CTRUNC != 0 && received.is_none() {
+        return Err(io::Error::other("a passed descriptor was lost"));
+    }
+    Ok((n, received))
+}
+
+/// Whether the peer closed `socket`, without reading anything or waiting.
+/// Data waiting to be read means it has not.
+pub fn hung_up(socket: &UnixStream) -> bool {
+    let mut byte = 0u8;
+    // SAFETY: recv writes at most one byte into `byte`, which outlives the
+    // call; MSG_PEEK leaves it in the socket and MSG_DONTWAIT never blocks.
+    let n = unsafe {
+        libc::recv(
+            socket.as_raw_fd(),
+            (&raw mut byte).cast(),
+            1,
+            libc::MSG_PEEK | libc::MSG_DONTWAIT,
+        )
+    };
+    n == 0
+}
+
+/// This Mac's own IPv4 addresses, on every interface.
+pub fn ipv4_addresses() -> io::Result<Vec<Ipv4Addr>> {
+    let mut list: *mut libc::ifaddrs = std::ptr::null_mut();
+    // SAFETY: getifaddrs writes a list pointer into `list` or fails.
+    if unsafe { libc::getifaddrs(&mut list) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut addrs = Vec::new();
+    let mut entry = list;
+    // SAFETY: the list from getifaddrs is valid until freeifaddrs; each
+    // ifa_addr is null or a sockaddr of the family it names, and AF_INET
+    // ones are sockaddr_in.
+    unsafe {
+        while !entry.is_null() {
+            let addr = (*entry).ifa_addr;
+            if !addr.is_null() && i32::from((*addr).sa_family) == libc::AF_INET {
+                let sin = addr.cast::<libc::sockaddr_in>();
+                addrs.push(Ipv4Addr::from(u32::from_be((*sin).sin_addr.s_addr)));
+            }
+            entry = (*entry).ifa_next;
+        }
+        libc::freeifaddrs(list);
+    }
+    Ok(addrs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::io::{Read, Write};
 
     fn temp(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("cave-host-{name}-{}", std::process::id()));
@@ -139,6 +315,46 @@ mod tests {
         let unaligned = punch_hole(&file, 512, 4096).unwrap_err();
         assert_eq!(unaligned.raw_os_error(), Some(libc::EINVAL));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_closed_peer_is_seen_without_reading() {
+        let (a, b) = UnixStream::pair().unwrap();
+        assert!(!hung_up(&a));
+        (&b).write_all(b"x").unwrap();
+        assert!(!hung_up(&a));
+        drop(b);
+        assert!(!hung_up(&a), "unread data comes first");
+        let mut byte = [0u8; 1];
+        (&a).read_exact(&mut byte).unwrap();
+        assert!(hung_up(&a));
+    }
+
+    #[test]
+    fn a_descriptor_crosses_with_its_data() {
+        use std::io::{Read, Write};
+        use std::os::fd::AsFd;
+        let (a, b) = UnixStream::pair().unwrap();
+        let (mut ours, theirs) = UnixStream::pair().unwrap();
+        send_with_fd(&a, b"frame", theirs.as_fd()).unwrap();
+        drop(theirs);
+        let mut buf = [0u8; 64];
+        let (n, fd) = recv_with_fd(&b, &mut buf).unwrap();
+        assert_eq!(&buf[..n], b"frame");
+        let mut passed = UnixStream::from(fd.expect("a descriptor"));
+        passed.write_all(b"through").unwrap();
+        let mut got = [0u8; 7];
+        ours.read_exact(&mut got).unwrap();
+        assert_eq!(&got, b"through");
+        // Plain data has no descriptor.
+        (&a).write_all(b"plain").unwrap();
+        let (n, fd) = recv_with_fd(&b, &mut buf).unwrap();
+        assert_eq!((&buf[..n], fd.is_none()), (&b"plain"[..], true));
+    }
+
+    #[test]
+    fn the_macs_addresses_include_loopback() {
+        assert!(ipv4_addresses().unwrap().contains(&Ipv4Addr::LOCALHOST));
     }
 
     #[test]
