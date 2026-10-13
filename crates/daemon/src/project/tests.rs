@@ -149,3 +149,61 @@ fn problems_say_how_to_fix_them() {
     assert!(err.fix.unwrap().contains("cave init"));
     fs::remove_dir_all(&s.root).unwrap();
 }
+
+#[test]
+fn images_count_the_projects_that_use_them() {
+    let s = setup("images", TOML);
+    let before = s.source.images(std::slice::from_ref(&s.project)).unwrap();
+    assert_eq!(before.len(), 1);
+    assert!(!before[0].downloaded);
+    // Unpinned, it counts toward the newest version, which it will pin.
+    assert_eq!(before[0].used_by, 1);
+    assert!(before[0].base);
+
+    s.source.prepare(&vm(&s.project), None, &[]).unwrap();
+    let after = s.source.images(std::slice::from_ref(&s.project)).unwrap();
+    assert_eq!(after[0].name, "debian");
+    assert_eq!(after[0].digest, s.disk.to_string());
+    assert!(after[0].downloaded);
+    assert_eq!(after[0].used_by, 1);
+    assert_eq!(after[0].update, None);
+    fs::remove_dir_all(&s.root).unwrap();
+}
+
+#[test]
+fn an_older_version_in_use_is_listed_with_its_update() {
+    let hex = |n: u8| format!("{n:02x}").repeat(32);
+    let manifest = Manifest::parse(&format!(
+        r#"{{"version": 1, "images": [
+            {{"name": "debian", "disk": {{"url": "d2", "sha256": "{d2}", "size": 1}}, "kernel": {{"url": "k", "sha256": "{k}", "size": 1}}}},
+            {{"name": "ubuntu", "disk": {{"url": "u", "sha256": "{u}", "size": 1}}, "kernel": {{"url": "k", "sha256": "{k}", "size": 1}}}},
+            {{"name": "debian", "disk": {{"url": "d1", "sha256": "{d1}", "size": 1}}, "kernel": {{"url": "k", "sha256": "{k}", "size": 1}}}},
+            {{"name": "debian", "disk": {{"url": "d0", "sha256": "{d0}", "size": 1}}, "kernel": {{"url": "k", "sha256": "{k}", "size": 1}}}}
+        ]}}"#,
+        d2 = hex(0xd2),
+        u = hex(0x01),
+        d1 = hex(0xd1),
+        d0 = hex(0xd0),
+        k = hex(0xbb),
+    ))
+    .unwrap();
+    let digest = |n: u8| -> Digest { format!("sha256:{}", hex(n)).parse().unwrap() };
+    let rows = image_rows(&manifest, &[digest(0xd1), digest(0xd1)], |_| false);
+    let summary: Vec<_> = rows
+        .iter()
+        .map(|r| (r.name.as_str(), r.used_by, r.base, r.update.is_some()))
+        .collect();
+    // d0 is neither used nor downloaded, so it is left out.
+    assert_eq!(
+        summary,
+        [
+            ("debian", 0, true, false),
+            ("ubuntu", 0, false, false),
+            ("debian", 2, false, true)
+        ]
+    );
+    assert_eq!(
+        rows[2].update.as_deref(),
+        Some(digest(0xd2).to_string().as_str())
+    );
+}

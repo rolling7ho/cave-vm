@@ -16,12 +16,14 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use cave_vm_proto::daemon::{EntryKind, ListEntry, NetMode, Policy, PortMap, VmId, VmState};
+use cave_vm_proto::daemon::{
+    EntryKind, ImageInfo, ListEntry, NetMode, Policy, PortMap, VmId, VmState,
+};
 use cave_vm_proto::vmm::{FromVmm, ToVmm, VmmConfig};
 use cave_vm_proto::{ErrorCode, ErrorMessage};
 
 use crate::forward::{self, Bound, Forward};
-use crate::home::Home;
+use crate::home::{Home, PROJECT_FILE};
 use crate::launch::{Launched, Launcher};
 use crate::link::{BOOT_TIMEOUT, LinkError, VmmLink};
 use crate::project::STATE_DIR;
@@ -52,6 +54,13 @@ pub trait VmSource: Send + Sync {
         net: Option<NetMode>,
         ports: &[PortMap],
     ) -> Result<Prepared, ErrorMessage>;
+
+    /// The base images for `cave images`, with how many of `projects` use
+    /// each.
+    fn images(&self, projects: &[PathBuf]) -> Result<Vec<ImageInfo>, ErrorMessage> {
+        let _ = projects;
+        Err(error(ErrorCode::Internal, "this daemon cannot list images"))
+    }
 }
 
 enum Slot {
@@ -140,6 +149,8 @@ impl Vms {
         })?;
         let mut vms = self.vms.lock().expect("vms lock");
         Ok(Arc::clone(vms.entry(dir.clone()).or_insert_with(|| {
+            // Best effort: only `cave images` counts use from it.
+            let _ = fs::write(dir.join(PROJECT_FILE), &id.project);
             Arc::new(Vm {
                 id: id.clone(),
                 dir,
@@ -362,6 +373,16 @@ impl Vms {
             .collect();
         entries.sort_by(|a, b| (&a.project, &a.name).cmp(&(&b.project, &b.name)));
         entries
+    }
+
+    /// The base images and how many known projects use each.
+    pub fn images(&self) -> Result<Vec<ImageInfo>, ErrorMessage> {
+        let projects = self
+            .home
+            .projects()
+            .map_err(|e| error(ErrorCode::Io, format!("cannot list the VM folders: {e}")))?;
+        let projects: Vec<PathBuf> = projects.into_iter().filter(|p| p.is_dir()).collect();
+        self.source.images(&projects)
     }
 
     /// Stops every running VM, when the daemon exits.

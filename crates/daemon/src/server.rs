@@ -124,6 +124,7 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                 ..vm
             })
             .map(|()| Reply::Ok),
+        Request::Images => vms.images().map(|images| Reply::Images { images }),
         Request::Stop { vm } => vms.stop(&vm).map(|()| Reply::Ok),
         Request::List { project } => Ok(Reply::List {
             entries: vms.list(project.as_deref()),

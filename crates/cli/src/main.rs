@@ -82,6 +82,12 @@ enum Cmd {
         #[arg(last = true, value_name = "CMD")]
         argv: Vec<String>,
     },
+    /// List the base images.
+    Images {
+        /// One JSON document, for scripts.
+        #[arg(long)]
+        json: bool,
+    },
     /// Interactive shell in the VM.
     Shell {
         #[arg(long)]
@@ -123,6 +129,7 @@ fn main() -> ExitCode {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
+        Cmd::Images { json } => commands::images(json),
         Cmd::Rm { name, yes } => remove::run(name, yes),
         Cmd::Shell { fork } => match shell::run(fork) {
             Ok(code) => return ExitCode::from(code),

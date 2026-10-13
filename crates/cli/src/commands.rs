@@ -1,11 +1,11 @@
-//! `cave run`, `cave stop` and `cave ls`.
+//! `cave run`, `cave stop`, `cave ls` and `cave images`.
 
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
 use cave_vm_proto::daemon::{
-    EntryKind, ListEntry, NetMode, PortMap, Reply, Request, VmId, VmState,
+    EntryKind, ImageInfo, ListEntry, NetMode, PortMap, Reply, Request, VmId, VmState,
 };
 
 use crate::client::Connection;
@@ -199,4 +199,97 @@ pub fn ls(all: bool, json: bool) -> Result<()> {
     }
     print!("{out}");
     Ok(())
+}
+
+/// `sha256:` and the first 8 hex digits.
+fn short_digest(digest: &str) -> &str {
+    let end = digest.len().min("sha256:".len() + 8);
+    &digest[..end]
+}
+
+/// The `cave images` table.
+fn images_table(images: &[ImageInfo]) -> String {
+    let width = images
+        .iter()
+        .map(|i| i.name.len())
+        .max()
+        .unwrap_or(4)
+        .max(4)
+        + 2;
+    let mut out = format!(
+        "{:<width$}{:<17}{:<12}USED BY\n",
+        "NAME", "DIGEST", "DOWNLOADED"
+    );
+    for image in images {
+        let mut used = match image.used_by {
+            0 => "-".to_string(),
+            1 => "1 project".to_string(),
+            n => format!("{n} projects"),
+        };
+        if image.base {
+            used = format!("{used:<13}(base)");
+        }
+        if let Some(update) = &image.update {
+            used = format!("{used:<13}(newer: {})", short_digest(update));
+        }
+        let downloaded = if image.downloaded { "yes" } else { "no" };
+        out.push_str(&format!(
+            "{:<width$}{:<17}{downloaded:<12}{}\n",
+            image.name,
+            short_digest(&image.digest),
+            used.trim_end()
+        ));
+    }
+    out
+}
+
+/// `cave images`.
+pub fn images(json: bool) -> Result<()> {
+    let Reply::Images { images } = Connection::call(&Request::Images)? else {
+        return Err(CliError::new(
+            "the daemon sent an unexpected reply to images",
+        ));
+    };
+    if json {
+        let doc = serde_json::json!({ "images": images });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&doc).map_err(|e| CliError::new(e.to_string()))?
+        );
+        return Ok(());
+    }
+    print!("{}", images_table(&images));
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image(name: &str, digest: &str, downloaded: bool, used_by: u32) -> ImageInfo {
+        ImageInfo {
+            name: name.into(),
+            digest: format!("sha256:{digest}"),
+            downloaded,
+            used_by,
+            base: false,
+            update: None,
+        }
+    }
+
+    #[test]
+    fn the_images_table_matches_the_docs() {
+        let mut debian = image("debian", "3f2a9c1e00000000", true, 3);
+        debian.base = true;
+        let ubuntu = image("ubuntu", "8b17d04a00000000", false, 0);
+        let mut old = image("debian", "11112222ffff", true, 1);
+        old.update = Some("sha256:3f2a9c1e00000000".into());
+        assert_eq!(
+            images_table(&[debian, ubuntu, old]),
+            "NAME    DIGEST           DOWNLOADED  USED BY\n\
+             debian  sha256:3f2a9c1e  yes         3 projects   (base)\n\
+             ubuntu  sha256:8b17d04a  no          -\n\
+             debian  sha256:11112222  yes         1 project    (newer: sha256:3f2a9c1e)\n"
+        );
+    }
 }

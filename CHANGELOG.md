@@ -16,6 +16,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- `cave images [--json]`: the base images from the manifest, with each one's digest, whether it is downloaded, how many projects use it and which one `base` stands for. An older version still downloaded or in use is listed with the newer digest. The daemon remembers each project it has run in its own data directory, so the count survives a daemon restart (P3.11f).
 - `cave rm [name] [--yes]`: removes the project's VM, deleting `.cave/` and the daemon's state for it while `cave.toml` stays. It asks first, showing the size and, for a sealed project, that code only in the VM is lost; without a terminal it needs `--yes`. A `.cave` that is a symbolic link is removed without being followed (P3.11d).
 - `cave shell`: an interactive shell in the VM as the `cave` user, booting it first if needed, on a pseudo-terminal that follows window resizes, with Ctrl-C going to the VM and the shell's exit code. Without a terminal it says to use `cave exec` (P3.11c).
 - `cave cp <src>... <dest>`: copies files and folders between the Mac and the VM, with `:` marking the VM side as in `scp`. Files go through the agent's `file_read` and `file_write`, checked by SHA-256 on both ends and keeping their permission bits; folders go through `tar` on both sides, without macOS metadata. The daemon relays `file_read` and `file_write` to the agent (P3.11e).

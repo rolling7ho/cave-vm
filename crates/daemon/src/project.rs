@@ -10,14 +10,14 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cave_vm_proto::daemon::{NetMode, Policy, PortMap, VmId};
+use cave_vm_proto::daemon::{ImageInfo, NetMode, Policy, PortMap, VmId};
 use cave_vm_proto::vmm::VmmConfig;
 use cave_vm_proto::{ErrorCode, ErrorMessage};
 use cave_vm_vmm::disk;
 
 use crate::config;
-use crate::image::manifest::{Manifest, Origin};
-use crate::image::{Cache, Digest, ImageRef};
+use crate::image::manifest::{Entry, Manifest, Origin};
+use crate::image::{BASE_ALIAS_TARGET, Cache, Digest, ImageRef};
 use crate::vms::{Prepared, VmSource};
 
 /// The project's machine-specific folder.
@@ -54,6 +54,17 @@ impl ProjectSource {
         format!("sha256:{}", text.trim()).parse().ok()
     }
 
+    fn read_manifest(&self) -> Result<Manifest, ErrorMessage> {
+        let text = self.origin.manifest().map_err(|e| {
+            ErrorMessage::new(
+                ErrorCode::Io,
+                format!("cannot read the image manifest: {e}"),
+            )
+            .with_fix("Check your connection and try again")
+        })?;
+        Manifest::parse(&text).map_err(|e| error(ErrorCode::Internal, e))
+    }
+
     /// Makes sure the image and its kernel are cached, and returns the image
     /// pinned to its digest with the paths of both.
     fn fetch(&self, image: &ImageRef) -> Result<(ImageRef, PathBuf, PathBuf), ErrorMessage> {
@@ -68,14 +79,7 @@ impl ProjectSource {
                 self.cache.path(&kernel),
             ));
         }
-        let text = self.origin.manifest().map_err(|e| {
-            ErrorMessage::new(
-                ErrorCode::Io,
-                format!("cannot read the image manifest: {e}"),
-            )
-            .with_fix("Check your connection and try again")
-        })?;
-        let manifest = Manifest::parse(&text).map_err(|e| error(ErrorCode::Internal, e))?;
+        let manifest = self.read_manifest()?;
         let entry = manifest
             .resolve(image)
             .map_err(|e| error(ErrorCode::NotFound, e))?;
@@ -141,6 +145,52 @@ fn absolute(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// The disk digest each project uses: its pin, or for an unpinned project
+/// the newest version of its image, which it pins on its next start.
+fn project_digests(manifest: &Manifest, projects: &[PathBuf]) -> Vec<Digest> {
+    projects
+        .iter()
+        .filter_map(|project| {
+            let image: ImageRef = config::load(project).ok()?.image.parse().ok()?;
+            match image.digest {
+                Some(digest) => Some(digest),
+                None => manifest.resolve(&image).ok().map(|e| e.disk.digest),
+            }
+        })
+        .collect()
+}
+
+/// The rows of `cave images`: the newest version of each image, and any
+/// older version that is downloaded or in use, marked with the update.
+fn image_rows(
+    manifest: &Manifest,
+    used: &[Digest],
+    downloaded: impl Fn(&Entry) -> bool,
+) -> Vec<ImageInfo> {
+    let newest = manifest.newest();
+    manifest
+        .images
+        .iter()
+        .filter_map(|entry| {
+            let latest = newest.iter().find(|n| n.name == entry.name)?;
+            let is_latest = std::ptr::eq(*latest, entry);
+            let used_by = used.iter().filter(|d| **d == entry.disk.digest).count();
+            let downloaded = downloaded(entry);
+            if !is_latest && used_by == 0 && !downloaded {
+                return None;
+            }
+            Some(ImageInfo {
+                name: entry.name.clone(),
+                digest: entry.disk.digest.to_string(),
+                downloaded,
+                used_by: u32::try_from(used_by).unwrap_or(u32::MAX),
+                base: is_latest && entry.name == BASE_ALIAS_TARGET,
+                update: (!is_latest).then(|| latest.disk.digest.to_string()),
+            })
+        })
+        .collect()
+}
+
 impl VmSource for ProjectSource {
     fn prepare(
         &self,
@@ -202,6 +252,14 @@ impl VmSource for ProjectSource {
                 widened,
             },
         })
+    }
+
+    fn images(&self, projects: &[PathBuf]) -> Result<Vec<ImageInfo>, ErrorMessage> {
+        let manifest = self.read_manifest()?;
+        let used = project_digests(&manifest, projects);
+        Ok(image_rows(&manifest, &used, |entry| {
+            self.cache.contains(&entry.disk.digest) && self.cache.contains(&entry.kernel.digest)
+        }))
     }
 }
 

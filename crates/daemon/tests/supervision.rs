@@ -374,10 +374,10 @@ fn startup_cleanup_kills_a_vmm_left_by_an_earlier_daemon() {
 #[test]
 fn unsupported_and_malformed_requests_are_errors() {
     let r = rig("unsup", NORMAL);
-    match r.request(Request::Images) {
+    match r.request(Request::Doctor) {
         Reply::Error(e) => {
             assert_eq!(e.code, ErrorCode::BadRequest);
-            assert!(e.message.contains("images"), "{}", e.message);
+            assert!(e.message.contains("doctor"), "{}", e.message);
         }
         other => panic!("{other:?}"),
     }
@@ -528,6 +528,8 @@ fn remove_stops_the_vm_and_deletes_only_its_state() {
         ports: Vec::new(),
     });
     assert!(matches!(started, Reply::Policy(_)), "{started:?}");
+    // The daemon remembers the project in its own folder, not in `.cave/`.
+    assert_eq!(r.home.projects().unwrap(), std::slice::from_ref(&project));
 
     let remove = |name: Option<&str>| {
         r.request(Request::Remove {
@@ -542,6 +544,7 @@ fn remove_stops_the_vm_and_deletes_only_its_state() {
     assert_eq!(remove(None), Reply::Ok);
     assert!(!project.join(".cave").exists());
     assert!(project.join("cave.toml").exists());
+    assert!(r.home.projects().unwrap().is_empty());
     assert!(
         matches!(r.request(Request::List { project: None }), Reply::List { entries } if entries.is_empty())
     );
