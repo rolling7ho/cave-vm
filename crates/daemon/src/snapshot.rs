@@ -220,6 +220,28 @@ pub fn dir(state_dir: &Path, name: &str) -> PathBuf {
     state_dir.join(SNAPSHOTS_DIR).join(name)
 }
 
+/// The folder for fork `name` in a project's `.cave/`. It holds the fork's
+/// disk, and until the fork first boots, the snapshot it starts from in
+/// the same format as a snapshot folder.
+pub fn fork_dir(state_dir: &Path, name: &str) -> PathBuf {
+    state_dir.join(FORKS_DIR).join(name)
+}
+
+/// The names of the forks in a project's `.cave/`, sorted.
+pub fn fork_names(state_dir: &Path) -> io::Result<Vec<String>> {
+    let mut names = match fs::read_dir(state_dir.join(FORKS_DIR)) {
+        Ok(entries) => entries
+            .flatten()
+            .filter(|e| e.path().join(DISK_FILE).is_file())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e),
+    };
+    names.sort();
+    Ok(names)
+}
+
 /// Writes the manifest into `dir`, replacing it in one step so a crash
 /// leaves the old manifest or the new one, never half of one.
 pub fn write_manifest(dir: &Path, manifest: &Manifest) -> io::Result<()> {

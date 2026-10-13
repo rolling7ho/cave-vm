@@ -236,6 +236,14 @@ pub enum Reply {
     },
     Forked {
         name: String,
+        /// The snapshot it was made from, or the VM whose current state
+        /// was forked.
+        #[serde(default)]
+        from: String,
+        /// Why the fork's memory was not restored, so it booted from the
+        /// disk, if it was not.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     List {
         entries: Vec<ListEntry>,

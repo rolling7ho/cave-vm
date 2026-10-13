@@ -304,7 +304,11 @@ impl Vms {
     /// no `.cave/` is not an error.
     pub fn remove(&self, id: &VmId) -> Result<(), ErrorMessage> {
         if let Some(name) = &id.fork {
-            if self.remove_snapshot(id, name)? {
+            let project = VmId {
+                fork: None,
+                ..id.clone()
+            };
+            if self.remove_snapshot(&project, name)? || self.remove_fork(&project, name)? {
                 return Ok(());
             }
             return Err(error(
@@ -319,6 +323,11 @@ impl Vms {
                 ErrorCode::BadRequest,
                 format!("{} is not an absolute path", id.project),
             ));
+        }
+        // Forks live in `.cave/` too.
+        for fork in self.forks_of(&id.project) {
+            self.stop(&fork)?;
+            self.forget(&fork);
         }
         self.stop(id)?;
         let vm = self.vm(id)?;
@@ -383,10 +392,35 @@ impl Vms {
         projects.sort();
         projects.dedup();
         for project in projects {
+            let known: Vec<String> = entries
+                .iter()
+                .filter(|e| e.project == project && e.kind == EntryKind::Fork)
+                .map(|e| e.name.clone())
+                .collect();
+            entries.extend(snapshots::stopped_forks(&project, &known));
             entries.extend(snapshots::list(&project));
         }
         entries.sort_by(|a, b| (&a.project, &a.name).cmp(&(&b.project, &b.name)));
         entries
+    }
+
+    /// The forks of `project` the daemon knows.
+    fn forks_of(&self, project: &str) -> Vec<VmId> {
+        self.vms
+            .lock()
+            .expect("vms lock")
+            .values()
+            .filter(|vm| vm.id.project == project && vm.id.fork.is_some())
+            .map(|vm| vm.id.clone())
+            .collect()
+    }
+
+    /// Drops a stopped VM and the daemon's folder for it.
+    fn forget(&self, id: &VmId) {
+        if let Ok(dir) = self.home.vm_dir(id) {
+            let _ = fs::remove_dir_all(&dir);
+            self.vms.lock().expect("vms lock").remove(&dir);
+        }
     }
 
     /// The base images and how many known projects use each.

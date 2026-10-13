@@ -207,3 +207,25 @@ fn an_older_version_in_use_is_listed_with_its_update() {
         Some(digest(0xd2).to_string().as_str())
     );
 }
+
+#[test]
+fn a_fork_boots_from_the_disk_in_its_folder() {
+    let s = setup("fork", TOML);
+    let fork = VmId {
+        fork: Some("try".into()),
+        ..vm(&s.project)
+    };
+    let err = s.source.prepare(&fork, None, &[]).unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotFound);
+    assert!(err.message.contains("no fork named try"), "{}", err.message);
+
+    let dir = s.project.join(".cave/forks/try");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("disk.img"), DISK).unwrap();
+    let prepared = s.source.prepare(&fork, None, &[]).unwrap();
+    assert_eq!(prepared.policy.name, "try");
+    assert_eq!(prepared.config.disk, dir.join("disk.img").to_string_lossy());
+    // The project's own disk is not made for a fork.
+    assert!(!s.project.join(".cave/disk.img").exists());
+    fs::remove_dir_all(&s.root).unwrap();
+}
