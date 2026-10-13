@@ -1,6 +1,6 @@
 # cave.toml reference
 
-`cave.toml` is a project's small config file, committed to git (ROADMAP task P1.2). Together with the pinned base-image digest it rebuilds the environment on any Mac. Nothing here is implemented yet.
+`cave.toml` is a project's small config file, committed to git (ROADMAP task P1.2). Together with the pinned base-image digest it rebuilds the environment on any Mac. The daemon reads it (`cave-vm-daemon`'s `config` module).
 
 The keys in the design's example are fixed: `[vm] image cpus memory`, `[storage] mode` and `[network] mode`. Every other key was proposed under [decision D10](decisions/0003-roadmap-open-items.md), which says the key names for idle auto-suspend, automatic snapshots and deletion, TTL and the update detector are proposed and approved here.
 

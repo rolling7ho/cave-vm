@@ -3,6 +3,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod config;
 pub mod home;
 pub mod image;
 pub mod launch;
