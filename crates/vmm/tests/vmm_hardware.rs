@@ -9,7 +9,10 @@
 //! ```
 //!
 //! `CAVE_E2E_IMAGE_DIR` points at another image folder; the default is
-//! `target/image`. The VM has no network.
+//! `target/image`. The first test's VM has no network. The second needs
+//! the internet and runs only when `CAVE_E2E_TCP_TARGET` names a server
+//! that keeps an idle TCP connection open for a minute, such as
+//! `1.1.1.1:80`.
 
 #![cfg(all(target_os = "macos", target_arch = "aarch64"))]
 
@@ -18,6 +21,7 @@ use std::io::Read;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cave_vm_proto::agent::{Exec, Message};
@@ -40,6 +44,13 @@ fn image_dir() -> PathBuf {
         dir.display()
     );
     dir
+}
+
+/// One test at a time: each start signs the same `cave-vmm` binary again,
+/// and a VMM started while another signing rewrites it fails to launch.
+fn one_at_a_time() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 struct Vmm {
@@ -148,6 +159,7 @@ fn unix_now() -> u64 {
 #[test]
 #[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
 fn a_process_survives_snapshot_and_restore() {
+    let _one = one_at_a_time();
     let images = image_dir();
     let root = std::env::temp_dir()
         .canonicalize()
@@ -213,5 +225,94 @@ fn a_process_survives_snapshot_and_restore() {
             eprintln!("{log}: {line}");
         }
     }
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A fresh, empty folder for a test's files.
+fn scratch(name: &str) -> PathBuf {
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("cave-vmm-hw-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    root
+}
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement, a built image and the internet"]
+fn a_connection_from_before_a_snapshot_is_reset_after_a_restore() {
+    let Ok(target) = std::env::var("CAVE_E2E_TCP_TARGET") else {
+        eprintln!("skipped: set CAVE_E2E_TCP_TARGET to run it");
+        return;
+    };
+    let _one = one_at_a_time();
+    let (host, port) = target
+        .rsplit_once(':')
+        .expect("CAVE_E2E_TCP_TARGET is host:port");
+    let images = image_dir();
+    let root = scratch("net");
+    let disk = root.join("disk.img");
+    host::clonefile(&images.join("debian.img"), &disk).unwrap();
+    let snap = root.join("snap");
+    let config = VmmConfig {
+        kernel: images.join("Image").to_string_lossy().into_owned(),
+        disk: disk.to_string_lossy().into_owned(),
+        memory_bytes: 1 << 30,
+        cpus: 1,
+        net: NetMode::Nat,
+        restore: None,
+    };
+
+    let mut vmm = Vmm::boot(config.clone(), &root.join("boot.log"));
+    // A reader that blocks on an idle connection and notes when it ends.
+    let reader = format!(
+        "exec 3<>/dev/tcp/{host}/{port} && echo open > /tmp/conn && \
+         cat <&3 >/dev/null 2>/tmp/conn.err; echo closed >> /tmp/conn"
+    );
+    vmm.sh(&format!(
+        "setsid bash -c '{reader}' </dev/null >/dev/null 2>&1 & \
+         for i in $(seq 50); do [ -s /tmp/conn ] && break; sleep 0.1; done; cat /tmp/conn"
+    ))
+    .contains("open")
+    .then_some(())
+    .expect("the guest could not connect");
+    let reply = vmm.call(&ToVmm::Snapshot {
+        dir: snap.to_string_lossy().into_owned(),
+    });
+    assert_eq!(reply, FromVmm::Ok);
+    assert_eq!(
+        vmm.sh("cat /tmp/conn"),
+        "open\n",
+        "the connection ended early"
+    );
+    vmm.stop();
+
+    let restored_disk = root.join("restored.img");
+    host::clonefile(&snap.join("disk.img"), &restored_disk).unwrap();
+    let mut vmm = Vmm::boot(
+        VmmConfig {
+            disk: restored_disk.to_string_lossy().into_owned(),
+            restore: Some(snap.to_string_lossy().into_owned()),
+            ..config
+        },
+        &root.join("restore.log"),
+    );
+    // The reader sees the reset within seconds, not a hang.
+    let out = vmm.sh(
+        "for i in $(seq 100); do grep -q closed /tmp/conn && break; sleep 0.1; done; \
+         cat /tmp/conn /tmp/conn.err",
+    );
+    assert!(
+        out.contains("closed"),
+        "still open after a restore: {out:?}"
+    );
+    assert!(out.contains("reset"), "not ended by a reset: {out:?}");
+    // And the guest can connect again.
+    let again = vmm.sh(&format!(
+        "bash -c 'exec 3<>/dev/tcp/{host}/{port}' && echo reconnected"
+    ));
+    assert_eq!(again, "reconnected\n");
+    vmm.stop();
     fs::remove_dir_all(&root).unwrap();
 }

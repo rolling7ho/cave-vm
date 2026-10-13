@@ -9,9 +9,11 @@ A snapshot is a folder in the project's `.cave/snapshots/<name>/`. This page is 
 | `snapshot.json` | daemon, last | The manifest, below. A folder without one is an unfinished snapshot and is ignored. |
 | `disk.img` | daemon | The project disk, as an APFS clone of `.cave/disk.img`. |
 | `memory` | VMM | Guest RAM. Missing for a snapshot of a stopped VM. |
-| `state` | VMM | vCPU, interrupt-controller, timer, UART and virtio state. Missing with `memory`. |
+| `state` | VMM | vCPU, interrupt-controller, timer, UART and virtio state, and the guest's open TCP connections. Missing with `memory`. |
 
 The virtio state is each transport's registers and its queues with the device's position in each ring. It leaves out what cannot outlive the VMM process: frames waiting for the guest are dropped, and host vsock connections end, which the guest learns from a transport reset (P4.3).
+
+The guest's TCP connections through the network stack end too: their host sockets belong to the old VMM. `state` lists each one (the guest port and the destination), and the restored network stack sends the guest segments it cannot accept on each. The guest answers with an acknowledgment, which the stack, knowing no such connection, answers with a reset. So programs in the guest see "connection reset" at once rather than waiting on a connection nothing is behind, and can connect again. A connection missing from the list, say one opened as the snapshot was taken, is reset the first time the guest sends on it (P4.4).
 
 The manifest is written to a temporary file and renamed into place, so a crash leaves either no manifest or a whole one.
 

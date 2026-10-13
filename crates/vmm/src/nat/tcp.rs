@@ -17,11 +17,15 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 use smoltcp::iface::{SocketHandle, SocketSet};
+use smoltcp::phy::ChecksumCapabilities;
 use smoltcp::socket::tcp;
-use smoltcp::wire::IpListenEndpoint;
+use smoltcp::wire::{
+    EthernetAddress, EthernetFrame, EthernetProtocol, EthernetRepr, IpListenEndpoint, IpProtocol,
+    Ipv4Packet, Ipv4Repr, TcpControl, TcpPacket, TcpRepr, TcpSeqNumber,
+};
 
-use super::Event;
 use super::host::{Connector, HostStream};
+use super::{Event, GATEWAY_MAC, GUEST_IP, GUEST_MAC};
 
 /// Bytes each direction may have in flight inside the gateway.
 pub const WINDOW: usize = 256 * 1024;
@@ -117,6 +121,18 @@ impl Flows {
 
     pub fn is_connecting(&self, key: &FlowKey) -> bool {
         matches!(self.flows.get(key), Some(Phase::Connecting { .. }))
+    }
+
+    /// The connections the guest has open, sorted.
+    pub fn open_keys(&self) -> Vec<FlowKey> {
+        let mut keys: Vec<FlowKey> = self
+            .flows
+            .iter()
+            .filter(|(_, phase)| matches!(phase, Phase::Open(_)))
+            .map(|(key, _)| *key)
+            .collect();
+        keys.sort_by_key(|k| (k.guest_port, *k.dst.ip(), k.dst.port()));
+        keys
     }
 
     /// Starts connecting for a new guest connection whose SYN is `syn`.
@@ -279,6 +295,59 @@ impl Open {
         }
         moved
     }
+}
+
+/// Bare acknowledgments to the guest on `key`'s connection that it cannot
+/// accept, so it answers with an acknowledgment carrying its own sequence
+/// numbers, which are not known here. Linux answers any segment outside
+/// its receive window; some stacks check the acknowledgment number first
+/// and answer only one for data not yet sent, so the probes cover the
+/// sequence space in quarters and one of them is always ahead.
+pub fn probe_frames(key: FlowKey) -> impl Iterator<Item = Vec<u8>> {
+    (0..4u32).map(move |quarter| probe_frame(key, quarter << 30))
+}
+
+fn probe_frame(key: FlowKey, ack: u32) -> Vec<u8> {
+    let tcp = TcpRepr {
+        src_port: key.dst.port(),
+        dst_port: key.guest_port,
+        control: TcpControl::None,
+        seq_number: TcpSeqNumber(0),
+        ack_number: Some(TcpSeqNumber(ack as i32)),
+        window_len: 0,
+        window_scale: None,
+        max_seg_size: None,
+        sack_permitted: false,
+        sack_ranges: [None; 3],
+        timestamp: None,
+        payload: &[],
+    };
+    let ip = Ipv4Repr {
+        src_addr: *key.dst.ip(),
+        dst_addr: GUEST_IP,
+        next_header: IpProtocol::Tcp,
+        payload_len: tcp.header_len(),
+        hop_limit: 64,
+    };
+    let eth = EthernetRepr {
+        src_addr: EthernetAddress(GATEWAY_MAC),
+        dst_addr: EthernetAddress(GUEST_MAC),
+        ethertype: EthernetProtocol::Ipv4,
+    };
+    let caps = ChecksumCapabilities::default();
+    let mut frame = vec![0; eth.buffer_len() + ip.buffer_len() + ip.payload_len];
+    let mut eth_frame = EthernetFrame::new_unchecked(&mut frame);
+    eth.emit(&mut eth_frame);
+    let mut ip_packet = Ipv4Packet::new_unchecked(eth_frame.payload_mut());
+    ip.emit(&mut ip_packet, &caps);
+    let mut tcp_packet = TcpPacket::new_unchecked(ip_packet.payload_mut());
+    tcp.emit(
+        &mut tcp_packet,
+        &(*key.dst.ip()).into(),
+        &GUEST_IP.into(),
+        &caps,
+    );
+    frame
 }
 
 /// A listening socket for the guest's SYN, and the host threads.

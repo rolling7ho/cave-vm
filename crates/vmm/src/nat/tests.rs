@@ -528,3 +528,68 @@ fn queued_guest_frames_are_bounded() {
     let sent = (0..BACKLOG + 10).filter(|_| frames.send(&arp)).count();
     assert_eq!(sent, BACKLOG);
 }
+
+/// Opens a connection to the host through `r`, as before a snapshot.
+fn established(r: &mut Rig) -> (SocketHandle, UnixStream) {
+    let s = r.connect(REMOTE, 80);
+    let peer = r.peer();
+    r.until("the guest to connect", |r| {
+        r.state(s) == tcp::State::Established
+    });
+    (s, peer)
+}
+
+/// A new stack, as in the VMM a restore starts.
+fn restored_stack(r: &mut Rig) {
+    r.stack = Stack::new(r.now(), Policy::new(Mode::Nat, Vec::new()), r.host.clone());
+}
+
+#[test]
+fn open_flows_are_listed_for_a_snapshot() {
+    let mut r = rig(Mode::Nat, FakeHost::default());
+    let flows = r.stack.open_flows();
+    assert!(flows.get().is_empty());
+    let (s, _peer) = established(&mut r);
+    assert_eq!(
+        flows.get(),
+        [FlowKey {
+            guest_port: 40000,
+            dst: SocketAddrV4::new(REMOTE, 80)
+        }]
+    );
+    r.socket(s).abort();
+    r.until("the flow to end", |r| r.stack.open_flows().get().is_empty());
+}
+
+#[test]
+fn a_restored_stack_resets_the_guest_connections_it_is_told_of() {
+    let mut r = rig(Mode::Nat, FakeHost::default());
+    let (s, _peer) = established(&mut r);
+    let flows = r.stack.open_flows().get();
+    restored_stack(&mut r);
+    // The guest is only receiving, so without the reset it would wait for
+    // ever.
+    r.stack.reset_guest_flows(&flows);
+    r.until("the guest connection to reset", |r| {
+        r.state(s) == tcp::State::Closed
+    });
+    assert_eq!(
+        r.host.attempts.lock().unwrap().len(),
+        1,
+        "no new host connection"
+    );
+    // A new connection works.
+    let (again, _peer) = established(&mut r);
+    assert_eq!(r.state(again), tcp::State::Established);
+}
+
+#[test]
+fn a_restored_stack_resets_a_guest_that_sends_on_an_old_connection() {
+    let mut r = rig(Mode::Nat, FakeHost::default());
+    let (s, _peer) = established(&mut r);
+    restored_stack(&mut r);
+    r.socket(s).send_slice(b"hello?").unwrap();
+    r.until("the guest connection to reset", |r| {
+        r.state(s) == tcp::State::Closed
+    });
+}

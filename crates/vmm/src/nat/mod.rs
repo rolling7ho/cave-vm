@@ -14,6 +14,13 @@
 //! [`Policy`] allows; a denied TCP connection gets a reset and a denied
 //! datagram is dropped. DNS queries to the gateway go to the Mac's DNS
 //! servers.
+//!
+//! Host connections end with the VMM process. After a restore the guest
+//! still has its TCP connections, so the new stack is told of the ones
+//! that were open ([`Stack::open_flows`] at the snapshot) and makes the
+//! guest reset them ([`Stack::reset_guest_flows`]), so programs see an
+//! error instead of waiting for data that will never come. A guest that
+//! sends on a connection the stack does not know gets a reset anyway.
 
 mod host;
 mod policy;
@@ -22,6 +29,7 @@ mod udp;
 
 pub use host::{Connector, HostStream, TcpConnector};
 pub use policy::{Mode, Policy, Verdict};
+pub use tcp::FlowKey;
 pub use udp::{
     DNS_PORT, HostDatagram, HostUdp, IDLE_TIMEOUT, UdpConnector, host_dns_servers,
     parse_resolv_conf,
@@ -29,20 +37,20 @@ pub use udp::{
 
 use std::collections::{HashMap, VecDeque};
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use smoltcp::iface::{Config, Interface, SocketSet};
 use smoltcp::phy::{self, Device, DeviceCapabilities, Medium};
 use smoltcp::time::Instant;
 use smoltcp::wire::{
-    ArpPacket, EthernetAddress, EthernetFrame, EthernetProtocol, HardwareAddress, IpCidr,
-    IpProtocol, Ipv4Packet, TcpPacket,
+    ArpOperation, ArpPacket, ArpRepr, EthernetAddress, EthernetFrame, EthernetProtocol,
+    EthernetRepr, HardwareAddress, IpCidr, IpProtocol, Ipv4Packet, TcpPacket,
 };
 
-use tcp::{FlowKey, Flows, HostEvent};
+use tcp::{Flows, HostEvent};
 
 /// The guest's hardware address, which the virtio-net device reports.
 pub const GUEST_MAC: [u8; 6] = [0x02, 0xca, 0x5e, 0x00, 0x00, 0x02];
@@ -104,6 +112,21 @@ impl GuestFrames {
     }
 }
 
+/// The guest's open TCP connections, kept up to date by the stack, for a
+/// snapshot taken from another thread. Cheap to clone.
+#[derive(Debug, Clone, Default)]
+pub struct OpenFlows(Arc<Mutex<Vec<FlowKey>>>);
+
+impl OpenFlows {
+    pub fn get(&self) -> Vec<FlowKey> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn set(&self, flows: Vec<FlowKey>) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = flows;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     Tcp,
@@ -153,6 +176,7 @@ pub struct Stack {
     connects: Vec<ConnectEvent>,
     /// The time of the latest [`poll`](Self::poll).
     now: Duration,
+    open_flows: OpenFlows,
 }
 
 impl Stack {
@@ -194,7 +218,30 @@ impl Stack {
             waiting: None,
             connects: Vec::new(),
             now,
+            open_flows: OpenFlows::default(),
         }
+    }
+
+    /// The guest's open TCP connections, updated on every poll.
+    pub fn open_flows(&self) -> OpenFlows {
+        self.open_flows.clone()
+    }
+
+    /// Makes the guest reset each of `flows`, its connections from before
+    /// a restore. Each gets segments the guest cannot accept, so it
+    /// answers with an acknowledgment carrying its sequence numbers; no
+    /// socket here knows the connection, so that is answered with a reset
+    /// the guest accepts.
+    ///
+    /// The guest, which already knows the gateway, sends no ARP request
+    /// first, and a reset to an address the stack has not resolved would
+    /// be dropped. So the stack takes the request the guest would have
+    /// sent, which teaches it the guest's hardware address.
+    pub fn reset_guest_flows(&mut self, flows: &[FlowKey]) {
+        self.link.from_guest.push_back(guest_arp_request());
+        self.link
+            .to_guest
+            .extend(flows.iter().flat_map(|&key| tcp::probe_frames(key)));
     }
 
     /// Lets the guest send UDP through `connector`, and DNS queries to the
@@ -362,6 +409,7 @@ impl Stack {
                 break;
             }
         }
+        self.open_flows.set(self.flows.open_keys());
         std::mem::take(&mut self.link.to_guest)
     }
 
@@ -481,6 +529,27 @@ fn from_guest_address(frame: &[u8]) -> bool {
         }
         _ => false,
     }
+}
+
+/// The ARP request the guest sends for the gateway.
+fn guest_arp_request() -> Vec<u8> {
+    let arp = ArpRepr::EthernetIpv4 {
+        operation: ArpOperation::Request,
+        source_hardware_addr: EthernetAddress(GUEST_MAC),
+        source_protocol_addr: GUEST_IP,
+        target_hardware_addr: EthernetAddress([0; 6]),
+        target_protocol_addr: GATEWAY_IP,
+    };
+    let eth = EthernetRepr {
+        src_addr: EthernetAddress(GUEST_MAC),
+        dst_addr: EthernetAddress::BROADCAST,
+        ethertype: EthernetProtocol::Arp,
+    };
+    let mut frame = vec![0; eth.buffer_len() + arp.buffer_len()];
+    let mut eth_frame = EthernetFrame::new_unchecked(&mut frame);
+    eth.emit(&mut eth_frame);
+    arp.emit(&mut ArpPacket::new_unchecked(eth_frame.payload_mut()));
+    frame
 }
 
 /// The link as smoltcp sees it: frames queued from the guest, and frames
