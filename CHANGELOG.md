@@ -16,6 +16,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `cave`: the command line's first commands, `init`, `run` (prints the startup policy and echoes widening flags), `stop` and `ls`, with project discovery, errors that say how to fix the problem, and a daemon client that starts the daemon on first use (P3.11a).
 - `cave-vm-proto`: the daemon API requests and replies, with the reply objects written down in `docs/protocol.md` (P3.1b).
 - `cave-vm-proto`: the length-prefixed JSON frame codec, the `hello` version handshake, `error` messages and every guest agent message from `docs/protocol.md` (P3.1).
+- `cave-vm-agent`: the guest agent's exec with streamed output, stdin and signals, checked file reads and atomic file writes, port forwarding to guest loopback, and the control connection for ping, snapshot preparation and clock sync after restore (P3.6a).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
