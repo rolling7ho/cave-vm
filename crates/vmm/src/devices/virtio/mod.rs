@@ -187,6 +187,11 @@ pub trait VirtioDevice: Send {
     /// while the device is active and the vCPUs are paused. Restore passes
     /// them back to [`VirtioDevice::activate`].
     fn save_queues(&self) -> Vec<Queue>;
+
+    /// Called after a restore activated the device again, in a new
+    /// process. The device tells the driver about state that did not
+    /// survive, such as connections to the host.
+    fn restored(&mut self) {}
 }
 
 /// Copies `config[offset..]` into `data`, zero-filling past the end. For
