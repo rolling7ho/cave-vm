@@ -16,7 +16,11 @@ fn program_bytes() -> Vec<u8> {
     PROGRAM.iter().flat_map(|w| w.to_le_bytes()).collect()
 }
 
+/// A process can hold only one VM, and tests run in parallel.
+static ONE_VM: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn run_store(memory: &GuestMemory, value: u64, target: u64) {
+    let _one = ONE_VM.lock().unwrap_or_else(|e| e.into_inner());
     let vm = Vm::new(&VmConfig::default()).unwrap();
     let mapping = memory.map_into(&vm).unwrap();
     let mut vcpu = vm.create_vcpu().unwrap();

@@ -46,6 +46,7 @@ impl Hello {
                 ),
                 fix: None,
                 supported: Some(ours.to_vec()),
+                files: None,
             });
         };
         Ok(Hello {

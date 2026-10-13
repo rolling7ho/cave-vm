@@ -3,7 +3,7 @@
 #![cfg(target_os = "macos")]
 
 use cave_vm_vmm::backend::mock::MockBackend;
-use cave_vm_vmm::backend::{Backend, BackendVcpu, IccReg, Reg, SysReg};
+use cave_vm_vmm::backend::{Backend, BackendVcpu, IccReg, RedistReg, Reg, SysReg};
 use cave_vm_vmm::devices::pl011::Pl011State;
 use cave_vm_vmm::layout::RAM_BASE;
 use cave_vm_vmm::memory::{GuestMemory, Region};
@@ -19,6 +19,10 @@ fn vcpu_state_moves_to_a_new_vcpu_and_the_counter_continues() {
     a.set_sys_reg(SysReg::TTBR1_EL1, 0x8000).unwrap();
     a.set_sys_reg(SysReg::MPIDR_EL1, 0x8000_0000).unwrap();
     a.set_icc_reg(IccReg::PMR_EL1, 0xf0).unwrap();
+    // SGIs 0 to 7 and the virtual timer enabled, the timer pending.
+    a.set_redist_reg(RedistReg::ISENABLER0, 0x0800_00ff)
+        .unwrap();
+    a.set_redist_reg(RedistReg::ISPENDR0, 1 << 27).unwrap();
     a.set_vtimer_offset(1_000).unwrap();
     old.set_now(11_000);
     let saved = snapshot::save_vcpu(&a, old.now_ticks()).unwrap();
@@ -27,6 +31,8 @@ fn vcpu_state_moves_to_a_new_vcpu_and_the_counter_continues() {
     let new = MockBackend::new();
     new.set_now(500_000);
     let mut b = [new.create_vcpu(0).unwrap()];
+    // A stray enable on the new vCPU is cleared by the restore.
+    b[0].set_redist_reg(RedistReg::ISENABLER0, 1 << 30).unwrap();
     let state = State {
         memory_size: 0,
         irqchip: vec![9, 9],
@@ -37,6 +43,8 @@ fn vcpu_state_moves_to_a_new_vcpu_and_the_counter_continues() {
     assert_eq!(snapshot::save_vcpu(&b[0], new.now_ticks()).unwrap(), saved);
     assert_eq!(new.irqchip_state().unwrap(), vec![9, 9]);
     assert_eq!(b[0].vtimer_offset().unwrap(), 490_000);
+    assert_eq!(b[0].redist_reg(RedistReg::ISENABLER0).unwrap(), 0x0800_00ff);
+    assert_eq!(b[0].redist_reg(RedistReg::ISPENDR0).unwrap(), 1 << 27);
 }
 
 #[test]

@@ -60,8 +60,8 @@ fn guest_prints_then_powers_off() {
 
     let mut vcpu = start(&mock);
     let mut out = Vec::new();
-    let mut machine = Machine::new(&mut out, None, 1);
-    let stop = runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+    let machine = Machine::new(&mut out, None, 1);
+    let stop = runner::run(&mock, &mut vcpu, &machine).unwrap();
     drop(machine);
 
     assert_eq!(stop, Stop::PowerOff);
@@ -84,9 +84,9 @@ fn psci_version_is_returned_in_x0() {
         ],
     );
     let mut vcpu = start(&mock);
-    let mut machine = Machine::new(Vec::new(), None, 1);
+    let machine = Machine::new(Vec::new(), None, 1);
     assert_eq!(
-        runner::run(&mock, &mut vcpu, &mut machine).unwrap(),
+        runner::run(&mock, &mut vcpu, &machine).unwrap(),
         Stop::Reset
     );
     assert!(mock.events().contains(&Event::SetReg {
@@ -112,8 +112,8 @@ fn uart_input_raises_the_interrupt_and_is_read() {
         ],
     );
     let mut vcpu = start(&mock);
-    let mut machine = Machine::new(Vec::new(), Some(rx), 1);
-    runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+    let machine = Machine::new(Vec::new(), Some(rx), 1);
+    runner::run(&mock, &mut vcpu, &machine).unwrap();
 
     assert_eq!(vcpu.reg(x(2)).unwrap(), u64::from(b'a'));
     let lines: Vec<Event> = mock
@@ -147,8 +147,8 @@ fn timer_exit_marks_the_ppi_pending_then_clears_it() {
         ],
     );
     let mut vcpu = start(&mock);
-    let mut machine = Machine::new(Vec::new(), None, 1);
-    runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+    let machine = Machine::new(Vec::new(), None, 1);
+    runner::run(&mock, &mut vcpu, &machine).unwrap();
 
     let events = mock.events();
     let pending = events
@@ -190,8 +190,8 @@ fn wfi_steps_over_the_instruction() {
         ],
     );
     let mut vcpu = start(&mock);
-    let mut machine = Machine::new(Vec::new(), None, 1);
-    runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+    let machine = Machine::new(Vec::new(), None, 1);
+    runner::run(&mock, &mut vcpu, &machine).unwrap();
     assert_eq!(vcpu.reg(Reg::PC).unwrap(), PC + 4);
 }
 
@@ -200,8 +200,8 @@ fn unknown_trap_is_an_error_with_the_pc() {
     let mock = MockBackend::new();
     mock.script(0, [Step::exit(exception(0x3c, 0, 0))]); // BRK
     let mut vcpu = start(&mock);
-    let mut machine = Machine::new(Vec::new(), None, 1);
-    let err = runner::run(&mock, &mut vcpu, &mut machine).unwrap_err();
+    let machine = Machine::new(Vec::new(), None, 1);
+    let err = runner::run(&mock, &mut vcpu, &machine).unwrap_err();
     assert!(err.to_string().contains("0x40000000"), "{err}");
 }
 
@@ -216,8 +216,8 @@ fn a_kick_without_the_stop_flag_keeps_running() {
         ],
     );
     let mut vcpu = start(&mock);
-    let mut machine = Machine::new(Vec::new(), None, 1);
-    let stop = runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+    let machine = Machine::new(Vec::new(), None, 1);
+    let stop = runner::run(&mock, &mut vcpu, &machine).unwrap();
     assert_eq!(stop, Stop::PowerOff);
 }
 
@@ -226,11 +226,11 @@ fn a_kick_with_the_stop_flag_stops() {
     let mock = MockBackend::new();
     mock.script(0, [Step::exit(Exit::Canceled)]);
     let mut vcpu = start(&mock);
-    let mut machine = Machine::new(Vec::new(), None, 1);
+    let machine = Machine::new(Vec::new(), None, 1);
     machine
         .stop_flag()
         .store(true, std::sync::atomic::Ordering::Release);
-    let stop = runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+    let stop = runner::run(&mock, &mut vcpu, &machine).unwrap();
     assert_eq!(stop, Stop::Canceled);
 }
 
@@ -286,14 +286,14 @@ fn virtio_registers_are_routed_by_slot() {
     let mut machine = Machine::new(Vec::new(), None, 1);
     assert_eq!(machine.add_virtio(blank_transport()), 0);
     assert_eq!(machine.add_virtio(blank_transport()), 1);
-    runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+    runner::run(&mock, &mut vcpu, &machine).unwrap();
 
     assert_eq!(vcpu.reg(x(1)).unwrap(), 0x7472_6976);
     assert_eq!(vcpu.reg(x(2)).unwrap(), u64::from(device_type::BLOCK));
     assert_eq!(vcpu.reg(x(3)).unwrap(), 0x33);
     assert_eq!(vcpu.reg(x(4)).unwrap(), 0, "unused slot reads as zero");
-    assert_eq!(machine.virtio(1).unwrap().status(), 1);
-    assert_eq!(machine.virtio(0).unwrap().status(), 0);
+    assert_eq!(machine.devices().virtio(1).unwrap().status(), 1);
+    assert_eq!(machine.devices().virtio(0).unwrap().status(), 0);
 }
 
 #[test]
@@ -312,7 +312,7 @@ fn virtio_interrupt_drives_its_line() {
     let transport = blank_transport();
     transport.interrupt().raise(1);
     machine.add_virtio(transport);
-    runner::run(&mock, &mut vcpu, &mut machine).unwrap();
+    runner::run(&mock, &mut vcpu, &machine).unwrap();
 
     let lines: Vec<Event> = mock
         .events()
