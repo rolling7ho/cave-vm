@@ -2,7 +2,7 @@
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -74,6 +74,17 @@ pub fn read(path: &str, out: &Out, config: &Config) -> io::Result<()> {
     })
 }
 
+/// The folders `create_dir_all(dir)` would create, outermost first.
+fn missing_dirs(dir: &Path) -> Vec<PathBuf> {
+    let mut missing: Vec<PathBuf> = dir
+        .ancestors()
+        .take_while(|d| !d.as_os_str().is_empty() && !d.exists())
+        .map(Path::to_path_buf)
+        .collect();
+    missing.reverse();
+    missing
+}
+
 /// A temporary file, removed unless renamed into place.
 struct Temp(PathBuf);
 
@@ -98,8 +109,18 @@ pub fn write(
             format!("not a file path: {}", path.display()),
         );
     };
-    if create_dirs && let Err(e) = fs::create_dir_all(dir) {
-        return io_error(out, dir, &e);
+    if create_dirs {
+        let missing = missing_dirs(dir);
+        if let Err(e) = fs::create_dir_all(dir) {
+            return io_error(out, dir, &e);
+        }
+        if let Some(user) = &config.user {
+            for created in &missing {
+                if let Err(e) = std::os::unix::fs::chown(created, Some(user.uid), Some(user.gid)) {
+                    return io_error(out, created, &e);
+                }
+            }
+        }
     }
     let temp = Temp(dir.join(format!(
         ".cave-tmp-{}-{}-{}",
@@ -152,15 +173,22 @@ pub fn write(
             ),
         );
     }
+    let existing = fs::metadata(&path).ok();
     let mode = mode
-        .or_else(|| {
-            fs::metadata(&path)
-                .ok()
-                .map(|m| m.permissions().mode() & 0o7777)
-        })
+        .or_else(|| existing.as_ref().map(|m| m.permissions().mode() & 0o7777))
         .unwrap_or(0o644);
+    // A replaced file keeps its owner; a new one belongs to the user
+    // commands run as.
+    let owner = existing
+        .as_ref()
+        .map(|m| (m.uid(), m.gid()))
+        .or_else(|| config.user.as_ref().map(|u| (u.uid, u.gid)))
+        .filter(|_| config.user.is_some());
     let finish = || -> io::Result<()> {
         file.sync_all()?;
+        if let Some((uid, gid)) = owner {
+            std::os::unix::fs::fchown(&file, Some(uid), Some(gid))?;
+        }
         fs::set_permissions(&temp.0, fs::Permissions::from_mode(mode))?;
         fs::rename(&temp.0, &path)
     };
