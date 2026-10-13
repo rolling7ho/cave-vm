@@ -35,19 +35,50 @@ impl Stream for TcpStream {
     }
 }
 
+#[cfg(target_os = "linux")]
+impl Stream for crate::sys::Vsock {
+    fn try_clone_stream(&self) -> io::Result<Box<dyn Stream>> {
+        Ok(Box::new(self.try_clone()?))
+    }
+
+    fn shutdown_stream(&self, how: Shutdown) -> io::Result<()> {
+        self.shutdown(how)
+    }
+}
+
 /// The writing half of a connection, shared by the threads of one
 /// operation so frames never interleave.
 #[derive(Clone)]
-pub struct Out(Arc<Mutex<Box<dyn Stream>>>);
+pub struct Out(Arc<Mutex<Writer>>);
+
+struct Writer {
+    stream: Box<dyn Stream>,
+    /// Set once the operation's last message is sent; later frames from
+    /// threads still running are dropped.
+    finished: bool,
+}
 
 impl Out {
     pub fn new(stream: Box<dyn Stream>) -> Out {
-        Out(Arc::new(Mutex::new(stream)))
+        Out(Arc::new(Mutex::new(Writer {
+            stream,
+            finished: false,
+        })))
     }
 
     pub fn send(&self, message: &Message) -> io::Result<()> {
-        let mut stream = self.0.lock().expect("out lock");
-        write_frame(&mut *stream, message).map_err(io::Error::other)
+        let mut writer = self.0.lock().expect("out lock");
+        if writer.finished {
+            return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+        }
+        write_frame(&mut writer.stream, message).map_err(io::Error::other)
+    }
+
+    /// Sends the operation's last message; nothing is sent after it.
+    pub fn finish(&self, message: &Message) -> io::Result<()> {
+        let result = self.send(message);
+        self.0.lock().expect("out lock").finished = true;
+        result
     }
 
     /// Sends an `error`, which ends the operation.
@@ -57,10 +88,10 @@ impl Out {
 
     /// Writes raw bytes, for port forwarding after `port_forward_ok`.
     pub fn write_raw(&self, data: &[u8]) -> io::Result<()> {
-        self.0.lock().expect("out lock").write_all(data)
+        self.0.lock().expect("out lock").stream.write_all(data)
     }
 
     pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
-        self.0.lock().expect("out lock").shutdown_stream(how)
+        self.0.lock().expect("out lock").stream.shutdown_stream(how)
     }
 }

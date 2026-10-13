@@ -19,7 +19,9 @@ use crate::memory::GuestMemory;
 
 pub mod block;
 pub mod mmio;
+pub mod net;
 pub mod queue;
+pub mod vsock;
 
 #[cfg(test)]
 pub mod testing;

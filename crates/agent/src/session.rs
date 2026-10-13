@@ -7,7 +7,7 @@ use cave_vm_proto::agent::Message;
 use cave_vm_proto::{ErrorCode, VERSIONS, read_frame};
 
 use crate::stream::{Out, Stream};
-use crate::{control, exec, files, forward};
+use crate::{control, exec, files, forward, pty};
 
 /// What every operation needs to know.
 #[derive(Debug, Clone)]
@@ -67,10 +67,7 @@ pub fn serve(stream: Box<dyn Stream>, config: &Config) -> io::Result<()> {
         } => files::write(&path, mode, create_dirs, reader, &out, config),
         Message::PortForward { port } => forward::run(port, reader, out),
         Message::Control => control::run(reader, &out),
-        Message::PtyOpen(_) => out.error(
-            ErrorCode::BadRequest,
-            "this agent does not support pty_open yet",
-        ),
+        Message::PtyOpen(req) => pty::run(req, reader, out, config),
         other => out.error(
             ErrorCode::BadRequest,
             format!("expected a request, got {}", kind(&other)),
