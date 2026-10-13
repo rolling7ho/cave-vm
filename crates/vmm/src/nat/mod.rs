@@ -30,6 +30,7 @@ pub use udp::{
 use std::collections::{HashMap, VecDeque};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
 
@@ -64,10 +65,43 @@ const BACKLOG: usize = 256;
 /// keep it from returning.
 const RELAY_ROUNDS: usize = 8;
 
+/// The longest [`Stack::run`] sleeps without news, so idle flows still
+/// expire.
+const IDLE_WAIT: Duration = Duration::from_secs(1);
+
 /// What host threads report to the gateway.
 pub(crate) enum Event {
     Tcp(HostEvent),
     Udp(udp::HostEvent),
+    /// A frame the guest sent, through [`GuestFrames`].
+    Guest(Vec<u8>),
+    /// [`GuestFrames::close`]: [`Stack::run`] returns.
+    Close,
+}
+
+/// Hands frames the guest sends to a [`Stack`] running on its own thread
+/// ([`Stack::run`]), waking it. Never blocks, so a vCPU thread can call it.
+#[derive(Clone)]
+pub struct GuestFrames {
+    events: Sender<Event>,
+    pending: Arc<AtomicUsize>,
+}
+
+impl GuestFrames {
+    /// Queues one frame. Returns `false` if it was dropped because the
+    /// stack is [`BACKLOG`] frames behind, or has stopped.
+    pub fn send(&self, frame: &[u8]) -> bool {
+        if self.pending.fetch_add(1, Ordering::AcqRel) >= BACKLOG {
+            self.pending.fetch_sub(1, Ordering::AcqRel);
+            return false;
+        }
+        self.events.send(Event::Guest(frame.to_vec())).is_ok()
+    }
+
+    /// Makes [`Stack::run`] return.
+    pub fn close(&self) {
+        let _ = self.events.send(Event::Close);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +144,10 @@ pub struct Stack {
     udp_denied: HashMap<udp::FlowKey, Duration>,
     events: Sender<Event>,
     host_events: Receiver<Event>,
+    /// Guest frames queued through [`GuestFrames`] and not yet taken.
+    pending: Arc<AtomicUsize>,
+    /// Set by [`Event::Close`].
+    closed: bool,
     /// An event [`wait`](Self::wait) took off the channel.
     waiting: Option<Event>,
     connects: Vec<ConnectEvent>,
@@ -151,6 +189,8 @@ impl Stack {
             udp_denied: HashMap::new(),
             events,
             host_events,
+            pending: Arc::default(),
+            closed: false,
             waiting: None,
             connects: Vec::new(),
             now,
@@ -292,6 +332,11 @@ impl Stack {
             .collect();
         for event in events {
             match event {
+                Event::Guest(frame) => {
+                    self.pending.fetch_sub(1, Ordering::AcqRel);
+                    self.from_guest(&frame);
+                }
+                Event::Close => self.closed = true,
                 Event::Tcp(event) => {
                     if let Some(syn) = self
                         .flows
@@ -318,6 +363,40 @@ impl Stack {
             }
         }
         std::mem::take(&mut self.link.to_guest)
+    }
+
+    /// A handle for queueing guest frames from other threads while
+    /// [`run`](Self::run) drives the stack.
+    pub fn guest_frames(&self) -> GuestFrames {
+        GuestFrames {
+            events: self.events.clone(),
+            pending: Arc::clone(&self.pending),
+        }
+    }
+
+    /// Drives the stack until [`GuestFrames::close`]: takes guest frames,
+    /// host news and timers as they come, gives each frame for the guest to
+    /// `deliver`, and each connection attempt to `record`. `clock` is the
+    /// same clock the stack was created with. Sleeps while nothing happens.
+    pub fn run(
+        &mut self,
+        clock: &dyn Fn() -> Duration,
+        deliver: &mut dyn FnMut(&[u8]),
+        record: &mut dyn FnMut(ConnectEvent),
+    ) {
+        while !self.closed {
+            for frame in self.poll(clock()) {
+                deliver(&frame);
+            }
+            for event in self.take_connects() {
+                record(event);
+            }
+            if self.closed {
+                break;
+            }
+            let timeout = self.poll_delay(clock()).unwrap_or(IDLE_WAIT);
+            self.wait(timeout.min(IDLE_WAIT));
+        }
     }
 
     /// Connection attempts since the last call, for the audit log.

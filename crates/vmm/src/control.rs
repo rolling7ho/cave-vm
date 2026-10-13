@@ -109,13 +109,20 @@ pub fn wait_for_boot(link: &mut UnixStream) -> io::Result<Option<VmmConfig>> {
 
 /// Serves requests for a booted VM until `stop` or until the link closes.
 pub fn serve(link: &mut UnixStream, vm: &dyn RunningVm) -> io::Result<Ending> {
+    // The last connection sent stays open here until the daemon's next
+    // request, by which time it has received it: closing it while it is in
+    // flight lost connections on macOS under load.
+    let mut in_flight = None;
     loop {
-        match read(link)? {
+        let request = read(link)?;
+        drop(in_flight.take());
+        match request {
             Some(ToVmm::AgentConnect) => match vm.agent_connection() {
                 Ok(connection) => {
                     let frame = encode(&FromVmm::AgentConnection)
                         .map_err(|e| io::Error::other(e.to_string()))?;
                     host::send_with_fd(link, &frame, connection.as_fd())?;
+                    in_flight = Some(connection);
                 }
                 Err(e) => reply(
                     link,
