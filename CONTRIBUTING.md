@@ -33,6 +33,14 @@ Hardware tests that create real VMs are marked `#[ignore]`. On an Apple Silicon 
 cargo test --workspace -- --ignored --test-threads=1
 ```
 
+The gate 3 end-to-end test also needs the binaries and a locally built image:
+
+```sh
+image/debian/build.sh && image/manifest.sh
+cargo build --workspace
+cargo test -p cave-vm-cli --test e2e -- --ignored
+```
+
 `.cargo/config.toml` makes cargo sign each test binary ad hoc with the `com.apple.security.hypervisor` entitlement (`scripts/hypervisor-runner.sh`) before running it.
 
 ## Making a change

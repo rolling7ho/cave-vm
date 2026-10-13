@@ -1,0 +1,314 @@
+//! Gate 3 end to end: the real `cave`, `cave-daemon` and `cave-vmm` boot a
+//! real VM from a locally built image. `#[ignore]`d, since it needs an
+//! Apple Silicon Mac with the hypervisor entitlement and a built image:
+//!
+//! ```sh
+//! image/debian/build.sh && image/manifest.sh
+//! cargo build --workspace
+//! cargo test -p cave-vm-cli --test e2e -- --ignored
+//! ```
+//!
+//! `CAVE_E2E_IMAGE_DIR` points at another image folder; the default is
+//! `target/image`. Nothing here reaches the network: the image comes from
+//! that folder, and the only connections the guest makes are the denied
+//! ones, which the VMM refuses without opening a host socket. Outbound
+//! HTTPS, `apt` and Docker need the network and are checked by hand.
+
+#![cfg(all(target_os = "macos", target_arch = "aarch64"))]
+
+use std::fs;
+use std::io::{Read, Write};
+use std::net::{Ipv4Addr, TcpListener, TcpStream, UdpSocket};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+struct Rig {
+    root: PathBuf,
+    bin: PathBuf,
+}
+
+impl Rig {
+    fn new() -> Rig {
+        let built = Path::new(env!("CARGO_BIN_EXE_cave"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        // Short, so the daemon socket path fits in sun_path.
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("cve{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let bin = root.join("bin");
+        for dir in ["bin", "home/proj", "data"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for name in ["cave", "cave-daemon", "cave-vmm"] {
+            let from = built.join(name);
+            assert!(
+                from.is_file(),
+                "{} is missing; run `cargo build --workspace` first",
+                from.display()
+            );
+            fs::copy(&from, bin.join(name)).unwrap();
+        }
+        // Local ad hoc signing, as scripts/hypervisor-runner.sh does for
+        // test binaries; not release signing.
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let signed = Command::new("/usr/bin/codesign")
+            .args(["--sign", "-", "--force", "--entitlements"])
+            .arg(repo.join("scripts/hypervisor.entitlements"))
+            .arg(bin.join("cave-vmm"))
+            .status()
+            .unwrap();
+        assert!(signed.success(), "cannot sign cave-vmm");
+        Rig { root, bin }
+    }
+
+    fn project(&self) -> PathBuf {
+        self.root.join("home/proj")
+    }
+
+    fn image_dir() -> PathBuf {
+        let dir = std::env::var_os("CAVE_E2E_IMAGE_DIR").map_or_else(
+            || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/image"),
+            PathBuf::from,
+        );
+        assert!(
+            dir.join("images.json").is_file(),
+            "no image in {}; build one with image/debian/build.sh && image/manifest.sh",
+            dir.display()
+        );
+        dir
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(self.bin.join("cave"));
+        command
+            .args(args)
+            .current_dir(self.project())
+            .env("HOME", self.root.join("home"))
+            .env("CAVE_HOME", self.root.join("data"))
+            .env("CAVE_IMAGE_DIR", Rig::image_dir())
+            .stdin(Stdio::null());
+        command
+    }
+
+    fn cave(&self, args: &[&str]) -> Output {
+        self.command(args).output().unwrap()
+    }
+
+    /// Runs `cave exec -- argv` and returns its stdout, asserting `code`.
+    fn exec(&self, argv: &[&str], code: i32) -> String {
+        let mut args = vec!["exec", "--"];
+        args.extend_from_slice(argv);
+        let out = self.cave(&args);
+        assert_eq!(
+            out.status.code(),
+            Some(code),
+            "{argv:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    fn vmm_pid(&self) -> Option<u32> {
+        let vms = self.root.join("data/vms");
+        fs::read_dir(vms)
+            .ok()?
+            .flatten()
+            .find_map(|e| fs::read_to_string(e.path().join("vmm.pid")).ok())
+            .and_then(|pid| pid.trim().parse().ok())
+    }
+}
+
+impl Drop for Rig {
+    fn drop(&mut self) {
+        let _ = self.cave(&["stop"]);
+        let _ = Command::new("/usr/bin/pkill")
+            .arg("-f")
+            .arg(self.bin.join("cave-daemon"))
+            .status();
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn free_port() -> u16 {
+    TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+/// The Mac's own address on its default route, if it has one. Connecting
+/// a UDP socket sends nothing.
+fn mac_address() -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ip) if !ip.is_unspecified() => Some(ip),
+        _ => None,
+    }
+}
+
+/// `GET path` on localhost:port, or `None` until something answers.
+fn http_get(port: u16, path: &str) -> Option<String> {
+    let mut tcp = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).ok()?;
+    tcp.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    write!(tcp, "GET {path} HTTP/1.0\r\nHost: localhost\r\n\r\n").ok()?;
+    let mut text = String::new();
+    tcp.read_to_string(&mut text).ok()?;
+    (!text.is_empty()).then_some(text)
+}
+
+fn kill(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn gate_3() {
+    let rig = Rig::new();
+
+    // cave init && cave run && cave exec -- uname -a
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    let run = rig.cave(&["run"]);
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    // The policy goes to stderr, keeping stdout for the command's output.
+    let policy = String::from_utf8_lossy(&run.stderr);
+    assert!(policy.contains("started in"), "{policy}");
+    let toml = fs::read_to_string(rig.project().join("cave.toml")).unwrap();
+    assert!(toml.contains("@sha256:"), "the image is pinned: {toml}");
+    assert!(rig.exec(&["uname", "-a"], 0).contains("aarch64"));
+    assert_eq!(rig.exec(&["whoami"], 0).trim(), "cave");
+    assert_eq!(rig.exec(&["pwd"], 0).trim(), "/workspace");
+    rig.exec(&["false"], 1);
+    rig.exec(&["no-such-command"], 127);
+
+    // Every denied range, and the Mac itself, is refused at once in nat
+    // mode: curl exits 7 (could not connect), not 28 (timed out).
+    let mut denied = vec![
+        "10.0.0.1".to_string(),
+        "172.16.0.1".into(),
+        "192.168.1.1".into(),
+        "169.254.169.254".into(),
+        "100.64.0.1".into(),
+    ];
+    denied.extend(mac_address().map(|ip| ip.to_string()));
+    for ip in &denied {
+        let url = format!("http://{ip}/");
+        rig.exec(&["curl", "-s", "-m", "5", "-o", "/dev/null", &url], 7);
+    }
+
+    // cave shell, through a pseudo-terminal from script(1).
+    let mut script = Command::new("/usr/bin/script");
+    script
+        .args(["-q", "/dev/null"])
+        .arg(rig.bin.join("cave"))
+        .arg("shell")
+        .current_dir(rig.project())
+        .env("HOME", rig.root.join("home"))
+        .env("CAVE_HOME", rig.root.join("data"))
+        .env("CAVE_IMAGE_DIR", Rig::image_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    let mut child = script.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"echo SHELL-$((40+2)) $(whoami)\nexit 3\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("SHELL-42 cave"), "{text}");
+
+    // Port forwarding: localhost on the Mac reaches the VM's port.
+    let port = free_port();
+    let forward = format!("{port}:8000");
+    let run = rig.cave(&["run", "-p", &forward]);
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(String::from_utf8_lossy(&run.stderr).contains(&format!("-p {forward}")));
+    let mut server = rig
+        .command(&[
+            "exec",
+            "--",
+            "python3",
+            "-m",
+            "http.server",
+            "8000",
+            "--bind",
+            "127.0.0.1",
+            "--directory",
+            "/etc",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let page = loop {
+        if let Some(page) = http_get(port, "/hostname").filter(|p| p.contains("200 OK")) {
+            break page;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the forwarded port never answered"
+        );
+        thread::sleep(Duration::from_millis(200));
+    };
+    assert!(page.trim_end().ends_with("cave"), "{page}");
+    kill(&mut server);
+
+    // cave cp, both ways.
+    let file = rig.project().join("data.txt");
+    fs::write(&file, "round trip\n").unwrap();
+    assert!(
+        rig.cave(&["cp", "data.txt", ":copied.txt"])
+            .status
+            .success()
+    );
+    assert_eq!(rig.exec(&["cat", "copied.txt"], 0), "round trip\n");
+    let back = rig.root.join("back.txt");
+    let out = rig.cave(&["cp", ":copied.txt", back.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(fs::read_to_string(&back).unwrap(), "round trip\n");
+
+    // A killed VMM is noticed, and the next command starts a new one.
+    let pid = rig.vmm_pid().expect("a running VMM");
+    assert!(
+        Command::new("/bin/kill")
+            .args(["-KILL", &pid.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while String::from_utf8_lossy(&rig.cave(&["ls"]).stdout).contains("running") {
+        assert!(Instant::now() < deadline, "the crash was never noticed");
+        thread::sleep(Duration::from_millis(100));
+    }
+    assert!(rig.exec(&["uname", "-r"], 0).starts_with("6."));
+    assert_ne!(rig.vmm_pid(), Some(pid));
+
+    // cave rm keeps cave.toml.
+    assert!(rig.cave(&["rm", "--yes"]).status.success());
+    assert!(!rig.project().join(".cave").exists());
+    assert!(rig.project().join("cave.toml").exists());
+}
