@@ -48,6 +48,10 @@ cave-vm is an open-source (Apache 2.0) microVM runtime for macOS, built for codi
 4. Implement one crate at a time.
 5. Open a small PR against main. Do not stack PRs: work that depends on an open PR waits on its branch until that PR merges (D25). Commits use Conventional Commits (`feat:`, `fix:`) and DCO sign-off (`git commit -s`).
 6. Request a review from @rolling7ho on every PR (`gh pr edit <n> --add-reviewer rolling7ho`).
+7. Watch main while PRs are open. After every merge:
+   - Update each open PR branch from main and resolve its conflicts, then run the lint and the tests before pushing.
+   - Open a PR for every waiting branch whose dependencies have now merged. Open as many as D25 allows.
+   - In your status, list each branch that still has no PR and the PR it waits on.
 
 ## Definition of done
 
