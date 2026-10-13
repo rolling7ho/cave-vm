@@ -4,6 +4,8 @@
 //! process, does the control handshake and boots; a watcher thread notices
 //! when the process exits, whether asked to or not, so a crashed VMM leaves
 //! the VM stopped and the next `start` launches a new one.
+//!
+//! Snapshots and restores of a project's VM are in [`snapshots`].
 
 use std::collections::HashMap;
 use std::fs;
@@ -37,6 +39,8 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How often the watcher checks whether a VMM has exited.
 const WATCH_INTERVAL: Duration = Duration::from_millis(20);
+
+mod snapshots;
 
 /// What a VM needs to boot, from its project: read from `cave.toml` and
 /// `.cave/` by the real source, and made up by tests.
@@ -179,10 +183,14 @@ impl Vms {
         // Bound first, so a port in use is reported before the VM boots.
         let bound = bind_all(ports)?;
         vm.set(slot, Slot::Busy);
-        let result = self.launch(&vm, net, ports).map(|mut running| {
-            running.forwards = serve_all(&vm, bound);
-            running
-        });
+        let result = self
+            .source
+            .prepare(&vm.id, net, ports)
+            .and_then(|prepared| self.launch(&vm, prepared))
+            .map(|mut running| {
+                running.forwards = serve_all(&vm, bound);
+                running
+            });
         let slot = vm.slot.lock().expect("vm lock");
         match result {
             Ok(running) => {
@@ -197,13 +205,7 @@ impl Vms {
         }
     }
 
-    fn launch(
-        &self,
-        vm: &Arc<Vm>,
-        net: Option<NetMode>,
-        ports: &[PortMap],
-    ) -> Result<Running, ErrorMessage> {
-        let prepared = self.source.prepare(&vm.id, net, ports)?;
+    fn launch(&self, vm: &Arc<Vm>, prepared: Prepared) -> Result<Running, ErrorMessage> {
         let Launched { child, control } =
             self.launcher
                 .launch(&vm.dir, &prepared.config)
@@ -302,6 +304,9 @@ impl Vms {
     /// no `.cave/` is not an error.
     pub fn remove(&self, id: &VmId) -> Result<(), ErrorMessage> {
         if let Some(name) = &id.fork {
+            if self.remove_snapshot(id, name)? {
+                return Ok(());
+            }
             return Err(error(
                 ErrorCode::NotFound,
                 format!("no fork or snapshot named {name} in this project"),
@@ -371,6 +376,15 @@ impl Vms {
                 }
             })
             .collect();
+        let mut projects: Vec<String> = match project {
+            Some(p) => vec![p.to_string()],
+            None => vms.iter().map(|vm| vm.id.project.clone()).collect(),
+        };
+        projects.sort();
+        projects.dedup();
+        for project in projects {
+            entries.extend(snapshots::list(&project));
+        }
         entries.sort_by(|a, b| (&a.project, &a.name).cmp(&(&b.project, &b.name)));
         entries
     }

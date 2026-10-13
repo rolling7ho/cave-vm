@@ -220,9 +220,19 @@ pub enum Reply {
         size: u64,
     },
     Restored {
+        /// The snapshot restored.
+        #[serde(default)]
+        name: String,
         /// `false` when the memory could not be restored and the VM booted
         /// from its disk instead.
         memory_restored: bool,
+        /// Why the memory was not restored.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        /// The automatic snapshot of the state before the restore, which
+        /// undoes it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        saved: Option<String>,
     },
     Forked {
         name: String,

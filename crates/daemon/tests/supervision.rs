@@ -46,6 +46,7 @@ fn fake_vmm() {
     // The last connection sent stays open here until the next request, as
     // in cave-vmm: closing it while in flight can lose it on macOS.
     let mut in_flight = None;
+    let mut booted: Option<VmmConfig> = None;
     loop {
         let message = match read_frame::<_, ToVmm>(&mut link) {
             Ok(Some(message)) => message,
@@ -62,7 +63,19 @@ fn fake_vmm() {
                 "the kernel did not start",
             )),
             ToVmm::Boot { config } if mode == SANDBOX_CHECK => sandbox_check(&config),
-            ToVmm::Boot { .. } => FromVmm::Booted,
+            ToVmm::Boot { config } => {
+                let reply = fake_restore(&config);
+                booted = Some(config);
+                reply
+            }
+            ToVmm::Snapshot { dir } => {
+                let config = booted.as_ref().expect("booted");
+                let dir = PathBuf::from(dir);
+                fs::write(dir.join("state"), "state").unwrap();
+                fs::write(dir.join("memory"), "memory").unwrap();
+                fs::copy(&config.disk, dir.join("disk.img")).unwrap();
+                FromVmm::Ok
+            }
             ToVmm::Ping => FromVmm::Pong,
             ToVmm::AgentConnect => {
                 // The far end echoes, standing in for the guest agent.
@@ -88,6 +101,33 @@ fn fake_vmm() {
             std::process::exit(3);
         }
     }
+}
+
+/// A boot that restores checks the disk is the snapshot's and refuses a
+/// memory file reading `damaged`. What it restored from goes into
+/// `restored-from` next to the disk; a normal boot removes that.
+fn fake_restore(config: &VmmConfig) -> FromVmm {
+    let disk = std::path::Path::new(&config.disk);
+    let marker = disk.with_file_name("restored-from");
+    let Some(dir) = &config.restore else {
+        let _ = fs::remove_file(&marker);
+        return FromVmm::Booted;
+    };
+    let dir = std::path::Path::new(dir);
+    if fs::read(dir.join("memory")).unwrap() == b"damaged" {
+        return FromVmm::Error(ErrorMessage::new(
+            ErrorCode::BadRequest,
+            "cannot restore: the memory file is damaged",
+        ));
+    }
+    if fs::read(disk).unwrap() != fs::read(dir.join("disk.img")).unwrap() {
+        return FromVmm::Error(ErrorMessage::new(
+            ErrorCode::BadRequest,
+            "the disk is not the snapshot's",
+        ));
+    }
+    fs::write(&marker, format!("{} {}", dir.display(), config.cpus)).unwrap();
+    FromVmm::Booted
 }
 
 /// What the sandboxed fake VMM can and cannot reach.
@@ -560,4 +600,241 @@ fn remove_stops_the_vm_and_deletes_only_its_state() {
     assert_eq!(remove(None), Reply::Ok);
     assert!(fs::symlink_metadata(project.join(".cave")).is_err());
     assert!(elsewhere.join("keep").exists());
+}
+
+/// A project folder with a disk, for snapshots.
+fn snapshot_project(r: &Rig) -> (VmId, PathBuf) {
+    let project = r.home.root().join("projects/app");
+    fs::create_dir_all(project.join(".cave")).unwrap();
+    fs::write(project.join(".cave/disk.img"), "disk v1").unwrap();
+    let id = VmId {
+        project: project.to_string_lossy().into_owned(),
+        fork: None,
+    };
+    (id, project)
+}
+
+impl Rig {
+    fn snapshot(&self, id: &VmId, name: Option<&str>) -> Reply {
+        self.request(Request::Snapshot {
+            vm: id.clone(),
+            name: name.map(String::from),
+        })
+    }
+
+    fn restore(&self, id: &VmId, name: Option<&str>) -> Reply {
+        self.request(Request::Restore {
+            vm: id.clone(),
+            name: name.map(String::from),
+        })
+    }
+
+    fn snapshots(&self, id: &VmId) -> Vec<(String, bool)> {
+        match self.request(Request::List {
+            project: Some(id.project.clone()),
+        }) {
+            Reply::List { entries } => entries
+                .into_iter()
+                .filter(|e| e.kind == EntryKind::Snapshot)
+                .map(|e| (e.name, e.auto))
+                .collect(),
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+fn manifest(project: &std::path::Path, name: &str) -> serde_json::Value {
+    let text = fs::read_to_string(
+        project
+            .join(".cave/snapshots")
+            .join(name)
+            .join("snapshot.json"),
+    );
+    serde_json::from_str(&text.unwrap()).unwrap()
+}
+
+fn error_of(reply: Reply) -> ErrorMessage {
+    match reply {
+        Reply::Error(e) => e,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn snapshots_of_a_running_and_a_stopped_vm() {
+    let r = rig("snap", NORMAL);
+    let (id, project) = snapshot_project(&r);
+    // Nothing booted yet, but the disk is there: a disk-only snapshot.
+    let Reply::Snapshot { name, size } = r.snapshot(&id, None) else {
+        panic!("no snapshot")
+    };
+    assert!(
+        name.starts_with("app-") && name.ends_with("-debian"),
+        "{name}"
+    );
+    assert!(size > 0);
+    assert_eq!(manifest(&project, &name)["has_memory"], false);
+    assert_eq!(
+        fs::read(project.join(".cave/snapshots").join(&name).join("disk.img")).unwrap(),
+        b"disk v1"
+    );
+
+    // The default name gets a counter; a running VM's memory is saved.
+    assert!(matches!(
+        r.request(Request::Start {
+            vm: id.clone(),
+            net: None,
+            ports: Vec::new()
+        }),
+        Reply::Policy(_)
+    ));
+    let Reply::Snapshot { name: second, .. } = r.snapshot(&id, None) else {
+        panic!("no snapshot")
+    };
+    assert_eq!(second, format!("{name}-2"));
+    let m = manifest(&project, &second);
+    assert_eq!(m["has_memory"], true);
+    assert_eq!(m["auto"], false);
+    assert_eq!(m["vm"]["cpus"], 2);
+    assert_eq!(m["image"], "base");
+    let dir = project.join(".cave/snapshots").join(&second);
+    assert!(dir.join("memory").is_file() && dir.join("state").is_file());
+
+    assert!(matches!(
+        r.snapshot(&id, Some("before")),
+        Reply::Snapshot { .. }
+    ));
+    let e = error_of(r.snapshot(&id, Some("before")));
+    assert_eq!(e.code, ErrorCode::AlreadyExists);
+    assert!(e.fix.unwrap().contains("cave rm before"));
+    let e = error_of(r.snapshot(&id, Some("no spaces")));
+    assert_eq!(e.code, ErrorCode::BadRequest);
+    assert_eq!(
+        r.snapshots(&id),
+        [
+            (name.clone(), false),
+            (second, false),
+            ("before".to_string(), false)
+        ]
+    );
+    // It runs on, and `cave rm <snapshot>` removes just the snapshot.
+    assert_eq!(r.state(), Some(VmState::Running));
+    assert_eq!(
+        r.request(Request::Remove {
+            vm: id.clone(),
+            name: Some("before".into())
+        }),
+        Reply::Ok
+    );
+    assert!(!project.join(".cave/snapshots/before").exists());
+    assert!(project.join(".cave/disk.img").exists());
+}
+
+#[test]
+fn a_restore_brings_back_the_disk_and_memory_and_can_be_undone() {
+    let r = rig("restore", NORMAL);
+    let (id, project) = snapshot_project(&r);
+    let e = error_of(r.restore(&id, None));
+    assert_eq!(e.code, ErrorCode::NotFound);
+    assert!(e.message.contains("no snapshots yet"), "{}", e.message);
+
+    assert!(matches!(
+        r.request(Request::Start {
+            vm: id.clone(),
+            net: None,
+            ports: Vec::new()
+        }),
+        Reply::Policy(_)
+    ));
+    assert!(matches!(
+        r.snapshot(&id, Some("before")),
+        Reply::Snapshot { .. }
+    ));
+    fs::write(project.join(".cave/disk.img"), "disk v2").unwrap();
+
+    let e = error_of(r.restore(&id, Some("nope")));
+    assert_eq!(e.code, ErrorCode::NotFound);
+    assert!(e.fix.unwrap().contains("cave ls"));
+
+    // With no name, the newest snapshot taken by name.
+    let Reply::Restored {
+        name,
+        memory_restored,
+        reason,
+        saved,
+    } = r.restore(&id, None)
+    else {
+        panic!("not restored")
+    };
+    assert_eq!(name, "before");
+    assert!(memory_restored, "{reason:?}");
+    assert_eq!(
+        fs::read(project.join(".cave/disk.img")).unwrap(),
+        b"disk v1"
+    );
+    let marker = fs::read_to_string(project.join(".cave/restored-from")).unwrap();
+    assert!(marker.ends_with("/snapshots/before 2"), "{marker}");
+    assert_eq!(r.state(), Some(VmState::Running));
+
+    // The state before the restore was saved, and restoring it undoes it.
+    let saved = saved.expect("an automatic snapshot");
+    assert!(r.snapshots(&id).contains(&(saved.clone(), true)));
+    assert!(matches!(
+        r.restore(&id, Some(&saved)),
+        Reply::Restored {
+            memory_restored: true,
+            ..
+        }
+    ));
+    assert_eq!(
+        fs::read(project.join(".cave/disk.img")).unwrap(),
+        b"disk v2"
+    );
+    // Automatic snapshots are passed over for the default.
+    assert!(matches!(r.restore(&id, None), Reply::Restored { name, .. } if name == "before"));
+}
+
+#[test]
+fn a_restore_falls_back_to_the_disk_when_the_memory_cannot_be_loaded() {
+    let r = rig("fallback", NORMAL);
+    let (id, project) = snapshot_project(&r);
+    // Taken while stopped: there is no memory to load.
+    assert!(matches!(
+        r.snapshot(&id, Some("cold")),
+        Reply::Snapshot { .. }
+    ));
+    match r.restore(&id, Some("cold")) {
+        Reply::Restored {
+            memory_restored: false,
+            reason: Some(reason),
+            ..
+        } => assert!(reason.contains("without memory state"), "{reason}"),
+        other => panic!("{other:?}"),
+    }
+    assert!(!project.join(".cave/restored-from").exists());
+    assert_eq!(r.state(), Some(VmState::Running));
+
+    // A damaged memory file: the VMM refuses it, and the VM boots from the
+    // snapshot's disk instead.
+    assert!(matches!(
+        r.snapshot(&id, Some("warm")),
+        Reply::Snapshot { .. }
+    ));
+    let warm = project.join(".cave/snapshots/warm");
+    fs::write(warm.join("memory"), "damaged").unwrap();
+    fs::write(project.join(".cave/disk.img"), "disk v2").unwrap();
+    match r.restore(&id, Some("warm")) {
+        Reply::Restored {
+            memory_restored: false,
+            reason: Some(reason),
+            ..
+        } => assert!(reason.contains("memory file is damaged"), "{reason}"),
+        other => panic!("{other:?}"),
+    }
+    assert!(!project.join(".cave/restored-from").exists());
+    assert_eq!(
+        fs::read(project.join(".cave/disk.img")).unwrap(),
+        b"disk v1"
+    );
+    assert_eq!(r.state(), Some(VmState::Running));
 }

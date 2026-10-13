@@ -186,9 +186,21 @@ fn replies_round_trip() {
         },
     );
     check(
-        json!({"type": "restored", "memory_restored": false}),
+        json!({"type": "restored", "name": "before", "memory_restored": true, "saved": "app-2026-10-13-debian"}),
         Reply::Restored {
+            name: "before".into(),
+            memory_restored: true,
+            reason: None,
+            saved: Some("app-2026-10-13-debian".into()),
+        },
+    );
+    check(
+        json!({"type": "restored", "name": "before", "memory_restored": false, "reason": "it was taken without memory state"}),
+        Reply::Restored {
+            name: "before".into(),
             memory_restored: false,
+            reason: Some("it was taken without memory state".into()),
+            saved: None,
         },
     );
     check(

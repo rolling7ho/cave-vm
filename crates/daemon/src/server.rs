@@ -125,6 +125,18 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
             })
             .map(|()| Reply::Ok),
         Request::Images => vms.images().map(|images| Reply::Images { images }),
+        Request::Restore { vm, name } => {
+            vms.restore(&vm, name.as_deref())
+                .map(|restored| Reply::Restored {
+                    name: restored.name,
+                    memory_restored: restored.fallback.is_none(),
+                    reason: restored.fallback,
+                    saved: restored.saved,
+                })
+        }
+        Request::Snapshot { vm, name } => vms
+            .snapshot(&vm, name.as_deref())
+            .map(|(name, size)| Reply::Snapshot { name, size }),
         Request::Stop { vm } => vms.stop(&vm).map(|()| Reply::Ok),
         Request::List { project } => Ok(Reply::List {
             entries: vms.list(project.as_deref()),
