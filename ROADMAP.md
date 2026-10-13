@@ -224,7 +224,11 @@ None of these are established. Each is checked in the task listed, and the resul
 
 ## Needs Ivan's decision
 
-None open. When a task hits something the design and the decisions below do not cover, add it here with a recommendation and stop work that depends on it.
+When a task hits something the design and the decisions below do not cover, add it here with a recommendation and stop work that depends on it.
+
+| ID | Question | Recommendation |
+| --- | --- | --- |
+| Q1 | Gate 4 misses five of six targets ([docs/bench/gate4.md](docs/bench/gate4.md)): snapshot 595 ms (under 500), restore 922 ms (under 100), fork 162 ms (under 150), booted memory 275 MB (under 128), fork memory 35 MB (under 32). Fix them, or set new targets in a decision record? | Fix snapshot and restore: keep guest RAM in a shared file from boot, so a snapshot writes only dirty pages. This also shortens the undo point every restore takes. Re-baseline booted memory for a Debian guest (300 MB) rather than adding free page reporting now. Accept fork time and fork memory as within noise of their targets, or retest them after the snapshot work. |
 
 ## Decisions
 
