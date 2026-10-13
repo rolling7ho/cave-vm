@@ -374,6 +374,7 @@ fn outbound_connection_relays_both_ways_and_closes() {
     assert_eq!(
         r.stack.take_connects(),
         [ConnectEvent {
+            protocol: Protocol::Tcp,
             dst: SocketAddrV4::new(REMOTE, 80),
             allowed: true,
             reason: None
@@ -432,6 +433,7 @@ fn denied_destinations_are_reset_without_a_host_connection() {
     assert_eq!(
         r.stack.take_connects(),
         [ConnectEvent {
+            protocol: Protocol::Tcp,
             dst: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 5), 22),
             allowed: false,
             reason: Some("LAN")

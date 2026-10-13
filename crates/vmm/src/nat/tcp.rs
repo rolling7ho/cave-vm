@@ -20,6 +20,7 @@ use smoltcp::iface::{SocketHandle, SocketSet};
 use smoltcp::socket::tcp;
 use smoltcp::wire::IpListenEndpoint;
 
+use super::Event;
 use super::host::{Connector, HostStream};
 
 /// Bytes each direction may have in flight inside the gateway.
@@ -124,7 +125,7 @@ impl Flows {
         key: FlowKey,
         syn: Vec<u8>,
         connector: &Arc<dyn Connector>,
-        events: &Sender<HostEvent>,
+        events: &Sender<Event>,
     ) {
         self.flows.insert(key, Phase::Connecting { syn });
         let connector = Arc::clone(connector);
@@ -134,7 +135,7 @@ impl Flows {
                 Ok(stream) => HostEvent::Connected(key, stream),
                 Err(_) => HostEvent::Failed(key),
             };
-            let _ = events.send(event);
+            let _ = events.send(Event::Tcp(event));
         });
     }
 
@@ -144,7 +145,7 @@ impl Flows {
         &mut self,
         event: HostEvent,
         sockets: &mut SocketSet<'static>,
-        events: &Sender<HostEvent>,
+        events: &Sender<Event>,
     ) -> Option<Vec<u8>> {
         match event {
             HostEvent::Connected(key, stream) => {
@@ -285,7 +286,7 @@ fn open(
     key: FlowKey,
     stream: Box<dyn HostStream>,
     sockets: &mut SocketSet<'static>,
-    events: &Sender<HostEvent>,
+    events: &Sender<Event>,
 ) -> Option<Open> {
     let reader = stream.try_clone_stream().ok()?;
     let writer = stream.try_clone_stream().ok()?;
@@ -318,7 +319,7 @@ fn open(
             let mut writer = writer;
             for chunk in data {
                 if writer.write_all(&chunk).is_err() {
-                    let _ = events.send(HostEvent::Reset(key));
+                    let _ = events.send(Event::Tcp(HostEvent::Reset(key)));
                     return;
                 }
                 let mut q = queued.lock().expect("queued lock");
@@ -343,7 +344,7 @@ fn read_host(
     key: FlowKey,
     mut reader: Box<dyn HostStream>,
     credit: &Credit,
-    events: &Sender<HostEvent>,
+    events: &Sender<Event>,
 ) {
     let mut buf = vec![0u8; READ_CHUNK];
     while credit.wait_for_room() {
@@ -357,7 +358,7 @@ fn read_host(
             Err(_) => HostEvent::Reset(key),
         };
         let last = !matches!(event, HostEvent::Data(..));
-        if events.send(event).is_err() || last {
+        if events.send(Event::Tcp(event)).is_err() || last {
             return;
         }
     }
