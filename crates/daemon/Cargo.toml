@@ -11,5 +11,6 @@ publish.workspace = true
 [dependencies]
 sha2 = "0.11.0"
 cave-vm-proto = { path = "../proto" }
+cave-vm-vmm = { path = "../vmm" }
 serde_json = "1.0.151"
 toml_edit = "0.25.17"

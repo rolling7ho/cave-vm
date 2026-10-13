@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -224,6 +225,26 @@ impl Vms {
             child,
             policy: prepared.policy,
             stop_requested,
+        })
+    }
+
+    /// A new connection to a running VM's guest agent.
+    pub fn agent_connection(&self, id: &VmId) -> Result<UnixStream, ErrorMessage> {
+        let vm = self.vm(id)?;
+        let mut slot = vm.idle_slot();
+        let Slot::Running(running) = &mut *slot else {
+            return Err(error(
+                ErrorCode::NotRunning,
+                format!("{} is not running", display_name(id)),
+            )
+            .with_fix("start it with `cave run`"));
+        };
+        running.link.agent_connect().map_err(|e| match e {
+            LinkError::Vmm(e) => e,
+            e => error(
+                ErrorCode::Internal,
+                format!("cannot reach the VMM of {}: {e}", display_name(id)),
+            ),
         })
     }
 

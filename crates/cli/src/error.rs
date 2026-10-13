@@ -7,6 +7,8 @@ use cave_vm_proto::ErrorMessage;
 
 /// Exit code for cave's own failures (docs/cli.md, "Exit codes").
 pub const EXIT_FAILED: u8 = 1;
+/// Exit code for a usage error, as clap uses.
+pub const EXIT_USAGE: u8 = 2;
 
 #[derive(Debug)]
 pub struct CliError {
