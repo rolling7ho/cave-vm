@@ -7,28 +7,12 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use cave_vm_daemon::home::Home;
+use cave_vm_daemon::image::Cache;
+use cave_vm_daemon::image::manifest::Origin;
 use cave_vm_daemon::launch::ProcessLauncher;
+use cave_vm_daemon::project::ProjectSource;
 use cave_vm_daemon::server;
-use cave_vm_daemon::vms::{Prepared, VmSource, Vms};
-use cave_vm_proto::daemon::{NetMode, PortMap, VmId};
-use cave_vm_proto::{ErrorCode, ErrorMessage};
-
-/// Until reading `cave.toml` lands, starting a VM says so.
-struct NotYet;
-
-impl VmSource for NotYet {
-    fn prepare(
-        &self,
-        _: &VmId,
-        _: Option<NetMode>,
-        _: &[PortMap],
-    ) -> Result<Prepared, ErrorMessage> {
-        Err(ErrorMessage::new(
-            ErrorCode::Internal,
-            "this build of the daemon cannot read cave.toml yet",
-        ))
-    }
-}
+use cave_vm_daemon::vms::Vms;
 
 fn main() -> ExitCode {
     match run() {
@@ -46,9 +30,15 @@ fn run() -> std::io::Result<()> {
     let vmm = exe.with_file_name("cave-vmm");
     let images = home.root().join("images");
     std::fs::create_dir_all(&images)?;
+    let cache = Cache::new(&images);
+    cache.remove_partials()?;
+    let source = ProjectSource {
+        cache,
+        origin: Origin::from_env(),
+    };
     let mut launcher = ProcessLauncher::new(vmm);
     launcher.sandbox = Some(images);
-    let vms = Arc::new(Vms::new(home.clone(), Arc::new(launcher), Arc::new(NotYet)));
+    let vms = Arc::new(Vms::new(home.clone(), Arc::new(launcher), Arc::new(source)));
     let killed = vms.clean_up()?;
     if killed > 0 {
         eprintln!("cave-daemon: stopped {killed} VMM processes left by an earlier daemon");
