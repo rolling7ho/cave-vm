@@ -9,6 +9,7 @@ mod exec;
 mod init;
 mod policy;
 mod project;
+mod remove;
 mod shell;
 
 use std::process::ExitCode;
@@ -59,6 +60,14 @@ enum Cmd {
         #[arg(long)]
         fork: Option<String>,
     },
+    /// Remove the project's VM, or a fork or snapshot.
+    Rm {
+        /// A fork or snapshot; the project's VM when left out.
+        name: Option<String>,
+        /// Do not ask first, for scripts.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Run one command in the VM.
     Exec {
         #[arg(long)]
@@ -107,6 +116,7 @@ fn main() -> ExitCode {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
+        Cmd::Rm { name, yes } => remove::run(name, yes),
         Cmd::Shell { fork } => match shell::run(fork) {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),

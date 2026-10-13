@@ -24,6 +24,7 @@ use crate::forward::{self, Bound, Forward};
 use crate::home::Home;
 use crate::launch::{Launched, Launcher};
 use crate::link::{BOOT_TIMEOUT, LinkError, VmmLink};
+use crate::project::STATE_DIR;
 
 /// The file holding a running VMM's process ID, for cleanup after a daemon
 /// crash.
@@ -284,6 +285,49 @@ impl Vms {
         Ok(())
     }
 
+    /// Removes a project's VM: stops it, then deletes the project's
+    /// `.cave/` (disk, snapshots and forks) and the daemon's state for it.
+    /// `cave.toml` and the rest of the folder stay. Removing a VM that has
+    /// no `.cave/` is not an error.
+    pub fn remove(&self, id: &VmId) -> Result<(), ErrorMessage> {
+        if let Some(name) = &id.fork {
+            return Err(error(
+                ErrorCode::NotFound,
+                format!("no fork or snapshot named {name} in this project"),
+            )
+            .with_fix("List them with `cave ls`"));
+        }
+        let project = Path::new(&id.project);
+        if !project.is_absolute() {
+            return Err(error(
+                ErrorCode::BadRequest,
+                format!("{} is not an absolute path", id.project),
+            ));
+        }
+        self.stop(id)?;
+        let vm = self.vm(id)?;
+        let slot = vm.idle_slot();
+        if !matches!(*slot, Slot::Stopped) {
+            return Err(error(
+                ErrorCode::Busy,
+                format!(
+                    "{} was started again while it was being removed",
+                    display_name(id)
+                ),
+            )
+            .with_fix("Run `cave rm` again"));
+        }
+        vm.set(slot, Slot::Busy);
+        let result = remove_state(&project.join(STATE_DIR));
+        if result.is_ok() {
+            let _ = fs::remove_dir_all(&vm.dir);
+            self.vms.lock().expect("vms lock").remove(&vm.dir);
+        }
+        let slot = vm.slot.lock().expect("vm lock");
+        vm.set(slot, Slot::Stopped);
+        result
+    }
+
     /// The VMs of one project, or of every project the daemon has seen.
     pub fn list(&self, project: Option<&str>) -> Vec<ListEntry> {
         let vms: Vec<Arc<Vm>> = self
@@ -353,6 +397,23 @@ impl Vms {
             fs::remove_file(&pid_file)?;
         }
         Ok(killed)
+    }
+}
+
+/// Deletes a project's `.cave/`. A symbolic link there is removed, never
+/// followed, so nothing outside the project is deleted.
+fn remove_state(state: &Path) -> Result<(), ErrorMessage> {
+    let failed = |e: io::Error| {
+        error(
+            ErrorCode::Io,
+            format!("cannot remove {}: {e}", state.display()),
+        )
+    };
+    match fs::symlink_metadata(state) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(failed(e)),
+        Ok(meta) if meta.is_dir() => fs::remove_dir_all(state).map_err(failed),
+        Ok(_) => fs::remove_file(state).map_err(failed),
     }
 }
 

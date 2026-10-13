@@ -136,6 +136,10 @@ fn handle(state: &Mutex<State>, request: Request) -> Reply {
             s.running = false;
             Reply::Ok
         }
+        Request::Remove { name: None, .. } => {
+            s.running = false;
+            Reply::Ok
+        }
         _ => Reply::Error(ErrorMessage::new(ErrorCode::BadRequest, "not in the fake")),
     }
 }
@@ -539,4 +543,24 @@ fn shell_without_a_terminal_points_at_exec() {
     assert_eq!(out.status.code(), Some(125), "{}", stderr(&out));
     assert!(stderr(&out).contains("cave shell needs a terminal"));
     assert!(stderr(&out).contains("cave exec -- <cmd>"));
+}
+
+#[test]
+fn rm_without_a_terminal_needs_yes() {
+    let s = Scratch::new();
+    let state = fake_daemon(&s);
+    fs::write(s.project().join("cave.toml"), "").unwrap();
+    let out = s.cave(&s.project(), &["rm"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("cave rm needs a terminal to ask first"));
+    assert!(stderr(&out).contains("--yes"));
+    assert!(state.lock().unwrap().requests.is_empty());
+
+    let out = s.cave(&s.project(), &["rm", "--yes"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("Removed the VM for proj; cave.toml is still here"));
+    assert!(matches!(
+        state.lock().unwrap().requests.as_slice(),
+        [Request::Remove { name: None, .. }]
+    ));
 }
