@@ -130,6 +130,24 @@ impl Drop for InUse {
     }
 }
 
+/// A project's `[snapshots]` settings (docs/config.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoSnapshots {
+    /// Take automatic snapshots.
+    pub auto: bool,
+    /// How many automatic snapshots to keep.
+    pub keep: u32,
+}
+
+impl Default for AutoSnapshots {
+    fn default() -> AutoSnapshots {
+        AutoSnapshots {
+            auto: true,
+            keep: 10,
+        }
+    }
+}
+
 /// Prepares VMs to boot.
 pub trait VmSource: Send + Sync {
     fn prepare(
@@ -138,6 +156,12 @@ pub trait VmSource: Send + Sync {
         net: Option<NetMode>,
         ports: &[PortMap],
     ) -> Result<Prepared, ErrorMessage>;
+
+    /// The `[snapshots]` settings of `vm`'s project.
+    fn auto_snapshots(&self, vm: &VmId) -> Result<AutoSnapshots, ErrorMessage> {
+        let _ = vm;
+        Ok(AutoSnapshots::default())
+    }
 
     /// The base images for `cave images`, with how many of `projects` use
     /// each.

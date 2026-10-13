@@ -225,13 +225,38 @@ impl Vms {
     pub fn restore(&self, id: &VmId, name: Option<&str>) -> Result<Restored, ErrorMessage> {
         let state = state_dir(id)?;
         let (name, manifest) = pick(&state, name)?;
-        let dir = snapshot::dir(&state, &name);
-        // The undo point. A VM that never booted has nothing to save.
-        let saved = if disk::path(&state).is_file() {
+        // The undo point, unless automatic snapshots are off. A VM that
+        // never booted has nothing to save.
+        let settings = self.source.auto_snapshots(id)?;
+        let saved = if settings.auto && disk::path(&state).is_file() {
             Some(self.take(id, &state, Dest::Snapshot(None), true)?.0)
         } else {
             None
         };
+        // Pruned once the restore is done with the snapshot it restores,
+        // which may be an automatic one.
+        let spare: Vec<&str> = std::iter::once(name.as_str())
+            .chain(saved.as_deref())
+            .collect();
+        let restored = self.restore_from(id, &state, &name, &manifest);
+        prune(&state, settings.keep, &spare);
+        restored.map(|fallback| Restored {
+            name: name.clone(),
+            fallback,
+            saved,
+        })
+    }
+
+    /// Rolls the VM back to snapshot `name` and boots it from there.
+    /// Returns why it booted from the disk alone, if it did.
+    fn restore_from(
+        &self,
+        id: &VmId,
+        state: &Path,
+        name: &str,
+        manifest: &Manifest,
+    ) -> Result<Option<String>, ErrorMessage> {
+        let dir = snapshot::dir(state, name);
         let ports = self.ports(id)?;
         self.stop(id)?;
         let vm = self.vm(id)?;
@@ -252,19 +277,15 @@ impl Vms {
         vm.set(slot, Slot::Busy);
         let disks = Disks {
             snapshot: dir.join(snapshot::DISK_FILE),
-            vm: disk::path(&state),
+            vm: disk::path(state),
         };
-        let result = self.boot_from(&vm, &dir, &manifest, &ports, Some(&disks));
+        let result = self.boot_from(&vm, &dir, manifest, &ports, Some(&disks));
         let slot = vm.slot.lock().expect("vm lock");
         match result {
             Ok((mut running, fallback)) => {
                 running.forwards = serve_all(&vm, bound);
                 vm.set(slot, Slot::Running(running));
-                Ok(Restored {
-                    name,
-                    fallback,
-                    saved,
-                })
+                Ok(fallback)
             }
             Err(e) => {
                 vm.set(slot, Slot::Stopped);
@@ -568,6 +589,36 @@ pub(super) fn list(project: &str) -> Vec<ListEntry> {
             }
         })
         .collect()
+}
+
+/// Deletes the oldest automatic snapshots beyond the newest `keep`,
+/// leaving those named in `spare`. Snapshots taken by name are never
+/// deleted. Best effort: one that cannot be deleted is tried next time.
+fn prune(state: &Path, keep: u32, spare: &[&str]) {
+    let mut auto: Vec<(u64, std::time::SystemTime, String)> = snapshot::names(state)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|name| {
+            let dir = snapshot::dir(state, &name);
+            let manifest = snapshot::read_manifest(&dir).ok()?;
+            // The manifest is written last, to the nanosecond, which
+            // orders snapshots taken in the same second.
+            let written = fs::metadata(dir.join(snapshot::MANIFEST_FILE))
+                .and_then(|m| m.modified())
+                .ok()?;
+            manifest
+                .auto
+                .then_some((manifest.created_unix, written, name))
+        })
+        .collect();
+    // Newest first.
+    auto.sort_by(|a, b| b.cmp(a));
+    let keep = usize::try_from(keep).unwrap_or(usize::MAX);
+    for (_, _, name) in auto.into_iter().skip(keep) {
+        if !spare.contains(&name.as_str()) {
+            let _ = fs::remove_dir_all(snapshot::dir(state, &name));
+        }
+    }
 }
 
 /// The snapshot to restore: `name`, or the newest one, preferring those

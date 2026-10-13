@@ -19,7 +19,7 @@ use crate::config;
 use crate::image::manifest::{Entry, Manifest, Origin};
 use crate::image::{BASE_ALIAS_TARGET, Cache, Digest, ImageRef};
 use crate::snapshot;
-use crate::vms::{Prepared, VmSource};
+use crate::vms::{AutoSnapshots, Prepared, VmSource};
 
 /// The project's machine-specific folder.
 pub const STATE_DIR: &str = ".cave";
@@ -264,6 +264,14 @@ impl VmSource for ProjectSource {
                 widened,
             },
             idle_suspend: settings.idle_suspend,
+        })
+    }
+
+    fn auto_snapshots(&self, vm: &VmId) -> Result<AutoSnapshots, ErrorMessage> {
+        let settings = config::load(Path::new(&vm.project)).map_err(config_error)?;
+        Ok(AutoSnapshots {
+            auto: settings.snapshots_auto,
+            keep: settings.snapshots_keep,
         })
     }
 
