@@ -17,6 +17,10 @@ The guest's TCP connections through the network stack end too: their host socket
 
 The manifest is written to a temporary file and renamed into place, so a crash leaves either no manifest or a whole one.
 
+## Forks
+
+A fork lives in `.cave/forks/<name>/` (D18). It is made as a snapshot folder: a fresh snapshot of the VM written straight there, or APFS clones of the files of the snapshot given with `--from`, with the manifest renamed to the fork. The fork boots from that memory with `disk.img` as its own disk. Once it has booted, `memory` and `state` are deleted and the manifest says `has_memory: false`, since the disk moves on from them; a fork that is stopped and started again boots from its disk.
+
 ## Manifest
 
 ```json

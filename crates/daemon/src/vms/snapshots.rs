@@ -15,7 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cave_vm_proto::daemon::{EntryKind, ListEntry, VmId};
+use cave_vm_proto::daemon::{EntryKind, ListEntry, VmId, VmState};
 use cave_vm_proto::vmm::{FromVmm, ToVmm};
 use cave_vm_proto::{ErrorCode, ErrorMessage};
 use cave_vm_vmm::{disk, host};
@@ -28,6 +28,30 @@ use crate::snapshot::{self, Manifest};
 /// How long a VMM may take to save a snapshot. It writes out guest memory,
 /// so this grows with the VM's memory.
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Where [`Vms::take`] saves.
+enum Dest<'a> {
+    /// A snapshot by this name, or the default one.
+    Snapshot(Option<&'a str>),
+    /// The folder of the new fork by this name.
+    Fork(&'a str),
+}
+
+/// A restore's disks: the snapshot's, and the one the VM boots from.
+struct Disks {
+    snapshot: PathBuf,
+    vm: PathBuf,
+}
+
+/// What a fork started from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Forked {
+    pub name: String,
+    /// The snapshot, or the VM whose current state was forked.
+    pub from: String,
+    /// Why the fork's memory was not restored, if it was not.
+    pub fallback: Option<String>,
+}
 
 /// What a restore did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,14 +72,14 @@ impl Vms {
         if let Some(name) = name {
             check_name(name)?;
         }
-        self.take(id, &state, name, false)
+        self.take(id, &state, Dest::Snapshot(name), false)
     }
 
     fn take(
         &self,
         id: &VmId,
         state: &Path,
-        name: Option<&str>,
+        dest: Dest<'_>,
         auto: bool,
     ) -> Result<(String, u64), ErrorMessage> {
         let vm = self.vm(id)?;
@@ -65,7 +89,7 @@ impl Vms {
             _ => None,
         };
         drop(slot);
-        let result = self.save(&vm, state, name, auto, running.as_mut());
+        let result = self.save(&vm, state, dest, auto, running.as_mut());
         let slot = vm.slot.lock().expect("vm lock");
         vm.set(slot, running.map_or(Slot::Stopped, Slot::Running));
         result
@@ -76,7 +100,7 @@ impl Vms {
         &self,
         vm: &Vm,
         state: &Path,
-        name: Option<&str>,
+        dest: Dest<'_>,
         auto: bool,
         running: Option<&mut Running>,
     ) -> Result<(String, u64), ErrorMessage> {
@@ -94,17 +118,27 @@ impl Vms {
             }
         };
         let created_unix = now_unix();
-        let name = match name {
-            Some(name) if snapshot::taken(state, name) => return Err(already_exists(name)),
-            Some(name) => name.to_string(),
-            None => snapshot::default_name(
-                &display_name(&vm.id),
-                &snapshot::local_date(created_unix),
-                &distro(&policy.image),
-                |n| snapshot::taken(state, n),
-            ),
+        let (name, dir) = match dest {
+            Dest::Fork(name) => (name.to_string(), snapshot::fork_dir(state, name)),
+            Dest::Snapshot(Some(name)) if snapshot::taken(state, name) => {
+                return Err(already_exists(name));
+            }
+            Dest::Snapshot(name) => {
+                let name = name.map_or_else(
+                    || {
+                        snapshot::default_name(
+                            &display_name(&vm.id),
+                            &snapshot::local_date(created_unix),
+                            &distro(&policy.image),
+                            |n| snapshot::taken(state, n),
+                        )
+                    },
+                    str::to_string,
+                );
+                let dir = snapshot::dir(state, &name);
+                (name, dir)
+            }
         };
-        let dir = snapshot::dir(state, &name);
         let failed = |what: &str, e: &dyn std::fmt::Display| {
             error(ErrorCode::Io, format!("cannot {what}: {e}"))
         };
@@ -162,7 +196,7 @@ impl Vms {
         let dir = snapshot::dir(&state, &name);
         // The undo point. A VM that never booted has nothing to save.
         let saved = if disk::path(&state).is_file() {
-            Some(self.take(id, &state, None, true)?.0)
+            Some(self.take(id, &state, Dest::Snapshot(None), true)?.0)
         } else {
             None
         };
@@ -182,7 +216,11 @@ impl Vms {
         }
         let bound = bind_all(&ports)?;
         vm.set(slot, Slot::Busy);
-        let result = self.roll_back(&vm, &state, &dir, &manifest, &ports);
+        let disks = Disks {
+            snapshot: dir.join(snapshot::DISK_FILE),
+            vm: disk::path(&state),
+        };
+        let result = self.boot_from(&vm, &dir, &manifest, &ports, Some(&disks));
         let slot = vm.slot.lock().expect("vm lock");
         match result {
             Ok((mut running, fallback)) => {
@@ -211,19 +249,21 @@ impl Vms {
         })
     }
 
-    /// Puts the snapshot's disk in place and boots from the snapshot,
-    /// falling back to a normal boot. Returns why it fell back, if it did.
-    fn roll_back(
+    /// Boots `vm` from the snapshot in `dir`, falling back to a normal boot
+    /// when its memory cannot be used. With `disks`, the snapshot's disk is
+    /// put in place first, and again before falling back. Returns why it
+    /// fell back, if it did.
+    fn boot_from(
         &self,
         vm: &std::sync::Arc<Vm>,
-        state: &Path,
         dir: &Path,
         manifest: &Manifest,
         ports: &[cave_vm_proto::daemon::PortMap],
+        disks: Option<&Disks>,
     ) -> Result<(Running, Option<String>), ErrorMessage> {
-        let disk = disk::path(state);
-        let snapshot_disk = dir.join(snapshot::DISK_FILE);
-        replace(&snapshot_disk, &disk)?;
+        if let Some(disks) = disks {
+            replace(&disks.snapshot, &disks.vm)?;
+        }
         let host_os = snapshot::host_os_build().unwrap_or_default();
         let why = match manifest.memory_usable(&host_os) {
             Ok(()) => {
@@ -241,7 +281,9 @@ impl Vms {
                     Ok(running) => return Ok((running, None)),
                     Err(e) => {
                         // The guest may have run and written the disk.
-                        replace(&snapshot_disk, &disk)?;
+                        if let Some(disks) = disks {
+                            replace(&disks.snapshot, &disks.vm)?;
+                        }
                         e.message
                     }
                 }
@@ -250,6 +292,122 @@ impl Vms {
         };
         let prepared = self.source.prepare(&vm.id, None, ports)?;
         Ok((self.launch(vm, prepared)?, Some(why)))
+    }
+
+    /// Makes fork `name` of a project's VM, or `fork-1`, `fork-2` and so on,
+    /// from snapshot `from` or from the VM's current state (D18), and
+    /// starts it.
+    pub fn fork(
+        &self,
+        id: &VmId,
+        name: Option<&str>,
+        from: Option<&str>,
+    ) -> Result<Forked, ErrorMessage> {
+        let state = state_dir(id)?;
+        let name = match name {
+            Some(name) => {
+                check_name(name)?;
+                if snapshot::taken(&state, name) {
+                    return Err(already_exists(name));
+                }
+                name.to_string()
+            }
+            None => (1..)
+                .map(|n| format!("fork-{n}"))
+                .find(|n| !snapshot::taken(&state, n))
+                .expect("a free name"),
+        };
+        let dir = snapshot::fork_dir(&state, &name);
+        let source = match from {
+            Some(from) => {
+                let (from, manifest) = pick(&state, Some(from))?;
+                copy_snapshot(&snapshot::dir(&state, &from), &dir, &name, &manifest)?;
+                from
+            }
+            None => {
+                self.take(id, &state, Dest::Fork(&name), false)?;
+                display_name(id)
+            }
+        };
+        let fork = VmId {
+            project: id.project.clone(),
+            fork: Some(name.clone()),
+        };
+        let booted = self.start_fork(&fork, &dir);
+        match booted {
+            Ok(fallback) => Ok(Forked {
+                name,
+                from: source,
+                fallback,
+            }),
+            Err(e) => {
+                let _ = fs::remove_dir_all(&dir);
+                Err(e)
+            }
+        }
+    }
+
+    /// Boots a new fork from the snapshot in its folder. The fork's disk
+    /// moves on from there, so the snapshot's memory is deleted once
+    /// booted: a later boot of the fork starts from its disk.
+    fn start_fork(&self, fork: &VmId, dir: &Path) -> Result<Option<String>, ErrorMessage> {
+        let manifest = snapshot::read_manifest(dir).map_err(|e| {
+            error(
+                ErrorCode::Internal,
+                format!("cannot read the fork's snapshot: {e}"),
+            )
+        })?;
+        let vm = self.vm(fork)?;
+        let slot = vm.idle_slot();
+        if !matches!(*slot, Slot::Stopped) {
+            return Err(error(
+                ErrorCode::Busy,
+                format!("{} is already running", display_name(fork)),
+            ));
+        }
+        vm.set(slot, Slot::Busy);
+        let result = self.boot_from(&vm, dir, &manifest, &[], None);
+        if manifest.has_memory {
+            let _ = fs::remove_file(dir.join(snapshot::MEMORY_FILE));
+            let _ = fs::remove_file(dir.join(snapshot::STATE_FILE));
+            let _ = snapshot::write_manifest(
+                dir,
+                &Manifest {
+                    has_memory: false,
+                    ..manifest
+                },
+            );
+        }
+        let slot = vm.slot.lock().expect("vm lock");
+        match result {
+            Ok((running, fallback)) => {
+                vm.set(slot, Slot::Running(running));
+                Ok(fallback)
+            }
+            Err(e) => {
+                vm.set(slot, Slot::Stopped);
+                Err(e)
+            }
+        }
+    }
+
+    /// Removes fork `name` of a project, stopping it first, if it has one
+    /// by that name.
+    pub(super) fn remove_fork(&self, id: &VmId, name: &str) -> Result<bool, ErrorMessage> {
+        let state = Path::new(&id.project).join(STATE_DIR);
+        let dir = snapshot::fork_dir(&state, name);
+        if check_name(name).is_err() || !dir.is_dir() {
+            return Ok(false);
+        }
+        let fork = VmId {
+            project: id.project.clone(),
+            fork: Some(name.to_string()),
+        };
+        self.stop(&fork)?;
+        fs::remove_dir_all(&dir)
+            .map_err(|e| error(ErrorCode::Io, format!("cannot remove fork {name}: {e}")))?;
+        self.forget(&fork);
+        Ok(true)
     }
 
     /// Removes snapshot `name` of a project, if it has one by that name.
@@ -263,6 +421,34 @@ impl Vms {
             .map_err(|e| error(ErrorCode::Io, format!("cannot remove snapshot {name}: {e}")))?;
         Ok(true)
     }
+}
+
+/// The rows of `cave ls` for a project's forks that are not running, which
+/// the daemon may not have seen since it started.
+pub(super) fn stopped_forks(project: &str, running: &[String]) -> Vec<ListEntry> {
+    let state = Path::new(project).join(STATE_DIR);
+    snapshot::fork_names(&state)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|name| !running.contains(name))
+        .map(|name| {
+            let dir = snapshot::fork_dir(&state, &name);
+            let created_unix = fs::metadata(&dir)
+                .and_then(|m| m.created())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs());
+            ListEntry {
+                project: project.to_string(),
+                kind: EntryKind::Fork,
+                state: Some(VmState::Stopped),
+                auto: false,
+                size: snapshot::size(&dir),
+                created_unix,
+                name,
+            }
+        })
+        .collect()
 }
 
 /// The rows of `cave ls` for a project's snapshots. A damaged snapshot is
@@ -336,9 +522,9 @@ fn state_dir(id: &VmId) -> Result<PathBuf, ErrorMessage> {
     if id.fork.is_some() {
         return Err(error(
             ErrorCode::BadRequest,
-            "this build of cave cannot snapshot or restore forks yet",
+            "this build of cave cannot snapshot, restore or fork a fork yet",
         )
-        .with_fix("Run it without --fork"));
+        .with_fix("Use the project's own VM, without --fork"));
     }
     let project = Path::new(&id.project);
     if !project.is_absolute() {
@@ -373,6 +559,46 @@ fn distro(image: &str) -> String {
         |_| image.split('@').next().unwrap_or(image).to_string(),
         |image| image.resolved_name().to_string(),
     )
+}
+
+/// Makes `dst`, a new fork's folder, a copy of the snapshot in `src`
+/// through APFS clones, with the manifest renamed to the fork.
+fn copy_snapshot(
+    src: &Path,
+    dst: &Path,
+    name: &str,
+    manifest: &Manifest,
+) -> Result<(), ErrorMessage> {
+    let failed = |e: std::io::Error| {
+        error(
+            ErrorCode::Io,
+            format!("cannot copy the snapshot for the fork: {e}"),
+        )
+    };
+    let _ = fs::remove_dir_all(dst);
+    fs::create_dir_all(dst).map_err(failed)?;
+    let mut files = vec![snapshot::DISK_FILE];
+    if manifest.has_memory {
+        files.extend([snapshot::MEMORY_FILE, snapshot::STATE_FILE]);
+    }
+    let copied = files
+        .into_iter()
+        .try_for_each(|file| host::clonefile(&src.join(file), &dst.join(file)))
+        .and_then(|()| {
+            snapshot::write_manifest(
+                dst,
+                &Manifest {
+                    name: name.to_string(),
+                    auto: false,
+                    ..manifest.clone()
+                },
+            )
+        });
+    if let Err(e) = copied {
+        let _ = fs::remove_dir_all(dst);
+        return Err(failed(e));
+    }
+    Ok(())
 }
 
 /// Makes `dst` a clone of `src`, replacing it.

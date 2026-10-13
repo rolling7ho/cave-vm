@@ -124,6 +124,14 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                 ..vm
             })
             .map(|()| Reply::Ok),
+        Request::Fork { vm, name, from } => {
+            vms.fork(&vm, name.as_deref(), from.as_deref())
+                .map(|forked| Reply::Forked {
+                    name: forked.name,
+                    from: forked.from,
+                    reason: forked.fallback,
+                })
+        }
         Request::Images => vms.images().map(|images| Reply::Images { images }),
         Request::Restore { vm, name } => {
             vms.restore(&vm, name.as_deref())

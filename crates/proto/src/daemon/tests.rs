@@ -186,6 +186,14 @@ fn replies_round_trip() {
         },
     );
     check(
+        json!({"type": "forked", "name": "fork-1", "from": "app"}),
+        Reply::Forked {
+            name: "fork-1".into(),
+            from: "app".into(),
+            reason: None,
+        },
+    );
+    check(
         json!({"type": "restored", "name": "before", "memory_restored": true, "saved": "app-2026-10-13-debian"}),
         Reply::Restored {
             name: "before".into(),

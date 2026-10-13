@@ -173,7 +173,10 @@ fn fake_launcher(mode: &str) -> ProcessLauncher {
 fn config(vm: &VmId) -> VmmConfig {
     VmmConfig {
         kernel: "/fake/Image".into(),
-        disk: format!("{}/.cave/disk.img", vm.project),
+        disk: match &vm.fork {
+            None => format!("{}/.cave/disk.img", vm.project),
+            Some(fork) => format!("{}/.cave/forks/{fork}/disk.img", vm.project),
+        },
         memory_bytes: 2 << 30,
         cpus: 2,
         net: NetMode::Nat,
@@ -837,4 +840,168 @@ fn a_restore_falls_back_to_the_disk_when_the_memory_cannot_be_loaded() {
         b"disk v1"
     );
     assert_eq!(r.state(), Some(VmState::Running));
+}
+
+impl Rig {
+    fn fork(&self, id: &VmId, name: Option<&str>, from: Option<&str>) -> Reply {
+        self.request(Request::Fork {
+            vm: id.clone(),
+            name: name.map(String::from),
+            from: from.map(String::from),
+        })
+    }
+
+    fn forks(&self, id: &VmId) -> Vec<(String, Option<VmState>)> {
+        match self.request(Request::List {
+            project: Some(id.project.clone()),
+        }) {
+            Reply::List { entries } => entries
+                .into_iter()
+                .filter(|e| e.kind == EntryKind::Fork)
+                .map(|e| (e.name, e.state))
+                .collect(),
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+fn fork_id(id: &VmId, name: &str) -> VmId {
+    VmId {
+        fork: Some(name.into()),
+        ..id.clone()
+    }
+}
+
+#[test]
+fn a_fork_of_the_running_vm_starts_from_its_memory() {
+    let r = rig("fork", NORMAL);
+    let (id, project) = snapshot_project(&r);
+    assert!(matches!(
+        r.request(Request::Start {
+            vm: id.clone(),
+            net: None,
+            ports: Vec::new()
+        }),
+        Reply::Policy(_)
+    ));
+    let Reply::Forked { name, from, reason } = r.fork(&id, None, None) else {
+        panic!("not forked")
+    };
+    assert_eq!(
+        (name.as_str(), from.as_str(), reason),
+        ("fork-1", "app", None)
+    );
+    let dir = project.join(".cave/forks/fork-1");
+    let marker = fs::read_to_string(dir.join("restored-from")).unwrap();
+    assert!(marker.ends_with("/forks/fork-1 2"), "{marker}");
+    // Booted: the memory is not needed again, since the disk moves on.
+    assert!(!dir.join("memory").exists() && !dir.join("state").exists());
+    assert_eq!(manifest_in(&dir)["has_memory"], false);
+    assert_eq!(
+        r.forks(&id),
+        [("fork-1".to_string(), Some(VmState::Running))]
+    );
+
+    // Parent and fork have their own disks.
+    fs::write(project.join(".cave/disk.img"), "disk v2").unwrap();
+    assert_eq!(fs::read(dir.join("disk.img")).unwrap(), b"disk v1");
+
+    // The next fork gets the next name; a name in use is refused.
+    assert!(matches!(r.fork(&id, None, None), Reply::Forked { name, .. } if name == "fork-2"));
+    assert!(matches!(
+        r.snapshot(&id, Some("before")),
+        Reply::Snapshot { .. }
+    ));
+    for taken in ["before", "fork-1"] {
+        assert_eq!(
+            error_of(r.fork(&id, Some(taken), None)).code,
+            ErrorCode::AlreadyExists
+        );
+        assert_eq!(
+            error_of(r.snapshot(&id, Some(taken))).code,
+            ErrorCode::AlreadyExists
+        );
+    }
+
+    // A stopped fork is listed, and starts again from its own disk.
+    assert_eq!(
+        r.request(Request::Stop {
+            vm: fork_id(&id, "fork-1")
+        }),
+        Reply::Ok
+    );
+    assert!(
+        r.forks(&id)
+            .contains(&("fork-1".to_string(), Some(VmState::Stopped)))
+    );
+    assert!(matches!(
+        r.request(Request::Start {
+            vm: fork_id(&id, "fork-1"),
+            net: None,
+            ports: Vec::new()
+        }),
+        Reply::Policy(p) if p.name == "app"
+    ));
+    assert!(!dir.join("restored-from").exists());
+
+    // `cave rm fork-1` stops and removes just the fork.
+    assert_eq!(
+        r.request(Request::Remove {
+            vm: id.clone(),
+            name: Some("fork-1".into())
+        }),
+        Reply::Ok
+    );
+    assert!(!dir.exists());
+    assert_eq!(
+        r.forks(&id),
+        [("fork-2".to_string(), Some(VmState::Running))]
+    );
+    // Removing the project's VM stops its forks too.
+    assert_eq!(
+        r.request(Request::Remove {
+            vm: id.clone(),
+            name: None
+        }),
+        Reply::Ok
+    );
+    assert!(!project.join(".cave").exists());
+    assert!(r.forks(&id).is_empty());
+}
+
+#[test]
+fn a_fork_from_a_snapshot() {
+    let r = rig("forkfrom", NORMAL);
+    let (id, project) = snapshot_project(&r);
+    let e = error_of(r.fork(&id, Some("try"), Some("nope")));
+    assert_eq!(e.code, ErrorCode::NotFound);
+
+    // A snapshot without memory: the fork boots from its disk.
+    assert!(matches!(
+        r.snapshot(&id, Some("cold")),
+        Reply::Snapshot { .. }
+    ));
+    match r.fork(&id, Some("try"), Some("cold")) {
+        Reply::Forked {
+            name,
+            from,
+            reason: Some(reason),
+        } => {
+            assert_eq!((name.as_str(), from.as_str()), ("try", "cold"));
+            assert!(reason.contains("without memory state"), "{reason}");
+        }
+        other => panic!("{other:?}"),
+    }
+    let dir = project.join(".cave/forks/try");
+    assert_eq!(fs::read(dir.join("disk.img")).unwrap(), b"disk v1");
+    assert_eq!(manifest_in(&dir)["name"], "try");
+    // The snapshot is untouched, and the project's VM was not started.
+    assert!(project.join(".cave/snapshots/cold/disk.img").is_file());
+    assert_eq!(r.state(), Some(VmState::Stopped));
+    assert_eq!(r.forks(&id), [("try".to_string(), Some(VmState::Running))]);
+}
+
+fn manifest_in(dir: &std::path::Path) -> serde_json::Value {
+    let text = fs::read_to_string(dir.join("snapshot.json")).unwrap();
+    serde_json::from_str(&text).unwrap()
 }

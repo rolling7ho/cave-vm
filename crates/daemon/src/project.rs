@@ -18,6 +18,7 @@ use cave_vm_vmm::disk;
 use crate::config;
 use crate::image::manifest::{Entry, Manifest, Origin};
 use crate::image::{BASE_ALIAS_TARGET, Cache, Digest, ImageRef};
+use crate::snapshot;
 use crate::vms::{Prepared, VmSource};
 
 /// The project's machine-specific folder.
@@ -198,13 +199,6 @@ impl VmSource for ProjectSource {
         net: Option<NetMode>,
         ports: &[PortMap],
     ) -> Result<Prepared, ErrorMessage> {
-        if vm.fork.is_some() {
-            return Err(ErrorMessage::new(
-                ErrorCode::BadRequest,
-                "this build of cave cannot run forks yet",
-            )
-            .with_fix("Run the project's own VM without --fork"));
-        }
         let project = Path::new(&vm.project);
         if !project.is_absolute() {
             return Err(ErrorMessage::new(
@@ -221,7 +215,22 @@ impl VmSource for ProjectSource {
         if image.digest.is_none() {
             pin(project, &pinned)?;
         }
-        let disk = project_disk(&base, &project.join(STATE_DIR), settings.disk_bytes)?;
+        // A fork's disk is in its folder, made when it was forked.
+        let disk_dir = match &vm.fork {
+            None => project.join(STATE_DIR),
+            Some(name) => {
+                let dir = snapshot::fork_dir(&project.join(STATE_DIR), name);
+                if snapshot::check_name(name).is_err() || !disk::path(&dir).is_file() {
+                    return Err(ErrorMessage::new(
+                        ErrorCode::NotFound,
+                        format!("no fork named {name} in this project"),
+                    )
+                    .with_fix("List them with `cave ls`, or make one with `cave fork`"));
+                }
+                dir
+            }
+        };
+        let disk = project_disk(&base, &disk_dir, settings.disk_bytes)?;
 
         let net_mode = net.unwrap_or(settings.net);
         let mut widened = Vec::new();
@@ -229,9 +238,11 @@ impl VmSource for ProjectSource {
             widened.push("--net lan".to_string());
         }
         widened.extend(ports.iter().map(|&p| crate::forward::flag(p)));
-        let name = project
-            .file_name()
-            .map_or_else(|| vm.project.clone(), |n| n.to_string_lossy().into_owned());
+        let name = vm.fork.clone().unwrap_or_else(|| {
+            project
+                .file_name()
+                .map_or_else(|| vm.project.clone(), |n| n.to_string_lossy().into_owned())
+        });
         Ok(Prepared {
             config: VmmConfig {
                 kernel: absolute(&kernel),
