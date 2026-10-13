@@ -333,3 +333,39 @@ fn virtio_interrupt_drives_its_line() {
         ]
     );
 }
+
+#[test]
+fn virtio_interrupt_from_another_thread_wakes_an_idle_vcpu() {
+    let mock = MockBackend::new();
+    // The guest idles in WFI, which the hypervisor handles without an exit,
+    // until something kicks the vCPU.
+    mock.script(
+        0,
+        [
+            Step::until_kicked(),
+            Step::exit(hvc()).with_reg(x(0), 0x8400_0008),
+        ],
+    );
+    let mut machine = Machine::new(Vec::new(), None, 1);
+    let transport = blank_transport();
+    let interrupt = transport.interrupt().clone();
+    machine.add_virtio(transport);
+
+    let (done, finished) = std::sync::mpsc::channel();
+    let runner_mock = mock.clone();
+    std::thread::spawn(move || {
+        let mut vcpu = start(&runner_mock);
+        let stop = runner::run(&runner_mock, &mut vcpu, &machine).unwrap();
+        let _ = done.send(stop);
+    });
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    interrupt.raise(1);
+    let stop = finished
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the interrupt kicked the vCPU");
+    assert_eq!(stop, Stop::PowerOff);
+    assert!(mock.events().contains(&Event::IrqLine {
+        intid: virtio_intid(0),
+        level: true
+    }));
+}

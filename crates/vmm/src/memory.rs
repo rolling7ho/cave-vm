@@ -1,7 +1,8 @@
 //! Guest memory.
 //!
-//! The only module in `vmm` allowed to use `unsafe` (ROADMAP.md D5). Every
-//! `unsafe` block needs a `// SAFETY:` comment.
+//! One of the two modules in `vmm` allowed to use `unsafe` (ROADMAP.md D5;
+//! the other is `host`, D24). Every `unsafe` block needs a `// SAFETY:`
+//! comment.
 //!
 //! Guest RAM is one or more regions of host memory from `mmap`, either
 //! anonymous or backed by a file. A file mapped copy-on-write is how a
