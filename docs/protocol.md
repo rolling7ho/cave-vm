@@ -10,6 +10,7 @@ The design fixes the shape: length-prefixed JSON messages, versioned from day on
 | --- | --- | --- | --- |
 | Guest agent | vsock, guest port 1024. | VMM, on the daemon's behalf | `agent` in the guest |
 | Daemon API | Unix socket `daemon.sock` in the data directory, mode `0600` (design: user-only permissions) | CLI, SDKs, MCP server | `daemon` |
+| VMM control | The VMM process's standard input, one end of a Unix socket pair the daemon made when it started the VMM | `daemon` | the VMM |
 
 ## Framing
 
@@ -231,6 +232,21 @@ The reply objects mirror the `--json` output of the matching CLI command. Sizes 
 ```
 
 The daemon resolves each name from the project's `.env` or a similar source, adds the values to `env` on the agent link only, and records the names, not the values, in the audit log and in the metadata of later snapshots (design). While streaming `output` back, it replaces the exact value of each injected credential with the credential's name in brackets, so `API_KEY_1: snednao_#m34nr` is streamed as `API_KEY_1: [API_KEY_1]`, including values split across two chunks [D9]. Redaction is best effort, and a command can still leak a value through files or the network; the docs say so.
+
+## VMM control
+
+The daemon starts one VMM process per VM and talks to it over a Unix socket pair, whose VMM end is the process's standard input. There is no socket file, so this works at any project path (D26). When the link closes, the VMM stops its VM and exits, so a VMM never outlives the daemon that started it. Its standard output and error go to `vmm.log` in the VM's folder in the data directory.
+
+The link uses the same framing, handshake and errors. Unlike the other links it carries more than one operation: the daemon sends one request at a time and reads its reply.
+
+| Request | Fields | Reply |
+| --- | --- | --- |
+| `boot` | `config`: `kernel` and `disk` (absolute paths), `memory_bytes`, `cpus`, `net` (`"off"`, `"nat"`, `"lan"`) | `booted` once the guest agent answers `ping`, or an `error` |
+| `agent_connect` | none | `agent_connection`, with the host end of a new connection to the guest agent attached as a file descriptor (`SCM_RIGHTS`) |
+| `ping` | none | `pong` |
+| `stop` | none | `ok`, after which the VMM stops the VM and exits |
+
+The daemon then speaks the agent protocol, from the handshake on, over each connection it gets from `agent_connect`.
 
 ## Versioning this document
 
