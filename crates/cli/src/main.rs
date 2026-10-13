@@ -9,6 +9,7 @@ mod exec;
 mod init;
 mod policy;
 mod project;
+mod shell;
 
 use std::process::ExitCode;
 
@@ -66,6 +67,11 @@ enum Cmd {
         #[arg(last = true, value_name = "CMD")]
         argv: Vec<String>,
     },
+    /// Interactive shell in the VM.
+    Shell {
+        #[arg(long)]
+        fork: Option<String>,
+    },
     /// Stop this project's VM now.
     Stop {
         #[arg(long)]
@@ -98,6 +104,10 @@ fn main() -> ExitCode {
             commands::run(net, ports, fork)
         }
         Cmd::Exec { fork, argv } => match exec::run(fork, argv) {
+            Ok(code) => return ExitCode::from(code),
+            Err(e) => Err(e),
+        },
+        Cmd::Shell { fork } => match shell::run(fork) {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
