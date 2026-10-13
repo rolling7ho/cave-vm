@@ -94,6 +94,9 @@ dependencies = [
 [[package]]
 name = "cave-vm-daemon"
 version = "0.0.0"
+dependencies = [
+ "sha2",
+]
 
 [[package]]
 name = "cave-vm-hvf"
@@ -120,6 +123,7 @@ name = "cave-vm-vmm"
 version = "0.0.0"
 dependencies = [
  "cave-vm-hvf",
+ "libc",
  "smoltcp",
  "vm-fdt",
 ]

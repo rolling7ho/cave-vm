@@ -12,6 +12,7 @@ pub mod control;
 pub mod exec;
 pub mod files;
 pub mod forward;
+pub mod pty;
 pub mod session;
 pub mod stream;
 pub mod sys;
