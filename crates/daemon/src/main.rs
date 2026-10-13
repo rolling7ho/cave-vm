@@ -44,6 +44,15 @@ fn run() -> std::io::Result<()> {
     launcher.sandbox = Some(images);
     let vms = Arc::new(Vms::new(home.clone(), Arc::new(launcher), Arc::new(source)));
     vms.watch_idle(IDLE_CHECK);
+    let sleeping = Arc::downgrade(&vms);
+    let watched = cave_vm_vmm::host::on_system_sleep(move || {
+        if let Some(vms) = sleeping.upgrade() {
+            vms.suspend_all();
+        }
+    });
+    if let Err(e) = watched {
+        eprintln!("cave-daemon: VMs will not be suspended when the Mac sleeps: {e}");
+    }
     let killed = vms.clean_up()?;
     if killed > 0 {
         eprintln!("cave-daemon: stopped {killed} VMM processes left by an earlier daemon");

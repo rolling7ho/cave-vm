@@ -390,6 +390,39 @@ impl Vms {
             .collect()
     }
 
+    /// Suspends every running VM at once, before the Mac sleeps, and
+    /// returns them. One that cannot be suspended keeps running.
+    pub fn suspend_all(&self) -> Vec<VmId> {
+        let ids: Vec<VmId> = self
+            .vms
+            .lock()
+            .expect("vms lock")
+            .values()
+            .map(|vm| vm.id.clone())
+            .collect();
+        thread::scope(|s| {
+            let suspending: Vec<_> = ids
+                .into_iter()
+                .map(|id| s.spawn(move || (self.suspend(&id), id)))
+                .collect();
+            suspending
+                .into_iter()
+                .filter_map(|t| match t.join() {
+                    Ok((Ok(true), id)) => Some(id),
+                    Ok((Err(e), id)) => {
+                        eprintln!(
+                            "cave-daemon: could not suspend {} before sleep: {}",
+                            display_name(&id),
+                            e.message
+                        );
+                        None
+                    }
+                    Ok((Ok(false), _)) | Err(_) => None,
+                })
+                .collect()
+        })
+    }
+
     /// Calls [`Vms::suspend_idle`] every `interval` on its own thread for
     /// as long as the daemon runs.
     pub fn watch_idle(self: &Arc<Self>, interval: Duration) {

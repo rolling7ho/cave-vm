@@ -984,6 +984,34 @@ fn an_unused_vm_is_suspended_after_its_idle_time() {
     assert!(r.vms.suspend_idle().is_empty());
 }
 
+#[test]
+fn every_running_vm_is_suspended_before_the_mac_sleeps() {
+    let r = rig("sleep", NORMAL);
+    let (id, project) = snapshot_project(&r);
+    assert!(matches!(
+        r.request(Request::Start {
+            vm: id.clone(),
+            net: None,
+            ports: Vec::new()
+        }),
+        Reply::Policy(_)
+    ));
+    assert!(matches!(r.start(), Reply::Policy(_)));
+    let mut suspended = r.vms.suspend_all();
+    suspended.sort_by(|a, b| a.project.cmp(&b.project));
+    let mut want = vec![id, vm()];
+    want.sort_by(|a, b| a.project.cmp(&b.project));
+    assert_eq!(suspended, want);
+    assert!(project.join(".cave/suspended/memory").exists());
+    assert!(
+        PathBuf::from(vm().project)
+            .join(".cave/suspended/memory")
+            .exists()
+    );
+    // Nothing is left running, so a second sleep has nothing to do.
+    assert!(r.vms.suspend_all().is_empty());
+}
+
 impl Rig {
     fn fork(&self, id: &VmId, name: Option<&str>, from: Option<&str>) -> Reply {
         self.request(Request::Fork {
