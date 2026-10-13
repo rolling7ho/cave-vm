@@ -183,14 +183,10 @@ impl Vms {
         // Bound first, so a port in use is reported before the VM boots.
         let bound = bind_all(ports)?;
         vm.set(slot, Slot::Busy);
-        let result = self
-            .source
-            .prepare(&vm.id, net, ports)
-            .and_then(|prepared| self.launch(&vm, prepared))
-            .map(|mut running| {
-                running.forwards = serve_all(&vm, bound);
-                running
-            });
+        let result = self.boot(&vm, net, ports).map(|mut running| {
+            running.forwards = serve_all(&vm, bound);
+            running
+        });
         let slot = vm.slot.lock().expect("vm lock");
         match result {
             Ok(running) => {
@@ -368,6 +364,7 @@ impl Vms {
             .map(|vm| {
                 let state = match *vm.slot.lock().expect("vm lock") {
                     Slot::Running(_) => VmState::Running,
+                    Slot::Stopped if snapshots::is_suspended(&vm.id) => VmState::Suspended,
                     Slot::Stopped | Slot::Busy => VmState::Stopped,
                 };
                 ListEntry {
@@ -392,6 +389,25 @@ impl Vms {
         projects.sort();
         projects.dedup();
         for project in projects {
+            // A suspended VM the daemon has not seen since it started.
+            let id = VmId {
+                project: project.clone(),
+                fork: None,
+            };
+            let listed = entries
+                .iter()
+                .any(|e| e.project == project && e.kind == EntryKind::Vm);
+            if !listed && snapshots::is_suspended(&id) {
+                entries.push(ListEntry {
+                    project: project.clone(),
+                    name: display_name(&id),
+                    kind: EntryKind::Vm,
+                    state: Some(VmState::Suspended),
+                    auto: false,
+                    size: 0,
+                    created_unix: 0,
+                });
+            }
             let known: Vec<String> = entries
                 .iter()
                 .filter(|e| e.project == project && e.kind == EntryKind::Fork)

@@ -401,7 +401,11 @@ fn stop_says_when_nothing_is_running() {
     state.lock().unwrap().running = true;
     let out = s.cave(&s.project(), &["stop"]);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(stdout(&out), "Stopped proj\n");
+    let out = stdout(&out);
+    assert!(
+        out.starts_with("Suspended proj (") && out.ends_with("s)\n"),
+        "{out}"
+    );
     assert!(!state.lock().unwrap().running);
 }
 

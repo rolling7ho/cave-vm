@@ -211,7 +211,7 @@ Added by [D20](../ROADMAP.md#decisions). The design has running, suspended and s
 cave stop [--fork <name>]
 ```
 
-Suspends the VM to a snapshot, freeing its memory. The next command that needs the VM restores it with processes intact. If the VM is not running, it says so and exits 0.
+Suspends the VM to a snapshot, freeing its memory, and prints `Suspended <name> (1.2s)`. The next command that needs the VM restores it with processes intact, unless it changes `--net` between `off` and another mode, which boots from the disk ([suspensions](snapshots.md#suspensions)). If the VM is not running, it says so and exits 0. If the VM cannot be saved, it keeps running and the error says why.
 
 ### cave shell
 

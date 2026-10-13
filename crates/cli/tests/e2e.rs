@@ -417,6 +417,53 @@ fn snapshot_and_restore() {
 
 #[test]
 #[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn stop_suspends_and_the_next_command_resumes() {
+    let rig = Rig::new();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    let pid = rig.exec(
+        &["sh", "-c", "setsid sleep 100000 >/dev/null 2>&1 & echo $!"],
+        0,
+    );
+    let pid = pid.trim().to_string();
+
+    let started = Instant::now();
+    let out = rig.cave(&["stop"]);
+    let suspended = started.elapsed();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.starts_with("Suspended proj ("), "{stdout}");
+    let ls = String::from_utf8_lossy(&rig.cave(&["ls"]).stdout).into_owned();
+    assert!(
+        ls.lines()
+            .any(|l| l.starts_with("proj") && l.contains("suspended")),
+        "{ls}"
+    );
+
+    // The next command resumes it with the process from before.
+    let started = Instant::now();
+    rig.exec(&["kill", "-0", &pid], 0);
+    let resumed = started.elapsed();
+    assert!(!rig.project().join(".cave/suspended").exists());
+
+    // Turning the network off cannot resume, so it boots from the disk.
+    assert!(rig.cave(&["stop"]).status.success());
+    let out = rig.cave(&["run", "--net", "off"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    rig.exec(&["sh", "-c", &format!("! kill -0 {pid} 2>/dev/null")], 0);
+
+    eprintln!("cave stop: {suspended:?}; resumed and ran a command: {resumed:?}");
+}
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
 fn forks_run_on_their_own() {
     let rig = Rig::new();
     assert!(rig.cave(&["init", "--sealed"]).status.success());

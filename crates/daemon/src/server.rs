@@ -145,7 +145,7 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
         Request::Snapshot { vm, name } => vms
             .snapshot(&vm, name.as_deref())
             .map(|(name, size)| Reply::Snapshot { name, size }),
-        Request::Stop { vm } => vms.stop(&vm).map(|()| Reply::Ok),
+        Request::Stop { vm } => vms.suspend(&vm).map(|_| Reply::Ok),
         Request::List { project } => Ok(Reply::List {
             entries: vms.list(project.as_deref()),
         }),

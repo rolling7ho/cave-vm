@@ -73,7 +73,8 @@ fn fake_vmm() {
                 let dir = PathBuf::from(dir);
                 fs::write(dir.join("state"), "state").unwrap();
                 fs::write(dir.join("memory"), "memory").unwrap();
-                fs::copy(&config.disk, dir.join("disk.img")).unwrap();
+                let disk = fs::read(&config.disk).unwrap_or_default();
+                fs::write(dir.join("disk.img"), disk).unwrap();
                 FromVmm::Ok
             }
             ToVmm::Ping => FromVmm::Pong,
@@ -226,6 +227,9 @@ impl Drop for Rig {
     fn drop(&mut self) {
         self.vms.stop_all();
         let _ = fs::remove_dir_all(self.home.root());
+        if let Some(dir) = PathBuf::from(vm().project).parent() {
+            let _ = fs::remove_dir_all(dir);
+        }
     }
 }
 
@@ -250,9 +254,16 @@ fn rig(name: &str, mode: &str) -> Rig {
     Rig { home, vms, source }
 }
 
+/// The VM of this test's own project folder, named after the test's
+/// thread so tests running at once do not share one.
 fn vm() -> VmId {
+    let thread = thread::current();
+    let test = thread.name().unwrap_or("main").replace("::", "-");
+    let project = std::env::temp_dir()
+        .join(format!("cvd-proj-{}-{test}", std::process::id()))
+        .join("app");
     VmId {
-        project: "/Users/someone/projects/app".into(),
+        project: project.to_string_lossy().into_owned(),
         fork: None,
     }
 }
@@ -343,11 +354,13 @@ fn start_list_and_stop() {
     assert!(matches!(r.start(), Reply::Policy(_)));
     assert_eq!(r.source.prepared.load(Ordering::SeqCst), 1);
 
+    // `stop` suspends it (D20), and the next start resumes it.
     assert_eq!(r.request(Request::Stop { vm: vm() }), Reply::Ok);
-    assert_eq!(r.state(), Some(VmState::Stopped));
+    assert_eq!(r.state(), Some(VmState::Suspended));
     assert!(!r.pid_file().exists());
     // Stopping again is fine.
     assert_eq!(r.request(Request::Stop { vm: vm() }), Reply::Ok);
+    assert_eq!(r.state(), Some(VmState::Suspended));
 }
 
 #[test]
@@ -842,6 +855,61 @@ fn a_restore_falls_back_to_the_disk_when_the_memory_cannot_be_loaded() {
     assert_eq!(r.state(), Some(VmState::Running));
 }
 
+#[test]
+fn stop_suspends_and_the_next_start_resumes() {
+    let r = rig("suspend", NORMAL);
+    let (id, project) = snapshot_project(&r);
+    let start = |net| {
+        r.request(Request::Start {
+            vm: id.clone(),
+            net,
+            ports: Vec::new(),
+        })
+    };
+    let suspended = project.join(".cave/suspended");
+    let marker = project.join(".cave/restored-from");
+    assert!(matches!(start(None), Reply::Policy(_)));
+    assert_eq!(r.request(Request::Stop { vm: id.clone() }), Reply::Ok);
+    assert!(suspended.join("memory").exists());
+    let listed = match r.request(Request::List {
+        project: Some(id.project.clone()),
+    }) {
+        Reply::List { entries } => entries,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0].state, Some(VmState::Suspended));
+
+    // A snapshot of the suspended VM keeps its memory.
+    assert!(matches!(
+        r.snapshot(&id, Some("asleep")),
+        Reply::Snapshot { .. }
+    ));
+    assert_eq!(manifest(&project, "asleep")["has_memory"], true);
+
+    // Starting resumes it and removes the suspension.
+    assert!(matches!(start(None), Reply::Policy(_)));
+    let restored = fs::read_to_string(&marker).unwrap();
+    assert!(restored.ends_with("/suspended 2"), "{restored}");
+    assert!(!suspended.exists());
+    assert_eq!(r.state(), Some(VmState::Running));
+
+    // A start that turns the network off cannot resume, so it boots.
+    assert_eq!(r.request(Request::Stop { vm: id.clone() }), Reply::Ok);
+    assert!(matches!(start(Some(NetMode::Off)), Reply::Policy(p) if p.net == NetMode::Off));
+    assert!(!marker.exists());
+    assert!(!suspended.exists());
+
+    // Restoring a snapshot drops a suspension.
+    assert_eq!(r.request(Request::Stop { vm: id.clone() }), Reply::Ok);
+    assert!(suspended.exists());
+    assert!(matches!(
+        r.restore(&id, Some("asleep")),
+        Reply::Restored { .. }
+    ));
+    assert!(!suspended.exists());
+}
+
 impl Rig {
     fn fork(&self, id: &VmId, name: Option<&str>, from: Option<&str>) -> Reply {
         self.request(Request::Fork {
@@ -923,7 +991,7 @@ fn a_fork_of_the_running_vm_starts_from_its_memory() {
         );
     }
 
-    // A stopped fork is listed, and starts again from its own disk.
+    // A stopped fork is listed as suspended, and resumes on its next start.
     assert_eq!(
         r.request(Request::Stop {
             vm: fork_id(&id, "fork-1")
@@ -932,7 +1000,7 @@ fn a_fork_of_the_running_vm_starts_from_its_memory() {
     );
     assert!(
         r.forks(&id)
-            .contains(&("fork-1".to_string(), Some(VmState::Stopped)))
+            .contains(&("fork-1".to_string(), Some(VmState::Suspended)))
     );
     assert!(matches!(
         r.request(Request::Start {
@@ -942,7 +1010,8 @@ fn a_fork_of_the_running_vm_starts_from_its_memory() {
         }),
         Reply::Policy(p) if p.name == "app"
     ));
-    assert!(!dir.join("restored-from").exists());
+    assert!(dir.join("restored-from").exists());
+    assert!(!dir.join("suspended").exists());
 
     // `cave rm fork-1` stops and removes just the fork.
     assert_eq!(
