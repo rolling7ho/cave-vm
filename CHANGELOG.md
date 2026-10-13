@@ -17,6 +17,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 - `cave`: the command line's first commands, `init`, `run` (prints the startup policy and echoes widening flags), `stop` and `ls`, with project discovery, errors that say how to fix the problem, and a daemon client that starts the daemon on first use (P3.11a).
 - `cave-vm-daemon`: the daemon socket (`daemon.sock`, user-only) with the hello handshake, one VMM process per VM with `start`, `stop` and `list`, crash detection so the next `start` relaunches a crashed VMM, and startup cleanup of VMM processes an earlier daemon left behind. The VMM control link and its messages (`cave-vm-proto::vmm`) are specified in `docs/protocol.md` (P3.10a).
+- `cave-vm-daemon` reads `cave.toml` with every key and default from `docs/config.md`, refuses unknown keys and bad values with the line and a fix, and writes the image pin into the file without changing its comments or layout (P3.10b, D27). Adds `toml_edit`.
 - `cave-vm-proto`: the daemon API requests and replies, with the reply objects written down in `docs/protocol.md` (P3.1b).
 - `cave-vm-proto`: the length-prefixed JSON frame codec, the `hello` version handshake, `error` messages and every guest agent message from `docs/protocol.md` (P3.1).
 - `cave-vm-agent`: the guest agent's exec with streamed output, stdin and signals, checked file reads and atomic file writes, port forwarding to guest loopback, and the control connection for ping, snapshot preparation and clock sync after restore (P3.6a).
