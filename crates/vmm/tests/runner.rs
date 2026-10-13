@@ -389,3 +389,33 @@ fn virtio_state_moves_to_a_machine_with_the_same_devices() {
     let err = empty.devices().restore_virtio(&saved).unwrap_err();
     assert!(err.contains("1 virtio devices"), "{err}");
 }
+
+#[test]
+fn a_restore_drives_every_interrupt_line_to_match_the_devices() {
+    // Saved with nothing pending, but the restored interrupt controller
+    // may hold the lines high: they are lowered before the guest runs.
+    let mut old = Machine::new(Vec::new(), None, 1);
+    old.add_virtio(blank_transport());
+    let saved = old.devices().save_virtio();
+
+    let mock = MockBackend::new();
+    mock.script(0, [Step::exit(hvc()).with_reg(x(0), 0x8400_0008)]);
+    let mut machine = Machine::new(Vec::new(), None, 1);
+    machine.add_virtio(blank_transport());
+    machine.devices().restore_virtio(&saved).unwrap();
+    let mut vcpu = start(&mock);
+    assert_eq!(
+        runner::run(&mock, &mut vcpu, &machine).unwrap(),
+        Stop::PowerOff
+    );
+    let events = mock.events();
+    for intid in [virtio_intid(0), uart_intid()] {
+        assert!(
+            events.contains(&Event::IrqLine {
+                intid,
+                level: false
+            }),
+            "{intid}: {events:?}"
+        );
+    }
+}

@@ -165,8 +165,13 @@ pub fn serve(link: &mut UnixStream, vm: &dyn RunningVm) -> io::Result<Ending> {
     }
 }
 
-/// How long one attempt to greet the agent may take.
+/// How long one attempt to greet the agent may take, at most.
 const AGENT_ATTEMPT: Duration = Duration::from_secs(2);
+/// How long the first attempt may take. Each failed attempt doubles it up
+/// to [`AGENT_ATTEMPT`]. Just after a restore, a connection can be lost to
+/// the guest's transport reset and never answered; a short first wait
+/// tries again soon instead of after the full attempt time.
+const FIRST_AGENT_ATTEMPT: Duration = Duration::from_millis(100);
 /// The pause between attempts while the guest boots.
 const AGENT_RETRY: Duration = Duration::from_millis(20);
 /// How long the agent may take to flush the guest's file systems before a
@@ -182,6 +187,7 @@ pub fn wait_for_agent(
     timeout: Duration,
 ) -> Result<(), ErrorMessage> {
     let deadline = Instant::now() + timeout;
+    let mut attempt = FIRST_AGENT_ATTEMPT;
     loop {
         if gone() {
             return Err(ErrorMessage::new(
@@ -190,10 +196,11 @@ pub fn wait_for_agent(
             ));
         }
         if let Ok(mut stream) = connect()
-            && greet(&mut stream).is_ok()
+            && greet(&mut stream, attempt).is_ok()
         {
             return Ok(());
         }
+        attempt = (attempt * 2).min(AGENT_ATTEMPT);
         if Instant::now() >= deadline {
             return Err(ErrorMessage::new(
                 ErrorCode::Internal,
@@ -234,8 +241,8 @@ fn open_control(stream: &mut UnixStream) -> io::Result<()> {
 
 /// The handshake, then `ping` and the clock (`restored`) on a control
 /// connection, as the protocol asks before `booted`.
-fn greet(stream: &mut UnixStream) -> io::Result<()> {
-    stream.set_read_timeout(Some(AGENT_ATTEMPT))?;
+fn greet(stream: &mut UnixStream, attempt: Duration) -> io::Result<()> {
+    stream.set_read_timeout(Some(attempt))?;
     open_control(stream)?;
     send_agent(stream, &Message::Ping)?;
     if read_agent(stream)? != Message::Pong {
