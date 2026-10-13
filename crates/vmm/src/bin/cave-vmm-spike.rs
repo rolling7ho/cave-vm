@@ -13,8 +13,8 @@
 //! instead of booting (P2.9). `--cpus` sets the number of vCPUs, each on
 //! its own thread (default 1); a restore uses the snapshot's count.
 //! `--disk <file>` attaches a raw image as a virtio block device (`/dev/vda`
-//! in the guest); it cannot be combined with snapshots yet, since device
-//! state is not saved until phase 4.
+//! in the guest). A snapshot saves the device's state but not the disk, so
+//! restore with the same `--disk` file, unchanged since the snapshot.
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn main() {
@@ -49,7 +49,7 @@ mod spike {
     use cave_vm_vmm::runner::{self, Machine, Stop};
     use cave_vm_vmm::snapshot::{self, State, VcpuState};
 
-    const USAGE: &str = "usage: cave-vmm-spike (--kernel <Image> [--initrd <file>] [--memory <MiB>] [--cpus <n>] [--disk <file>] [--cmdline <text>] | --restore <dir>) [--stop-at <text> [--snapshot <dir>]]";
+    const USAGE: &str = "usage: cave-vmm-spike (--kernel <Image> [--initrd <file>] [--memory <MiB>] [--cpus <n>] [--disk <file>] [--cmdline <text>] | --restore <dir> [--disk <file>]) [--stop-at <text> [--snapshot <dir>]]";
     const DEFAULT_CMDLINE: &str = "console=ttyAMA0 earlycon=pl011,0x9000000 rdinit=/init";
 
     struct Args {
@@ -106,11 +106,6 @@ mod spike {
         }
         if kernel.is_some() == restore.is_some() {
             return Err(format!("give either --kernel or --restore\n{USAGE}"));
-        }
-        if disk.is_some() && (snapshot.is_some() || restore.is_some()) {
-            return Err(format!(
-                "--disk cannot be used with --snapshot or --restore yet\n{USAGE}"
-            ));
         }
         if snapshot.is_some() && stop_at.is_none() {
             return Err(format!("--snapshot needs --stop-at\n{USAGE}"));
@@ -253,6 +248,7 @@ mod spike {
         let machine = machine;
         if let Some(state) = &saved {
             machine.devices().uart.set_state(&state.uart);
+            machine.devices().restore_virtio(&state.devices)?;
             let power: Vec<_> = state.vcpus.iter().map(|v| v.power).collect();
             machine.set_power(&power);
         }
@@ -327,6 +323,7 @@ mod spike {
             restored.map(|()| (ended, irqchip, power))
         })?;
         let uart = machine.devices().uart.state();
+        let devices = machine.devices().save_virtio();
         drop(machine);
 
         eprintln!();
@@ -366,7 +363,7 @@ mod spike {
             for (state, power) in states.iter_mut().zip(power) {
                 state.power = power;
             }
-            save_snapshot(dir, irqchip?, states, &memory, uart)?;
+            save_snapshot(dir, irqchip?, states, &memory, uart, devices)?;
         }
         Ok(())
     }
@@ -468,6 +465,7 @@ mod spike {
         vcpus: Vec<VcpuState>,
         memory: &GuestMemory,
         uart: cave_vm_vmm::devices::pl011::Pl011State,
+        devices: Vec<cave_vm_vmm::devices::virtio::mmio::TransportState>,
     ) -> Result<(), String> {
         let started = Instant::now();
         std::fs::create_dir_all(dir)
@@ -476,6 +474,7 @@ mod spike {
             memory_size: memory.regions().iter().map(|r| r.size() as u64).sum(),
             irqchip,
             uart,
+            devices,
             vcpus,
         };
         snapshot::save(dir, &state, memory).map_err(err)?;

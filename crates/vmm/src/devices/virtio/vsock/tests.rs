@@ -392,3 +392,32 @@ fn host_connection_before_the_driver_starts_fails() {
     let err = dev.connector().connect(AGENT_PORT).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::NotConnected);
 }
+
+#[test]
+fn a_restored_device_continues_from_the_saved_queues() {
+    let mut r = rig();
+    let _host = r.dev.connector().connect(AGENT_PORT).unwrap();
+    let (request, _) = r.next_packet();
+    assert_eq!(request.op, op::REQUEST);
+    let saved = r.dev.save_queues();
+    assert_eq!(saved.len(), 3, "the event queue is kept too");
+    assert_eq!(saved[RX_QUEUE as usize].next_used, 1);
+    assert_eq!(saved[EVENT_QUEUE as usize].size, 8);
+
+    // A new process: connections to the host are gone, the rings carry on.
+    let mut dev = Vsock::new(GUEST_CID);
+    dev.activate(Activation {
+        memory: r.mem.clone(),
+        queues: saved.clone(),
+        features: 0,
+        interrupt: Interrupt::new(),
+    })
+    .unwrap();
+    assert_eq!(dev.save_queues(), saved);
+    r.dev = dev;
+    r.dev.queue_notify(RX_QUEUE);
+    let _host = r.dev.connector().connect(AGENT_PORT).unwrap();
+    let (request, _) = r.next_packet();
+    assert_eq!(request.op, op::REQUEST);
+    assert_eq!(r.dev.save_queues()[RX_QUEUE as usize].next_used, 2);
+}

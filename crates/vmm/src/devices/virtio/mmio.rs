@@ -44,6 +44,23 @@ const CONFIG_GENERATION: u64 = 0x0fc;
 /// Start of device configuration space.
 pub const CONFIG: u64 = 0x100;
 
+/// A transport's state in a snapshot: its registers, and its queues with
+/// the device's position in each.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransportState {
+    /// The device type, checked on restore.
+    pub device_type: u32,
+    pub status: u32,
+    pub device_features_sel: u32,
+    pub driver_features_sel: u32,
+    pub driver_features: u64,
+    pub queue_sel: u32,
+    pub config_generation: u32,
+    pub interrupt_status: u32,
+    pub activated: bool,
+    pub queues: Vec<Queue>,
+}
+
 /// One virtio-mmio slot: the transport registers in front of a device.
 pub struct MmioTransport {
     device: Box<dyn VirtioDevice>,
@@ -90,6 +107,78 @@ impl MmioTransport {
     /// The device status register.
     pub fn status(&self) -> u32 {
         self.status
+    }
+
+    /// The transport's state, for a snapshot. The vCPUs must be paused, so
+    /// no register access or queue notification is half done.
+    pub fn save(&self) -> TransportState {
+        TransportState {
+            device_type: self.device.device_type(),
+            status: self.status,
+            device_features_sel: self.device_features_sel,
+            driver_features_sel: self.driver_features_sel,
+            driver_features: self.driver_features,
+            queue_sel: self.queue_sel,
+            config_generation: self.config_generation,
+            interrupt_status: self.interrupt.status(),
+            activated: self.activated,
+            queues: if self.activated {
+                self.device.save_queues()
+            } else {
+                self.queues.clone()
+            },
+        }
+    }
+
+    /// Restores saved state into a new transport over the same kind of
+    /// device. An active device is activated again with its saved queues,
+    /// so it carries on from the same ring positions. A device that cannot
+    /// start again is reported to the driver as needing a reset, as on
+    /// first activation.
+    pub fn restore(&mut self, state: &TransportState) -> Result<(), String> {
+        if state.device_type != self.device.device_type() {
+            return Err(format!(
+                "the snapshot has virtio device type {} where this VM has {}",
+                state.device_type,
+                self.device.device_type()
+            ));
+        }
+        let sizes: Vec<u16> = state.queues.iter().map(|q| q.max_size).collect();
+        if sizes != self.device.queue_max_sizes() {
+            return Err(format!(
+                "the snapshot's virtio device type {} has queues {sizes:?}, this build has {:?}",
+                state.device_type,
+                self.device.queue_max_sizes()
+            ));
+        }
+        if self.activated {
+            self.device.reset();
+        }
+        self.status = state.status;
+        self.device_features_sel = state.device_features_sel;
+        self.driver_features_sel = state.driver_features_sel;
+        self.driver_features = state.driver_features;
+        self.queue_sel = state.queue_sel;
+        self.config_generation = state.config_generation;
+        self.queues = state.queues.clone();
+        self.interrupt.clear();
+        self.activated = false;
+        if state.activated {
+            let activation = Activation {
+                memory: self.memory.clone(),
+                queues: state.queues.clone(),
+                features: self.driver_features,
+                interrupt: self.interrupt.clone(),
+            };
+            match self.device.activate(activation) {
+                Ok(()) => self.activated = true,
+                Err(_) => self.needs_reset(),
+            }
+        }
+        if state.interrupt_status != 0 {
+            self.interrupt.raise(state.interrupt_status);
+        }
+        Ok(())
     }
 
     fn device_features(&self) -> u64 {
@@ -345,6 +434,9 @@ mod tests {
             self.log.lock().unwrap().push("reset".into());
             self.active = None;
         }
+        fn save_queues(&self) -> Vec<Queue> {
+            self.active.as_ref().unwrap().queues.clone()
+        }
     }
 
     fn r32(t: &MmioTransport, offset: u64) -> u32 {
@@ -578,5 +670,73 @@ mod tests {
         assert_eq!(b, [0, 0]);
         t.write(STATUS, &[1]);
         assert_eq!(r32(&t, STATUS), 0);
+    }
+
+    #[test]
+    fn a_restored_transport_continues_mid_queue() {
+        let (mut t, mem) = transport(Echo::default());
+        let mut q0 = DriverQueue::at(&mem, 8, 0);
+        let q1 = DriverQueue::at(&mem, 4, 1);
+        init(&mut t, &[(0, &q0), (1, &q1)]);
+        let first = q0.add(&mem, &[b"one"], &[3]);
+        w32(&mut t, QUEUE_NOTIFY, 0);
+        w32(&mut t, QUEUE_SEL, 1);
+        // Made available but not yet notified when the snapshot is taken.
+        let second = q0.add(&mem, &[b"two"], &[3]);
+        let saved = t.save();
+        assert!(saved.activated);
+        assert_eq!(saved.queues[0].next_avail, 1);
+        assert_eq!(saved.queues[0].next_used, 1);
+        assert_eq!(saved.interrupt_status, irq::USED_BUFFER);
+
+        // A new process: a new device and transport over the same memory.
+        let echo = Echo::default();
+        let log = Arc::clone(&echo.log);
+        let mut restored = MmioTransport::new(Box::new(echo), mem.clone());
+        restored.restore(&saved).unwrap();
+        assert_eq!(restored.save(), saved);
+        assert!(restored.interrupt().level());
+        assert_eq!(r32(&restored, QUEUE_SEL), 0, "QueueSel is write-only");
+        assert_eq!(restored.queue_sel, 1);
+        assert_eq!(
+            r32(&restored, STATUS) & status::DRIVER_OK,
+            status::DRIVER_OK
+        );
+
+        w32(&mut restored, QUEUE_NOTIFY, 0);
+        assert_eq!(
+            q0.used(&mem),
+            vec![(u32::from(first), 3), (u32::from(second), 3)]
+        );
+        assert_eq!(&q0.written(&mem, second, 0, 3), b"TWO");
+        assert_eq!(*log.lock().unwrap(), ["activate", "notify 0"]);
+    }
+
+    #[test]
+    fn an_inactive_transport_restores_its_registers() {
+        let (mut t, _) = transport(Echo::default());
+        w32(&mut t, STATUS, status::ACKNOWLEDGE | status::DRIVER);
+        w32(&mut t, QUEUE_SEL, 1);
+        w32(&mut t, QUEUE_NUM, 2);
+        let saved = t.save();
+        let echo = Echo::default();
+        let log = Arc::clone(&echo.log);
+        let (mut restored, _) = transport(echo);
+        restored.restore(&saved).unwrap();
+        assert_eq!(restored.save(), saved);
+        assert_eq!(restored.queues[1].size, 2);
+        assert!(log.lock().unwrap().is_empty(), "not activated");
+    }
+
+    #[test]
+    fn restore_refuses_another_device() {
+        let (t, _) = transport(Echo::default());
+        let mut saved = t.save();
+        saved.device_type = 7;
+        let (mut other, _) = transport(Echo::default());
+        assert!(other.restore(&saved).unwrap_err().contains("type 7"));
+        let mut saved = t.save();
+        saved.queues.pop();
+        assert!(other.restore(&saved).unwrap_err().contains("queues"));
     }
 }

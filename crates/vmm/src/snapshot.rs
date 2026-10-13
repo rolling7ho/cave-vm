@@ -2,7 +2,7 @@
 //! in another process.
 //!
 //! A snapshot directory holds `state`, a small binary file with the vCPU,
-//! interrupt controller and UART state, and `memory`, guest RAM as a sparse
+//! interrupt controller, UART and virtio device state, and `memory`, guest RAM as a sparse
 //! file (all-zero pages are holes). Restore maps `memory` copy-on-write, so
 //! it costs no copy and the file stays unchanged.
 //!
@@ -16,6 +16,8 @@ use std::path::Path;
 
 use crate::backend::{self, Backend, BackendVcpu, IccReg, RedistReg, Reg, SysReg};
 use crate::devices::pl011::Pl011State;
+use crate::devices::virtio::Queue;
+use crate::devices::virtio::mmio::TransportState;
 use crate::layout;
 use crate::memory::{self, FileMode, GuestMemory, PAGE_SIZE, Region};
 use crate::runner::Power;
@@ -25,12 +27,12 @@ use cave_vm_hvf::{
 };
 
 const MAGIC: &[u8; 8] = b"CAVESNAP";
-/// Version 3 has each vCPU's PSCI power state and its redistributor's SGI
-/// and PPI registers. Older files are refused: version 1 has neither, and
-/// version 2 (written only by builds of the unmerged SMP branch) has the
-/// power state but not the redistributor state. Without that state the
-/// restored guest never gets another timer interrupt.
-const VERSION: u32 = 3;
+/// Version 4 adds the virtio devices. Version 3 has each vCPU's PSCI power
+/// state and its redistributor's SGI and PPI registers. Older files are
+/// refused: they have no device state, and versions 1 and 2 also lack
+/// state without which the restored guest never gets another timer
+/// interrupt.
+const VERSION: u32 = 4;
 const STATE_FILE: &str = "state";
 const MEMORY_FILE: &str = "memory";
 
@@ -57,6 +59,8 @@ pub struct State {
     pub memory_size: u64,
     pub irqchip: Vec<u8>,
     pub uart: Pl011State,
+    /// Virtio transports and their queues, by slot.
+    pub devices: Vec<TransportState>,
     pub vcpus: Vec<VcpuState>,
 }
 
@@ -245,6 +249,10 @@ fn encode(state: &State) -> Vec<u8> {
         put_u32(&mut out, reg);
     }
     put_bytes(&mut out, &state.uart.rx);
+    put_u32(&mut out, state.devices.len() as u32);
+    for device in &state.devices {
+        put_transport(&mut out, device);
+    }
     put_u32(&mut out, state.vcpus.len() as u32);
     for vcpu in &state.vcpus {
         put_u32(&mut out, vcpu.regs.len() as u32);
@@ -304,6 +312,9 @@ fn decode(bytes: &[u8]) -> Result<State> {
         *reg = r.u32()?;
     }
     uart.rx = r.bytes()?.to_vec();
+    let devices = (0..r.u32()?)
+        .map(|_| r.transport())
+        .collect::<Result<_>>()?;
     let mut vcpus = Vec::new();
     for _ in 0..r.u32()? {
         let regs = (0..r.u32()?)
@@ -381,6 +392,7 @@ fn decode(bytes: &[u8]) -> Result<State> {
         memory_size,
         irqchip,
         uart,
+        devices,
         vcpus,
     })
 }
@@ -402,6 +414,37 @@ fn put_bytes(out: &mut Vec<u8>, b: &[u8]) {
     out.extend_from_slice(b);
 }
 
+fn put_u16(out: &mut Vec<u8>, v: u16) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn put_transport(out: &mut Vec<u8>, t: &TransportState) {
+    for v in [
+        t.device_type,
+        t.status,
+        t.device_features_sel,
+        t.driver_features_sel,
+    ] {
+        put_u32(out, v);
+    }
+    put_u64(out, t.driver_features);
+    for v in [t.queue_sel, t.config_generation, t.interrupt_status] {
+        put_u32(out, v);
+    }
+    out.push(u8::from(t.activated));
+    put_u32(out, t.queues.len() as u32);
+    for q in &t.queues {
+        put_u16(out, q.max_size);
+        put_u16(out, q.size);
+        out.push(u8::from(q.ready));
+        put_u64(out, q.desc_table);
+        put_u64(out, q.avail_ring);
+        put_u64(out, q.used_ring);
+        put_u16(out, q.next_avail);
+        put_u16(out, q.next_used);
+    }
+}
+
 struct Reader<'a> {
     bytes: &'a [u8],
 }
@@ -416,6 +459,24 @@ impl<'a> Reader<'a> {
         Ok(head)
     }
 
+    fn u8(&mut self) -> Result<u8> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn bool(&mut self) -> Result<bool> {
+        match self.u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            other => Err(unknown("flag", u32::from(other))),
+        }
+    }
+
+    fn u16(&mut self) -> Result<u16> {
+        Ok(u16::from_le_bytes(
+            self.take(2)?.try_into().expect("2 bytes"),
+        ))
+    }
+
     fn u32(&mut self) -> Result<u32> {
         Ok(u32::from_le_bytes(
             self.take(4)?.try_into().expect("4 bytes"),
@@ -426,6 +487,38 @@ impl<'a> Reader<'a> {
         Ok(u64::from_le_bytes(
             self.take(8)?.try_into().expect("8 bytes"),
         ))
+    }
+
+    fn transport(&mut self) -> Result<TransportState> {
+        Ok(TransportState {
+            device_type: self.u32()?,
+            status: self.u32()?,
+            device_features_sel: self.u32()?,
+            driver_features_sel: self.u32()?,
+            driver_features: self.u64()?,
+            queue_sel: self.u32()?,
+            config_generation: self.u32()?,
+            interrupt_status: self.u32()?,
+            activated: self.bool()?,
+            queues: (0..self.u32()?)
+                .map(|_| {
+                    let max_size = self.u16()?;
+                    if !max_size.is_power_of_two() {
+                        return Err(unknown("queue size", u32::from(max_size)));
+                    }
+                    Ok(Queue {
+                        max_size,
+                        size: self.u16()?,
+                        ready: self.bool()?,
+                        desc_table: self.u64()?,
+                        avail_ring: self.u64()?,
+                        used_ring: self.u64()?,
+                        next_avail: self.u16()?,
+                        next_used: self.u16()?,
+                    })
+                })
+                .collect::<Result<_>>()?,
+        })
     }
 
     fn bytes(&mut self) -> Result<&'a [u8]> {
@@ -447,6 +540,26 @@ mod tests {
                 regs: [1, 2, 3, 4, 5, 6, 7, 8, 9],
                 rx: b"ls\n".to_vec(),
             },
+            devices: vec![TransportState {
+                device_type: 2,
+                status: 15,
+                device_features_sel: 1,
+                driver_features_sel: 0,
+                driver_features: 1 << 32 | 1 << 9,
+                queue_sel: 0,
+                config_generation: 3,
+                interrupt_status: 1,
+                activated: true,
+                queues: vec![Queue {
+                    ready: true,
+                    desc_table: 0x4000_0000,
+                    avail_ring: 0x4000_1000,
+                    used_ring: 0x4000_2000,
+                    next_avail: 65_000,
+                    next_used: 64_999,
+                    ..Queue::new(256)
+                }],
+            }],
             vcpus: vec![VcpuState {
                 regs: Reg::all().map(|r| (r, u64::from(r.raw()) * 3)).collect(),
                 simd: (0..32).map(|n| u128::MAX - n).collect(),
@@ -491,8 +604,8 @@ mod tests {
     }
 
     #[test]
-    fn versions_1_and_2_are_refused() {
-        for old in [1u32, 2] {
+    fn versions_1_to_3_are_refused() {
+        for old in [1u32, 2, 3] {
             let mut bytes = encode(&sample());
             bytes[8..12].copy_from_slice(&old.to_le_bytes());
             let err = decode(&bytes).unwrap_err().to_string();

@@ -9,7 +9,9 @@ A snapshot is a folder in the project's `.cave/snapshots/<name>/`. This page is 
 | `snapshot.json` | daemon, last | The manifest, below. A folder without one is an unfinished snapshot and is ignored. |
 | `disk.img` | daemon | The project disk, as an APFS clone of `.cave/disk.img`. |
 | `memory` | VMM | Guest RAM. Missing for a snapshot of a stopped VM. |
-| `state` | VMM | vCPU, interrupt-controller, timer and device state. Missing with `memory`. |
+| `state` | VMM | vCPU, interrupt-controller, timer, UART and virtio state. Missing with `memory`. |
+
+The virtio state is each transport's registers and its queues with the device's position in each ring. It leaves out what cannot outlive the VMM process: frames waiting for the guest are dropped, and host vsock connections end, which the guest learns from a transport reset (P4.3).
 
 The manifest is written to a temporary file and renamed into place, so a crash leaves either no manifest or a whole one.
 

@@ -37,6 +37,7 @@ fn vcpu_state_moves_to_a_new_vcpu_and_the_counter_continues() {
         memory_size: 0,
         irqchip: vec![9, 9],
         uart: Pl011State::default(),
+        devices: Vec::new(),
         vcpus: vec![saved.clone()],
     };
     snapshot::restore(&new, &mut b, &state).unwrap();
@@ -59,6 +60,7 @@ fn memory_round_trips_through_a_sparse_file() {
         memory_size: size,
         irqchip: Vec::new(),
         uart: Pl011State::default(),
+        devices: Vec::new(),
         vcpus: Vec::new(),
     };
     snapshot::save(&dir, &state, &memory).unwrap();

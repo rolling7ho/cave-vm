@@ -275,6 +275,17 @@ impl VirtioDevice for Net {
         rx.active = None;
         rx.backlog.clear();
     }
+
+    /// Frames waiting in the backlog are not saved: they are dropped, as
+    /// a network may drop any frame.
+    fn save_queues(&self) -> Vec<Queue> {
+        let rx = self.rx.lock().expect("net rx lock");
+        [rx.active.as_ref(), self.tx.as_ref()]
+            .into_iter()
+            .flatten()
+            .map(|a| a.queue.clone())
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -477,5 +488,43 @@ mod tests {
         .join()
         .unwrap();
         assert_eq!(r.rxq.used(&r.mem).len(), 4);
+    }
+
+    #[test]
+    fn a_restored_device_continues_from_the_saved_queues() {
+        let mut r = rig();
+        let tx1 = r.txq.add(&r.mem, &[&[0u8; HEADER_SIZE], &frame(60)], &[]);
+        r.net.queue_notify(TX_QUEUE);
+        let rx1 = r.rxq.add(&r.mem, &[], &[2048]);
+        let rx2 = r.rxq.add(&r.mem, &[], &[2048]);
+        r.net.queue_notify(RX_QUEUE);
+        assert!(r.receiver.deliver(&frame(70)));
+        let tx2 = r.txq.add(&r.mem, &[&[0u8; HEADER_SIZE], &frame(61)], &[]);
+        let saved = r.net.save_queues();
+        assert_eq!(saved.len(), 2);
+        assert_eq!((saved[0].next_avail, saved[1].next_avail), (1, 1));
+
+        let sent = Recorder::default();
+        let mut net = Net::new(MAC, Box::new(sent.clone()));
+        net.activate(Activation {
+            memory: r.mem.clone(),
+            queues: saved.clone(),
+            features: features::MAC | features::STATUS,
+            interrupt: Interrupt::new(),
+        })
+        .unwrap();
+        assert_eq!(net.save_queues(), saved);
+        net.queue_notify(TX_QUEUE);
+        assert_eq!(*sent.0.lock().unwrap(), vec![frame(61)]);
+        assert_eq!(
+            r.txq.used(&r.mem),
+            vec![(u32::from(tx1), 0), (u32::from(tx2), 0)]
+        );
+        assert!(net.receiver().deliver(&frame(71)));
+        let len = (HEADER_SIZE + 70) as u32;
+        assert_eq!(
+            r.rxq.used(&r.mem),
+            vec![(u32::from(rx1), len), (u32::from(rx2), len + 1)]
+        );
     }
 }
