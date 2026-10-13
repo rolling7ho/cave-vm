@@ -38,6 +38,7 @@ fn vcpu_state_moves_to_a_new_vcpu_and_the_counter_continues() {
         irqchip: vec![9, 9],
         uart: Pl011State::default(),
         devices: Vec::new(),
+        guest_flows: Vec::new(),
         vcpus: vec![saved.clone()],
     };
     snapshot::restore(&new, &mut b, &state).unwrap();
@@ -61,6 +62,7 @@ fn memory_round_trips_through_a_sparse_file() {
         irqchip: Vec::new(),
         uart: Pl011State::default(),
         devices: Vec::new(),
+        guest_flows: Vec::new(),
         vcpus: Vec::new(),
     };
     snapshot::save(&dir, &state, &memory).unwrap();
@@ -116,7 +118,7 @@ fn a_running_machine_is_snapshotted_with_its_disk_and_runs_on() {
         while runs() == 0 {
             std::thread::yield_now();
         }
-        snapshot::take(&snap, &machine, &mock, &memory, &disk).unwrap();
+        snapshot::take(&snap, &machine, &mock, &memory, &disk, None).unwrap();
         // It runs on after the snapshot.
         while runs() < 2 {
             std::thread::yield_now();
@@ -144,7 +146,7 @@ fn a_running_machine_is_snapshotted_with_its_disk_and_runs_on() {
     memory.write(RAM_BASE + 0x100, b"again").unwrap();
     let paused = Machine::new(Vec::new(), None, 1);
     paused.request_stop();
-    assert!(snapshot::take(&snap, &paused, &mock, &memory, &disk).is_err());
+    assert!(snapshot::take(&snap, &paused, &mock, &memory, &disk, None).is_err());
     let state = snapshot::load_state(&snap).unwrap();
     snapshot::save(&snap, &state, &memory).unwrap();
     restored.read(RAM_BASE + 0x100, &mut buf).unwrap();

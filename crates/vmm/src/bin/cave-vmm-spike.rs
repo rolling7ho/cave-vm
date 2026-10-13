@@ -475,6 +475,7 @@ mod spike {
             irqchip,
             uart,
             devices,
+            guest_flows: Vec::new(),
             vcpus,
         };
         snapshot::save(dir, &state, memory).map_err(err)?;

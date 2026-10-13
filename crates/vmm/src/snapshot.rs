@@ -2,7 +2,8 @@
 //! in another process.
 //!
 //! A snapshot directory holds `state`, a small binary file with the vCPU,
-//! interrupt controller, UART and virtio device state, and `memory`, guest RAM as a sparse
+//! interrupt controller, UART and virtio device state and the guest's open
+//! TCP connections, and `memory`, guest RAM as a sparse
 //! file (all-zero pages are holes). Restore maps `memory` copy-on-write, so
 //! it costs no copy and the file stays unchanged.
 //!
@@ -12,6 +13,7 @@
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::Path;
 
 use crate::backend::{self, Backend, BackendVcpu, IccReg, RedistReg, Reg, SysReg};
@@ -21,6 +23,7 @@ use crate::devices::virtio::mmio::TransportState;
 use crate::host;
 use crate::layout;
 use crate::memory::{self, FileMode, GuestMemory, PAGE_SIZE, Region};
+use crate::nat::{FlowKey, OpenFlows};
 use crate::runner::{self, Machine, Power};
 
 use cave_vm_hvf::{
@@ -28,12 +31,13 @@ use cave_vm_hvf::{
 };
 
 const MAGIC: &[u8; 8] = b"CAVESNAP";
-/// Version 4 adds the virtio devices. Version 3 has each vCPU's PSCI power
+/// Version 5 adds the guest's open TCP connections. Version 4 adds the
+/// virtio devices. Version 3 has each vCPU's PSCI power
 /// state and its redistributor's SGI and PPI registers. Older files are
 /// refused: they have no device state, and versions 1 and 2 also lack
 /// state without which the restored guest never gets another timer
 /// interrupt.
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 const STATE_FILE: &str = "state";
 const MEMORY_FILE: &str = "memory";
 /// The disk clone [`take`] writes next to `state` and `memory`.
@@ -64,6 +68,9 @@ pub struct State {
     pub uart: Pl011State,
     /// Virtio transports and their queues, by slot.
     pub devices: Vec<TransportState>,
+    /// The guest's TCP connections through the network stack. None
+    /// survives a restore; the restored stack resets each.
+    pub guest_flows: Vec<FlowKey>,
     pub vcpus: Vec<VcpuState>,
 }
 
@@ -186,17 +193,20 @@ pub fn restore_vcpu<V: BackendVcpu>(
 /// Snapshots a running VM: pauses it, writes `state` and `memory` into
 /// `dir` (created if missing) with an APFS clone of `disk` as
 /// [`DISK_FILE`], and lets it run on, whether or not that worked. The disk
-/// is cloned while the guest is paused, so it matches memory.
+/// is cloned while the guest is paused, so it matches memory. `flows` is
+/// the network stack's list of guest connections, if the VM has one.
 pub fn take<B: Backend, W: Write>(
     dir: &Path,
     machine: &Machine<W>,
     backend: &B,
     memory: &GuestMemory,
     disk: &Path,
+    flows: Option<&OpenFlows>,
 ) -> Result<()> {
     fs::create_dir_all(dir)?;
     let vcpus = machine.pause(backend).map_err(Error::Pause)?;
-    let saved = save_paused(dir, machine, backend, memory, disk, vcpus);
+    let guest_flows = flows.map(OpenFlows::get).unwrap_or_default();
+    let saved = save_paused(dir, machine, backend, memory, disk, vcpus, guest_flows);
     machine.resume();
     saved
 }
@@ -208,6 +218,7 @@ fn save_paused<B: Backend, W: Write>(
     memory: &GuestMemory,
     disk: &Path,
     vcpus: Vec<VcpuState>,
+    guest_flows: Vec<FlowKey>,
 ) -> Result<()> {
     let devices = machine.devices();
     let state = State {
@@ -215,6 +226,7 @@ fn save_paused<B: Backend, W: Write>(
         irqchip: backend.irqchip_state()?,
         uart: devices.uart.state(),
         devices: devices.save_virtio(),
+        guest_flows,
         vcpus,
     };
     drop(devices);
@@ -318,6 +330,12 @@ fn encode(state: &State) -> Vec<u8> {
     for device in &state.devices {
         put_transport(&mut out, device);
     }
+    put_u32(&mut out, state.guest_flows.len() as u32);
+    for flow in &state.guest_flows {
+        put_u16(&mut out, flow.guest_port);
+        out.extend_from_slice(&flow.dst.ip().octets());
+        put_u16(&mut out, flow.dst.port());
+    }
     put_u32(&mut out, state.vcpus.len() as u32);
     for vcpu in &state.vcpus {
         put_u32(&mut out, vcpu.regs.len() as u32);
@@ -379,6 +397,14 @@ fn decode(bytes: &[u8]) -> Result<State> {
     uart.rx = r.bytes()?.to_vec();
     let devices = (0..r.u32()?)
         .map(|_| r.transport())
+        .collect::<Result<_>>()?;
+    let guest_flows = (0..r.u32()?)
+        .map(|_| {
+            let guest_port = r.u16()?;
+            let ip: [u8; 4] = r.take(4)?.try_into().expect("4 bytes");
+            let dst = SocketAddrV4::new(Ipv4Addr::from(ip), r.u16()?);
+            Ok(FlowKey { guest_port, dst })
+        })
         .collect::<Result<_>>()?;
     let mut vcpus = Vec::new();
     for _ in 0..r.u32()? {
@@ -458,6 +484,7 @@ fn decode(bytes: &[u8]) -> Result<State> {
         irqchip,
         uart,
         devices,
+        guest_flows,
         vcpus,
     })
 }
@@ -625,6 +652,10 @@ mod tests {
                     ..Queue::new(256)
                 }],
             }],
+            guest_flows: vec![FlowKey {
+                guest_port: 40_000,
+                dst: "93.184.216.34:443".parse().unwrap(),
+            }],
             vcpus: vec![VcpuState {
                 regs: Reg::all().map(|r| (r, u64::from(r.raw()) * 3)).collect(),
                 simd: (0..32).map(|n| u128::MAX - n).collect(),
@@ -669,8 +700,8 @@ mod tests {
     }
 
     #[test]
-    fn versions_1_to_3_are_refused() {
-        for old in [1u32, 2, 3] {
+    fn versions_1_to_4_are_refused() {
+        for old in [1u32, 2, 3, 4] {
             let mut bytes = encode(&sample());
             bytes[8..12].copy_from_slice(&old.to_le_bytes());
             let err = decode(&bytes).unwrap_err().to_string();

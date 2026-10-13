@@ -49,7 +49,9 @@ mod vmm {
     use cave_vm_vmm::host;
     use cave_vm_vmm::kernel::BootLayout;
     use cave_vm_vmm::memory::GuestMemory;
-    use cave_vm_vmm::nat::{self, ConnectEvent, GuestFrames, HostUdp, Policy, Stack, TcpConnector};
+    use cave_vm_vmm::nat::{
+        self, ConnectEvent, GuestFrames, HostUdp, OpenFlows, Policy, Stack, TcpConnector,
+    };
     use cave_vm_vmm::runner::{self, Machine};
     use cave_vm_vmm::snapshot::{self, State};
 
@@ -132,6 +134,7 @@ mod vmm {
         backend: &'a B,
         memory: &'a GuestMemory,
         disk: &'a Path,
+        flows: Option<OpenFlows>,
     }
 
     impl<B: Backend> RunningVm for Booted<'_, B> {
@@ -149,9 +152,17 @@ mod vmm {
                     "the guest did not flush its disk before the snapshot ({e})"
                 ));
             }
-            snapshot::take(dir, self.machine, self.backend, self.memory, self.disk).map_err(
-                |e| ErrorMessage::new(ErrorCode::Io, format!("cannot snapshot the VM: {e}")),
-            )?;
+            snapshot::take(
+                dir,
+                self.machine,
+                self.backend,
+                self.memory,
+                self.disk,
+                self.flows.as_ref(),
+            )
+            .map_err(|e| {
+                ErrorMessage::new(ErrorCode::Io, format!("cannot snapshot the VM: {e}"))
+            })?;
             note(format!(
                 "snapshot written to {} in {:?}",
                 dir.display(),
@@ -239,6 +250,9 @@ mod vmm {
         machine.add_virtio(MmioTransport::new(Box::new(block), memory.clone()));
         machine.add_virtio(MmioTransport::new(Box::new(vsock), memory.clone()));
         let mut gateway = network(config.net);
+        if let (Some((stack, _)), Some(state)) = (&mut gateway, &saved) {
+            stack.reset_guest_flows(&state.guest_flows);
+        }
         if let Some((stack, _)) = &gateway {
             let net = Net::new(nat::GUEST_MAC, Box::new(ToStack(stack.guest_frames())));
             let receiver = net.receiver();
@@ -262,6 +276,7 @@ mod vmm {
             backend: &backend,
             memory: &memory,
             disk: Path::new(&config.disk),
+            flows: gateway.as_ref().map(|(stack, _)| stack.open_flows()),
         };
 
         // When the guest stops by itself, closing our side of the link ends
