@@ -1,5 +1,5 @@
-//! Gate 3 end to end: the real `cave`, `cave-daemon` and `cave-vmm` boot a
-//! real VM from a locally built image. `#[ignore]`d, since it needs an
+//! Gate 3 end to end, and snapshots: the real `cave`, `cave-daemon` and
+//! `cave-vmm` boot a real VM from a locally built image. `#[ignore]`d, since it needs an
 //! Apple Silicon Mac with the hypervisor entitlement and a built image:
 //!
 //! ```sh
@@ -311,4 +311,91 @@ fn gate_3() {
     assert!(rig.cave(&["rm", "--yes"]).status.success());
     assert!(!rig.project().join(".cave").exists());
     assert!(rig.project().join("cave.toml").exists());
+}
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn snapshot_and_restore() {
+    let rig = Rig::new();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    let pid = rig.exec(
+        &["sh", "-c", "setsid sleep 100000 >/dev/null 2>&1 & echo $!"],
+        0,
+    );
+    let pid = pid.trim().to_string();
+    rig.exec(&["sh", "-c", "echo before > marker && sync"], 0);
+
+    let out = rig.cave(&["snapshot", "before"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.starts_with("Saved snapshot before ("), "{stdout}");
+    // A second one gets the default name.
+    let out = rig.cave(&["snapshot"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Saved snapshot proj-20"), "{stdout}");
+    assert!(stdout.contains("-debian ("), "{stdout}");
+    let ls = String::from_utf8_lossy(&rig.cave(&["ls"]).stdout).into_owned();
+    assert!(ls.contains("before") && ls.contains("snapshot"), "{ls}");
+
+    // Changes after the snapshot are rolled back, and the process from
+    // before it is running again.
+    rig.exec(
+        &["sh", "-c", &format!("echo after > marker && kill {pid}")],
+        0,
+    );
+    let out = rig.cave(&["restore", "before"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stderr}");
+    assert!(!stderr.contains("warning"), "{stderr}");
+    assert!(stdout.starts_with("Restored before ("), "{stdout}");
+    assert_eq!(rig.exec(&["cat", "marker"], 0), "before\n");
+    rig.exec(&["kill", "-0", &pid], 0);
+    let date = rig.exec(&["date", "+%s"], 0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    assert!(
+        date.trim().parse::<u64>().unwrap().abs_diff(now) <= 2,
+        "guest clock {date}"
+    );
+
+    // The restore saved the state before it, so it can be undone.
+    let saved = stdout
+        .split("saved as ")
+        .nth(1)
+        .and_then(|rest| rest.split(';').next())
+        .expect("the automatic snapshot's name")
+        .to_string();
+    assert!(rig.cave(&["restore", &saved]).status.success());
+    assert_eq!(rig.exec(&["cat", "marker"], 0), "after\n");
+
+    // A damaged memory file: the restore boots from the snapshot's disk
+    // and says so.
+    let memory = rig.project().join(".cave/snapshots/before/memory");
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&memory)
+        .unwrap()
+        .set_len(4096)
+        .unwrap();
+    let out = rig.cave(&["restore", "before"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("warning: could not load the memory state of before"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("booted normally"), "{stderr}");
+    assert_eq!(rig.exec(&["cat", "marker"], 0), "before\n");
+    rig.exec(&["sh", "-c", &format!("! kill -0 {pid} 2>/dev/null")], 0);
+
+    // cave rm removes one snapshot.
+    assert!(rig.cave(&["rm", "--yes", "before"]).status.success());
+    assert!(!rig.project().join(".cave/snapshots/before").exists());
 }

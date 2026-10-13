@@ -274,7 +274,14 @@ cave restore [name] [--fork <name>]
 
 Rolls the VM back to a snapshot, by default the most recent one. Processes in the snapshot resume where they were. Open shells and running `cave exec` calls are disconnected first, and port forwards are re-applied.
 
-Before rolling back, it saves the current state as an automatic snapshot, so a restore can itself be undone. Automatic snapshots are deleted by the retention rules in `cave.toml`.
+Before rolling back, it saves the current state as an automatic snapshot, so a restore can itself be undone. Automatic snapshots are deleted by the retention rules in `cave.toml`. With no name, automatic snapshots are passed over, so a second `cave restore` does not just undo the first.
+
+Output:
+
+```
+Restored before (0.9s)
+The state before was saved as my-project-2026-10-12-debian-2; `cave restore my-project-2026-10-12-debian-2` goes back to it
+```
 
 If the memory state cannot be loaded, for example after a `cave` upgrade that cannot read it, restore falls back to the disk state and a normal boot, and says so (design):
 
