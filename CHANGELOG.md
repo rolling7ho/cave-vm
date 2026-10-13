@@ -20,6 +20,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - Userspace network stack in `cave-vm-vmm` (`nat`), built on smoltcp: the guest gets a fixed address on 192.168.127.0/24, the gateway answers ARP and ping, and frames with another hardware or IP address are dropped (P3.7b).
 - Project disks in `cave-vm-vmm`: a 20 GB sparse `.cave/disk.img` created as an APFS clone of the base image, growable but never shrunk, with no absolute paths stored (P3.4). A `host` module wraps `clonefile` and `statfs` (D24).
 - Image names and digests (`debian@sha256:...`) and the shared image cache in `cave-vm-daemon`: downloads are hashed as they are written and kept only when size and SHA-256 match, so an interrupted or wrong download leaves nothing behind (P3.12a).
+- virtio-net device in `cave-vm-vmm`: frames from the guest go to a backend trait, and frames for the guest are delivered from any thread with a bounded backlog. No offloads; the link is always up (P3.7a).
 - Design document, roadmap and decision records.
 - Spec for the `cave` command line in `docs/cli.md`.
 - Reference for `cave.toml` in `docs/config.md`.
