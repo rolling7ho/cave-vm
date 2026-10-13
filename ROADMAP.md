@@ -257,3 +257,4 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D24 | Calls std does not wrap: vsock, ptys and `setsid` in the agent; `clonefile` and hole punching in the VMM. | Add `libc`. `unsafe` is also allowed in an `agent` `sys` module and a `vmm` `host` module, each block with a `// SAFETY:` comment. |
 | D25 | How PRs that depend on each other are opened, after stacked PRs were auto-closed. | Every PR targets main and none are stacked; dependent work waits on its branch until the PR it needs merges. |
 | D26 | How the host reaches guest vsock ports, after socket paths in `.cave/` hit macOS's 104-byte limit in deep projects. | No socket files: the device hands out socket pairs, and the VMM passes connections to the daemon as file descriptors over its control socket. |
+| D27 | Which crate reads `cave.toml` and writes the image pin into it (D22). | Add `toml_edit`, which keeps the user's comments and layout when the pin is written. |
