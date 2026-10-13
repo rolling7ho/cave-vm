@@ -188,6 +188,15 @@ pub trait VirtioDevice: Send {
     /// them back to [`VirtioDevice::activate`].
     fn save_queues(&self) -> Vec<Queue>;
 
+    /// Stops writing guest memory from the device's own threads until
+    /// [`VirtioDevice::resume`], so a snapshot sees memory and queue
+    /// positions that agree. Work for the guest waits meanwhile. The vCPUs
+    /// are paused first, so nothing arrives from the driver.
+    fn pause(&mut self) {}
+
+    /// Ends [`VirtioDevice::pause`] and delivers what waited.
+    fn resume(&mut self) {}
+
     /// Called after a restore activated the device again, in a new
     /// process. The device tells the driver about state that did not
     /// survive, such as connections to the host.

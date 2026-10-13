@@ -185,6 +185,8 @@ struct State {
     next_host_port: u32,
     /// Bumped on every reset, so threads of an older driver session stop.
     generation: u64,
+    /// Packets wait in the backlog while a snapshot is taken.
+    paused: bool,
 }
 
 /// Opens the host side of a guest connection to a host port.
@@ -237,6 +239,9 @@ impl Shared {
 
 /// Moves packets from the backlog into free receive buffers.
 fn fill(state: &mut State) {
+    if state.paused {
+        return;
+    }
     let Some(active) = &mut state.rx else {
         return;
     };
@@ -319,6 +324,7 @@ impl Vsock {
                 conns: HashMap::new(),
                 next_host_port: FIRST_HOST_PORT,
                 generation: 0,
+                paused: false,
             }),
             changed: Condvar::new(),
         });
@@ -792,6 +798,16 @@ impl VirtioDevice for Vsock {
             let _ = conn.stream.shutdown(Shutdown::Both);
         }
         self.shared.changed.notify_all();
+    }
+
+    fn pause(&mut self) {
+        self.shared.lock().paused = true;
+    }
+
+    fn resume(&mut self) {
+        let mut state = self.shared.lock();
+        state.paused = false;
+        fill(&mut state);
     }
 
     /// Connections to the host are not saved: they end with the process,

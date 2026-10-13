@@ -248,3 +248,82 @@ fn restored_secondary_that_was_on_runs_without_cpu_on() {
         "restored registers are left alone"
     );
 }
+
+/// Waits up to five seconds for `done`.
+fn wait_until(done: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "timed out");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+fn runs(mock: &MockBackend, vcpu: u32) -> usize {
+    mock.events()
+        .iter()
+        .filter(|e| **e == Event::Run { vcpu })
+        .count()
+}
+
+#[test]
+fn pause_saves_every_vcpu_and_resume_lets_them_run_on() {
+    let mock = MockBackend::new();
+    mock.set_now(1_000);
+    // vCPU 0 idles in the guest until the pause kicks it, then until the
+    // stop does. vCPU 1 stays off.
+    mock.script(
+        0,
+        [
+            Step::until_kicked().with_reg(x(7), 77),
+            Step::until_kicked(),
+        ],
+    );
+    let machine = Machine::new(Vec::new(), None, 2);
+    std::thread::scope(|s| {
+        let boot = s.spawn(|| {
+            let mut vcpu = mock.create_vcpu(0).unwrap();
+            vcpu.set_reg(Reg::PC, PC).unwrap();
+            runner::run(&mock, &mut vcpu, &machine)
+        });
+        let secondary = s.spawn(|| {
+            let mut vcpu = mock.create_vcpu(1).unwrap();
+            runner::run_secondary(&mock, &mut vcpu, 1, &machine)
+        });
+        wait_until(|| runs(&mock, 0) == 1);
+
+        let states = machine.pause(&mock).unwrap();
+        assert_eq!(states.len(), 2);
+        assert_eq!((states[0].power, states[1].power), (Power::On, Power::Off));
+        assert!(states[0].regs.contains(&(x(7), 77)), "{:?}", states[0].regs);
+        assert!(states[0].regs.contains(&(Reg::PC, PC)));
+        assert_eq!(states[0].guest_counter, 1_000);
+        assert!(machine.pause(&mock).is_err(), "already paused");
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        assert_eq!(runs(&mock, 0), 1, "paused vCPUs do not run");
+
+        machine.resume();
+        wait_until(|| runs(&mock, 0) == 2);
+        machine.request_stop();
+        assert_eq!(boot.join().unwrap().unwrap(), Stop::Canceled);
+        assert_eq!(secondary.join().unwrap().unwrap(), Stop::Canceled);
+    });
+}
+
+#[test]
+fn a_stop_ends_a_pause() {
+    let mock = MockBackend::new();
+    mock.script(0, [Step::until_kicked()]);
+    let machine = Machine::new(Vec::new(), None, 1);
+    std::thread::scope(|s| {
+        let boot = s.spawn(|| {
+            let mut vcpu = mock.create_vcpu(0).unwrap();
+            runner::run(&mock, &mut vcpu, &machine)
+        });
+        wait_until(|| runs(&mock, 0) == 1);
+        machine.pause(&mock).unwrap();
+        machine.request_stop();
+        assert_eq!(boot.join().unwrap().unwrap(), Stop::Canceled);
+    });
+    let err = machine.pause(&mock).unwrap_err().to_string();
+    assert!(err.contains("stopping"), "{err}");
+}
