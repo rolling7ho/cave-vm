@@ -19,6 +19,8 @@ pub enum ErrorCode {
     Busy,
     Io,
     Internal,
+    /// `pull` found files changed on both sides; `files` lists them.
+    Conflict,
     #[serde(other)]
     Unknown,
 }
@@ -33,6 +35,9 @@ pub struct ErrorMessage {
     /// With `unsupported_version`: the versions the sender speaks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supported: Option<Vec<u32>>,
+    /// With `conflict`: the files changed on both sides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<String>>,
 }
 
 impl ErrorMessage {
@@ -42,6 +47,7 @@ impl ErrorMessage {
             message: message.into(),
             fix: None,
             supported: None,
+            files: None,
         }
     }
 
