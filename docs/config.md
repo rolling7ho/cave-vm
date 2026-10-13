@@ -56,7 +56,7 @@ check        = true
 | `idle_suspend` | duration or `"off"` | `"30m"` | Suspend the VM after this long idle. Idle means no `cave` or SDK or MCP connection to the VM and no traffic on a forwarded port |
 | `ttl` | duration or `"off"` | `"off"` | Lifetime for disposable VMs, counted from boot. When it passes, the VM is stopped and its state removed, as `cave rm --yes` would. `cave run` prints when that will happen. Decided by [D21](../ROADMAP.md#decisions) |
 
-The design says `cave.toml` "plus a pinned base-image digest rebuilds the environment anywhere", and `.cave/` is gitignored, so the pin lives in `cave.toml`: on first run cave rewrites `image = "base"` as `image = "base@sha256:..."`, and the pin is committed with the file. This is the one time cave edits `cave.toml` ([D22](../ROADMAP.md#decisions)).
+The design says `cave.toml` "plus a pinned base-image digest rebuilds the environment anywhere", and `.cave/` is gitignored, so the pin lives in `cave.toml`: on first run cave rewrites `image = "base"` as `image = "base@sha256:..."`, and the pin is committed with the file. This is the one time cave edits `cave.toml` ([D22](../ROADMAP.md#decisions)). Names and digests come from the `images.json` manifest on the project's GitHub releases, which also gives each image's kernel ([D28](decisions/0010-image-manifest.md)).
 
 ### [storage]
 

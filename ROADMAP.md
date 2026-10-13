@@ -228,7 +228,7 @@ None open. When a task hits something the design and the decisions below do not 
 
 ## Decisions
 
-Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md), D23 in [decision 0006](docs/decisions/0006-phase-3-dependencies.md), D24 and D25 in [decision 0007](docs/decisions/0007-unsafe-host-calls-and-pr-flow.md), and D26 in [decision 0008](docs/decisions/0008-vsock-without-socket-files.md).
+Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md), D23 in [decision 0006](docs/decisions/0006-phase-3-dependencies.md), D24 and D25 in [decision 0007](docs/decisions/0007-unsafe-host-calls-and-pr-flow.md), D26 in [decision 0008](docs/decisions/0008-vsock-without-socket-files.md), D27 in [decision 0009](docs/decisions/0009-toml-edit.md), and D28 in [decision 0010](docs/decisions/0010-image-manifest.md).
 
 | ID | Question | Decision |
 | --- | --- | --- |
@@ -259,3 +259,4 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D25 | How PRs that depend on each other are opened, after stacked PRs were auto-closed. | Every PR targets main and none are stacked; dependent work waits on its branch until the PR it needs merges. |
 | D26 | How the host reaches guest vsock ports, after socket paths in `.cave/` hit macOS's 104-byte limit in deep projects. | No socket files: the device hands out socket pairs, and the VMM passes connections to the daemon as file descriptors over its control socket. |
 | D27 | Which crate reads `cave.toml` and writes the image pin into it (D22). | Add `toml_edit`, which keeps the user's comments and layout when the pin is written. |
+| D28 | Where base images and the kernel come from, and how `image = "base"` becomes a digest. | An `images.json` manifest on each GitHub release lists every published image version with its disk and kernel; the pin is the disk digest, and `CAVE_IMAGE_DIR` points at a local build instead. |
