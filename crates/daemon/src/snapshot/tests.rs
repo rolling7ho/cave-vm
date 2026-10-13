@@ -13,6 +13,7 @@ fn sample() -> Manifest {
         net: NetMode::Nat,
         credentials: vec!["API_KEY".into()],
         has_memory: true,
+        auto: false,
     }
 }
 
@@ -29,8 +30,70 @@ fn unknown_keys_are_ignored_and_credentials_may_be_left_out() {
     let mut doc: Value = serde_json::from_str(&sample().to_json()).unwrap();
     doc["future"] = json!({"anything": true});
     doc.as_object_mut().unwrap().remove("credentials");
+    doc.as_object_mut().unwrap().remove("auto");
     let m = Manifest::parse("x", &doc.to_string()).unwrap();
     assert!(m.credentials.is_empty());
+    assert!(!m.auto);
+}
+
+#[test]
+fn names_are_checked() {
+    for good in [
+        "before",
+        "a",
+        "app-2026-10-13-debian",
+        "v1.2_rc",
+        &"x".repeat(64),
+    ] {
+        assert_eq!(check_name(good), Ok(()), "{good}");
+    }
+    for bad in ["", "-x", ".x", "a b", "a/b", "é", &"x".repeat(65)] {
+        let err = check_name(bad).unwrap_err();
+        assert!(err.contains("\nUse 1 to 64"), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn default_names_follow_the_design_with_a_counter() {
+    let none = |_: &str| false;
+    assert_eq!(
+        default_name("my-project", "2026-10-12", "debian", none),
+        "my-project-2026-10-12-debian"
+    );
+    let used = ["app-2026-10-12-debian", "app-2026-10-12-debian-2"];
+    assert_eq!(
+        default_name("app", "2026-10-12", "debian", |n| used.contains(&n)),
+        "app-2026-10-12-debian-3"
+    );
+}
+
+#[test]
+fn default_names_are_always_valid() {
+    for folder in [
+        "My Project (old)",
+        ".hidden",
+        "",
+        "日本",
+        &"long".repeat(40),
+    ] {
+        let name = default_name(folder, "2026-10-12", "ubuntu", |_| false);
+        assert_eq!(check_name(&name), Ok(()), "{folder}: {name}");
+        assert!(name.ends_with("-2026-10-12-ubuntu"), "{name}");
+        let counted = default_name(folder, "2026-10-12", "ubuntu", |n| n == name);
+        assert_eq!(check_name(&counted), Ok(()), "{counted}");
+    }
+    assert_eq!(
+        default_name("My Project", "2026-10-12", "debian", |_| false),
+        "My-Project-2026-10-12-debian"
+    );
+}
+
+#[test]
+fn dates_fall_back_to_utc() {
+    assert_eq!(utc_date(0), "1970-01-01");
+    assert_eq!(utc_date(1_790_000_000), "2026-09-21");
+    assert_eq!(utc_date(951_782_400), "2000-02-29");
+    assert_eq!(local_date(1_790_000_000).len(), 10);
 }
 
 #[test]
@@ -101,6 +164,9 @@ fn only_finished_snapshots_are_listed() {
     // Unfinished: no manifest yet.
     fs::create_dir_all(dir(&state, "c")).unwrap();
     assert_eq!(names(&state).unwrap(), ["a", "b"]);
+    assert!(taken(&state, "a") && !taken(&state, "c"));
+    fs::create_dir_all(state.join("forks/f")).unwrap();
+    assert!(taken(&state, "f"), "forks share the namespace");
     assert_eq!(read_manifest(&dir(&state, "a")).unwrap().name, "a");
     assert!(!dir(&state, "a").join(".snapshot.json.partial").exists());
     fs::remove_dir_all(&state).unwrap();

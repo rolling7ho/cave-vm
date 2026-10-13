@@ -194,8 +194,8 @@ Requests that take time (`start`, `snapshot`, `restore`, `fork`, image fetches d
 | `exec` | `vm`, the agent's `exec` fields, `credentials` (list of names) | the agent's stream, ending in `exit` |
 | `shell` | `vm`, the agent's `pty_open` fields | the agent's pty stream, ending in `exit` |
 | `file_read` / `file_write` | `vm`, the agent's fields | as on the agent link |
-| `snapshot` | `vm`, `name` (optional) | `snapshot` with the name and size |
-| `restore` | `vm`, `name` (optional) | `restored`, with `memory_restored` set to `false` when it fell back to a disk boot |
+| `snapshot` | `vm`, `name` (optional; the default name otherwise) | `snapshot` with the name and size. A running VM keeps running and its memory is saved; a stopped VM's disk is saved |
+| `restore` | `vm`, `name` (optional; the newest snapshot taken by name otherwise) | `restored` once the VM runs from the snapshot. The state before is saved first as an automatic snapshot. `memory_restored` is `false` when it fell back to a disk boot |
 | `fork` | `vm`, `name` (optional), `from` (optional snapshot) | `forked` with the name |
 | `list` | `project` (optional; all known projects if absent) | `list` with VMs, forks and snapshots |
 | `remove` | `vm`, `name` (optional) | `ok` |
@@ -215,7 +215,7 @@ The reply objects mirror the `--json` output of the matching CLI command. Sizes 
 | --- | --- |
 | `policy` | `name`, `image` (the pinned value), `storage`, `net`, `ports`, `cpus`, `memory_bytes`, optional `ttl_seconds`, and `widened`: the flags that widened the defaults, echoed back |
 | `snapshot` | `name`, `size` |
-| `restored` | `memory_restored` |
+| `restored` | `name`, `memory_restored`, `reason` (why the memory was not restored, when it was not) and `saved` (the automatic snapshot taken first, which undoes the restore) |
 | `forked` | `name` |
 | `list` | `entries`, each with `project`, `name`, `kind` (`vm`, `fork`, `snapshot`), `state` for VMs and forks (`running`, `suspended`, `stopped`), `auto` for automatic snapshots, `size` and `created_unix` |
 | `inspect` | `policy`, `resources` (`cpus`, `memory_bytes`, `disk_used`, `disk_size`), `audit` (the latest entries) and `audit_total`. An audit entry has `time_unix_ms` and an `event`: `exec` with `argv`, credential names and `exit_code`; `write` with `path` and `size`; or `connect` with `host`, `port`, `allowed` and an optional `reason` such as `LAN` |

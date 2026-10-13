@@ -18,6 +18,7 @@
 use std::fmt;
 use std::fs;
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -38,6 +39,14 @@ pub const STATE_FILE: &str = "state";
 
 /// The folder in `.cave/` that holds snapshots.
 const SNAPSHOTS_DIR: &str = "snapshots";
+/// The folder in `.cave/` that holds forks, whose names share one
+/// namespace with snapshots (`docs/cli.md`).
+const FORKS_DIR: &str = "forks";
+
+/// The longest snapshot or fork name.
+pub const MAX_NAME_LEN: usize = 64;
+/// Room kept at the end of a default name for a counter such as `-12`.
+const COUNTER_ROOM: usize = 4;
 
 /// What a snapshot is, apart from its files.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +69,9 @@ pub struct Manifest {
     pub credentials: Vec<String>,
     /// Whether `memory` and `state` were saved.
     pub has_memory: bool,
+    /// Taken automatically, such as before a restore, rather than asked
+    /// for.
+    pub auto: bool,
 }
 
 /// Why a manifest cannot be read. The messages say how to fix it.
@@ -112,6 +124,7 @@ impl Manifest {
             },
             "credentials": self.credentials,
             "has_memory": self.has_memory,
+            "auto": self.auto,
         });
         let mut text = serde_json::to_string_pretty(&doc).expect("a JSON value");
         text.push('\n');
@@ -182,6 +195,7 @@ impl Manifest {
                 .get("has_memory")
                 .and_then(Value::as_bool)
                 .ok_or_else(|| bad("no has_memory".into()))?,
+            auto: doc.get("auto").and_then(Value::as_bool).unwrap_or(false),
         })
     }
 
@@ -226,6 +240,109 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest, ManifestError> {
             why: format!("cannot read {MANIFEST_FILE}: {e}"),
         })?;
     Manifest::parse(&name, &text)
+}
+
+/// Checks a snapshot or fork name: 1 to 64 letters, digits, `.`, `_` and
+/// `-`, starting with a letter or digit (`docs/cli.md`). The error is a
+/// message, a newline and the fix.
+pub fn check_name(name: &str) -> Result<(), String> {
+    let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-');
+    let starts_well = name.starts_with(|c: char| c.is_ascii_alphanumeric());
+    if name.len() <= MAX_NAME_LEN && starts_well && name.chars().all(allowed) {
+        return Ok(());
+    }
+    Err(format!(
+        "\"{name}\" is not a snapshot name\nUse 1 to {MAX_NAME_LEN} letters, digits, `.`, `_` and `-`, starting with a letter or digit"
+    ))
+}
+
+/// Whether a finished snapshot or a fork in a project's `.cave/` is named
+/// `name`.
+pub fn taken(state_dir: &Path, name: &str) -> bool {
+    dir(state_dir, name).join(MANIFEST_FILE).is_file()
+        || state_dir.join(FORKS_DIR).join(name).exists()
+}
+
+/// The default name, `[ProjectFolder]-[YYYY-MM-DD]-[Distro]` (design,
+/// "Snapshot naming"), with `-2`, `-3` and so on appended while `taken`
+/// says the name is in use. Characters a name cannot hold become `-`, and
+/// a long folder name is shortened so the whole fits.
+pub fn default_name(
+    project_folder: &str,
+    date: &str,
+    distro: &str,
+    taken: impl Fn(&str) -> bool,
+) -> String {
+    let clean = |s: &str| -> String {
+        s.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect()
+    };
+    let suffix = format!("-{}-{}", clean(date), clean(distro));
+    let room = MAX_NAME_LEN.saturating_sub(COUNTER_ROOM + suffix.len());
+    let folder = clean(project_folder);
+    let folder = folder.trim_start_matches(|c: char| !c.is_ascii_alphanumeric());
+    let folder: String = folder.chars().take(room).collect();
+    let base = if folder.is_empty() {
+        format!("vm{suffix}")
+    } else {
+        format!("{folder}{suffix}")
+    };
+    if !taken(&base) {
+        return base;
+    }
+    (2..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|name| !taken(name))
+        .expect("a free counter")
+}
+
+/// The local date of `unix` as `YYYY-MM-DD`, through date(1) since std has
+/// no time zones; UTC if that fails.
+pub fn local_date(unix: u64) -> String {
+    Command::new("/bin/date")
+        .args(["-r", &unix.to_string(), "+%Y-%m-%d"])
+        .stdin(Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|d| d.len() == 10)
+        .unwrap_or_else(|| utc_date(unix))
+}
+
+/// The UTC date of `unix` as `YYYY-MM-DD` (the civil-from-days algorithm).
+fn utc_date(unix: u64) -> String {
+    let days = (unix / 86_400) as i64 + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let mp = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// The space the files in `dir` take on disk. Blocks a clone shares with
+/// its source are counted in both.
+pub fn size(dir: &Path) -> u64 {
+    fs::read_dir(dir).map_or(0, |entries| {
+        entries
+            .flatten()
+            .filter_map(|e| e.metadata().ok())
+            .filter(fs::Metadata::is_file)
+            .map(|m| m.blocks() * 512)
+            .sum()
+    })
 }
 
 /// The names of the finished snapshots in a project's `.cave/`, sorted.

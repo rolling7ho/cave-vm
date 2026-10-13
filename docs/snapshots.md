@@ -29,7 +29,8 @@ The manifest is written to a temporary file and renamed into place, so a crash l
   "image": "debian@sha256:...",
   "vm": { "cpus": 2, "memory_bytes": 2147483648, "net": "nat" },
   "credentials": ["API_KEY"],
-  "has_memory": true
+  "has_memory": true,
+  "auto": false
 }
 ```
 
@@ -38,6 +39,7 @@ The manifest is written to a temporary file and renamed into place, so a crash l
 - `image`: the pinned image the disk started from.
 - `credentials`: names of credentials injected into the VM before the snapshot, never their values. A fork or restore shows them so you know what the VM may still hold.
 - `has_memory`: whether `memory` and `state` exist.
+- `auto`: taken automatically, such as the one a restore takes first so it can be undone. A restore with no name passes over these. Missing means `false`.
 
 Readers ignore keys they do not know, so a later `cave` can add keys without a new version.
 
