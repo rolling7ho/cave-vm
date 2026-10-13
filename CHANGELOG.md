@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Fixed
 
+- `cave-vmm` keeps each agent connection it hands to the daemon open until the daemon's next request. Closing it right after sending it lost connections on macOS under load: the daemon got a connection that ended at the first reply.
 - The guest agent removes a failed file write's temporary file before it replies, so a client never finds it after getting the error. CI caught the race as a flaky test.
 - Interrupts that virtio devices raise from their own threads now wake an idle guest at once. Before, they waited for the guest's next timer tick, which delayed vsock connection setup by about 200 ms and network replies by up to a second.
 - Restored spike snapshots got no more timer interrupts once the guest went idle, so they hung at 100% CPU. `hv_gic_state_get_data` leaves out each redistributor's SGI and PPI state; snapshots now save it per vCPU (format version 3, so older spike snapshots are refused).
