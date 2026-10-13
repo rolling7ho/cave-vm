@@ -9,7 +9,8 @@
 //! ```
 //!
 //! `CAVE_E2E_IMAGE_DIR` points at another image folder; the default is
-//! `target/image`. Nothing here reaches the network: the image comes from
+//! `target/image`. `CAVE_E2E_KEEP` keeps the test's folder, with the VMM
+//! logs. Nothing here reaches the network: the image comes from
 //! that folder, and the only connections the guest makes are the denied
 //! ones, which the VMM refuses without opening a host socket. Outbound
 //! HTTPS, `apt` and Docker need the network and are checked by hand.
@@ -102,7 +103,16 @@ impl Rig {
 
     /// Runs `cave exec -- argv` and returns its stdout, asserting `code`.
     fn exec(&self, argv: &[&str], code: i32) -> String {
-        let mut args = vec!["exec", "--"];
+        self.exec_in(None, argv, code)
+    }
+
+    /// [`Rig::exec`] in a fork, or in the project's VM.
+    fn exec_in(&self, fork: Option<&str>, argv: &[&str], code: i32) -> String {
+        let mut args = vec!["exec"];
+        if let Some(fork) = fork {
+            args.extend(["--fork", fork]);
+        }
+        args.push("--");
         args.extend_from_slice(argv);
         let out = self.cave(&args);
         assert_eq!(
@@ -131,7 +141,12 @@ impl Drop for Rig {
             .arg("-f")
             .arg(self.bin.join("cave-daemon"))
             .status();
-        let _ = fs::remove_dir_all(&self.root);
+        // `CAVE_E2E_KEEP` keeps the folder, with each VMM's log, to look at.
+        if std::env::var_os("CAVE_E2E_KEEP").is_some() {
+            eprintln!("kept {}", self.root.display());
+        } else {
+            let _ = fs::remove_dir_all(&self.root);
+        }
     }
 }
 
@@ -398,4 +413,85 @@ fn snapshot_and_restore() {
     // cave rm removes one snapshot.
     assert!(rig.cave(&["rm", "--yes", "before"]).status.success());
     assert!(!rig.project().join(".cave/snapshots/before").exists());
+}
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn forks_run_on_their_own() {
+    let rig = Rig::new();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    let pid = rig.exec(
+        &["sh", "-c", "setsid sleep 100000 >/dev/null 2>&1 & echo $!"],
+        0,
+    );
+    let pid = pid.trim().to_string();
+    rig.exec(&["sh", "-c", "echo parent > marker && sync"], 0);
+    let out = rig.cave(&["snapshot", "base"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // From a snapshot: timed until the fork has run a command, the gate 4
+    // measure (docs/decisions/0005-spike-report.md).
+    let started = Instant::now();
+    let out = rig.cave(&["fork", "try", "--from", "base"]);
+    let forked = started.elapsed();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.starts_with("Forked try from base (")
+            && stdout.contains("Use it with: cave shell --fork try"),
+        "{stdout}"
+    );
+    assert_eq!(rig.exec_in(Some("try"), &["cat", "marker"], 0), "parent\n");
+    let first_command = started.elapsed();
+
+    // From the current state, with the default name.
+    let started = Instant::now();
+    let out = rig.cave(&["fork"]);
+    let fresh = started.elapsed();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("Forked fork-1 from proj ("), "{stdout}");
+
+    // All three run on their own, each with the process from before.
+    for (vm, text) in [(None, "p2"), (Some("try"), "t2"), (Some("fork-1"), "f2")] {
+        rig.exec_in(vm, &["sh", "-c", &format!("echo {text} > marker")], 0);
+    }
+    for (vm, text) in [(None, "p2"), (Some("try"), "t2"), (Some("fork-1"), "f2")] {
+        assert_eq!(rig.exec_in(vm, &["cat", "marker"], 0), format!("{text}\n"));
+        rig.exec_in(vm, &["kill", "-0", &pid], 0);
+    }
+    rig.exec_in(Some("try"), &["kill", &pid], 0);
+    rig.exec(&["kill", "-0", &pid], 0);
+
+    let ls = String::from_utf8_lossy(&rig.cave(&["ls"]).stdout).into_owned();
+    for name in ["try", "fork-1"] {
+        assert!(
+            ls.lines()
+                .any(|l| l.starts_with(name) && l.contains("fork") && l.contains("running")),
+            "{ls}"
+        );
+    }
+    assert!(rig.cave(&["stop", "--fork", "fork-1"]).status.success());
+    assert!(rig.cave(&["rm", "--yes", "try"]).status.success());
+    assert!(!rig.project().join(".cave/forks/try").exists());
+    assert_eq!(rig.exec(&["cat", "marker"], 0), "p2\n");
+
+    eprintln!(
+        "cave fork --from: {forked:?}; until the fork ran a command: {first_command:?}; \
+         cave fork of the running VM: {fresh:?}"
+    );
+    // The VMMs' own timings, for `--nocapture`.
+    for dir in fs::read_dir(rig.root.join("data/vms")).unwrap().flatten() {
+        let log = fs::read_to_string(dir.path().join("vmm.log")).unwrap_or_default();
+        for line in log.lines().filter(|l| l.starts_with("cave-vmm:")) {
+            eprintln!("{line}");
+        }
+    }
 }

@@ -70,6 +70,14 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Create a new VM from a snapshot, copy-on-write.
+    Fork {
+        /// The new fork's name; fork-1, fork-2 and so on when left out.
+        name: Option<String>,
+        /// Fork this snapshot instead of the VM's current state.
+        #[arg(long, value_name = "SNAPSHOT")]
+        from: Option<String>,
+    },
     /// Roll the VM back to a snapshot, by default the newest.
     Restore {
         /// A snapshot from `cave ls`.
@@ -145,6 +153,7 @@ fn main() -> ExitCode {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
+        Cmd::Fork { name, from } => snapshot::fork(name, from),
         Cmd::Images { json } => commands::images(json),
         Cmd::Restore { name, fork } => snapshot::restore(name, fork),
         Cmd::Rm { name, yes } => remove::run(name, yes),
