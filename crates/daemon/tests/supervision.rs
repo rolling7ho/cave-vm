@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use cave_vm_daemon::home::Home;
 use cave_vm_daemon::launch::{Launcher, ProcessLauncher};
 use cave_vm_daemon::server;
-use cave_vm_daemon::vms::{Clock, Prepared, VmSource, Vms};
+use cave_vm_daemon::vms::{AutoSnapshots, Clock, Prepared, VmSource, Vms};
 use cave_vm_proto::daemon::{
     EntryKind, NetMode, Policy, PortMap, Reply, Request, Storage, VmId, VmState,
 };
@@ -190,6 +190,7 @@ fn config(vm: &VmId) -> VmmConfig {
 struct Source {
     prepared: AtomicUsize,
     idle_suspend: Mutex<Option<Duration>>,
+    auto_snapshots: Mutex<AutoSnapshots>,
 }
 
 impl VmSource for Source {
@@ -216,6 +217,10 @@ impl VmSource for Source {
             },
             idle_suspend: *self.idle_suspend.lock().unwrap(),
         })
+    }
+
+    fn auto_snapshots(&self, _vm: &VmId) -> Result<AutoSnapshots, ErrorMessage> {
+        Ok(*self.auto_snapshots.lock().unwrap())
     }
 }
 
@@ -835,6 +840,70 @@ fn a_restore_brings_back_the_disk_and_memory_and_can_be_undone() {
     );
     // Automatic snapshots are passed over for the default.
     assert!(matches!(r.restore(&id, None), Reply::Restored { name, .. } if name == "before"));
+}
+
+#[test]
+fn automatic_snapshots_follow_the_project_settings() {
+    let r = rig("autosnap", NORMAL);
+    let (id, _) = snapshot_project(&r);
+    assert!(matches!(
+        r.request(Request::Start {
+            vm: id.clone(),
+            net: None,
+            ports: Vec::new()
+        }),
+        Reply::Policy(_)
+    ));
+    assert!(matches!(
+        r.snapshot(&id, Some("named")),
+        Reply::Snapshot { .. }
+    ));
+    let restore = |name: &str| match r.restore(&id, Some(name)) {
+        Reply::Restored { saved, .. } => saved,
+        other => panic!("{other:?}"),
+    };
+    let autos = || -> Vec<String> {
+        let mut autos: Vec<String> = r
+            .snapshots(&id)
+            .into_iter()
+            .filter(|(_, auto)| *auto)
+            .map(|(name, _)| name)
+            .collect();
+        autos.sort();
+        autos
+    };
+
+    // Only the newest `keep` automatic snapshots stay; named ones always.
+    *r.source.auto_snapshots.lock().unwrap() = AutoSnapshots {
+        auto: true,
+        keep: 2,
+    };
+    let saved: Vec<String> = (0..4).map(|_| restore("named").unwrap()).collect();
+    let mut newest = saved[2..].to_vec();
+    newest.sort();
+    assert_eq!(autos(), newest);
+    assert!(r.snapshots(&id).contains(&("named".to_string(), false)));
+
+    // An old automatic snapshot being restored is not deleted under it.
+    *r.source.auto_snapshots.lock().unwrap() = AutoSnapshots {
+        auto: true,
+        keep: 1,
+    };
+    let undo = restore(&saved[2]).unwrap();
+    let mut both = vec![saved[2].clone(), undo.clone()];
+    both.sort();
+    assert_eq!(autos(), both);
+    let last = restore("named").unwrap();
+    assert_eq!(autos(), [last]);
+
+    // With `auto = false` a restore saves nothing.
+    *r.source.auto_snapshots.lock().unwrap() = AutoSnapshots {
+        auto: false,
+        keep: 10,
+    };
+    let before = autos();
+    assert_eq!(restore("named"), None);
+    assert_eq!(autos(), before);
 }
 
 #[test]

@@ -80,7 +80,7 @@ Changing `mode` from sealed to synced creates the mirror on the next `cave sync`
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `auto` | boolean | `true` | Take automatic snapshots before each `cave agent` run (design), before each `cave pull` (design) and before each `cave restore` (see [cli.md](cli.md#cave-restore)). The snapshot before `cave pull` is always taken, even when this is `false`, because the design requires it |
-| `keep` | integer | `10` | How many automatic snapshots to keep. When there are more, the oldest automatic one is deleted. Snapshots named by the user are never deleted automatically |
+| `keep` | integer | `10` | How many automatic snapshots to keep. When there are more, the oldest automatic one is deleted, after each new automatic snapshot. The one just taken and one being restored are never deleted, even with `keep = 0`. Snapshots named by the user are never deleted automatically |
 
 ### [updates]
 

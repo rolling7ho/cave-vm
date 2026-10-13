@@ -274,7 +274,7 @@ cave restore [name] [--fork <name>]
 
 Rolls the VM back to a snapshot, by default the most recent one. Processes in the snapshot resume where they were. Open shells and running `cave exec` calls are disconnected first, and port forwards are re-applied.
 
-Before rolling back, it saves the current state as an automatic snapshot, so a restore can itself be undone. Automatic snapshots are deleted by the retention rules in `cave.toml`. With no name, automatic snapshots are passed over, so a second `cave restore` does not just undo the first.
+Before rolling back, it saves the current state as an automatic snapshot, so a restore can itself be undone. Automatic snapshots are deleted by the retention rules in `cave.toml` ([`[snapshots]`](config.md#snapshots)), once the restore is done, so restoring an old automatic snapshot does not delete it. With `auto = false` nothing is saved first, and the output has no second line. With no name, automatic snapshots are passed over, so a second `cave restore` does not just undo the first.
 
 Output:
 

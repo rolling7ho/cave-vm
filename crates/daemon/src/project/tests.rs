@@ -229,3 +229,21 @@ fn a_fork_boots_from_the_disk_in_its_folder() {
     assert!(!s.project.join(".cave/disk.img").exists());
     fs::remove_dir_all(&s.root).unwrap();
 }
+
+#[test]
+fn snapshot_settings_come_from_cave_toml() {
+    let s = setup("autosnap", "[snapshots]\nauto = false\nkeep = 3\n");
+    assert_eq!(
+        s.source.auto_snapshots(&vm(&s.project)).unwrap(),
+        AutoSnapshots {
+            auto: false,
+            keep: 3
+        }
+    );
+    fs::write(s.project.join(config::FILE), "").unwrap();
+    assert_eq!(
+        s.source.auto_snapshots(&vm(&s.project)).unwrap(),
+        AutoSnapshots::default()
+    );
+    fs::remove_dir_all(&s.root).unwrap();
+}
