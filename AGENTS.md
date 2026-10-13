@@ -33,7 +33,7 @@ cave-vm is an open-source (Apache 2.0) microVM runtime for macOS, built for codi
 
 ## Rules
 
-- `unsafe` is allowed only in `hvf` and the guest-memory code (the `memory` module in `vmm`). Every `unsafe` block has a `// SAFETY:` comment.
+- `unsafe` is allowed only in `hvf`, the guest-memory code (the `memory` module in `vmm`), the `host` module in `vmm` and the `sys` module in `agent` (D24). Every `unsafe` block has a `// SAFETY:` comment.
 - No new dependencies without asking, and say why when you ask.
 - No network access in tests. Test device models against the mock backend.
 - Do not touch signing, release or CI secrets.
@@ -46,7 +46,7 @@ cave-vm is an open-source (Apache 2.0) microVM runtime for macOS, built for codi
 2. Write a short plan. For anything large, open a design note in an issue first.
 3. Write tests first where practical.
 4. Implement one crate at a time.
-5. Open a small PR. Commits use Conventional Commits (`feat:`, `fix:`) and DCO sign-off (`git commit -s`).
+5. Open a small PR against main. Do not stack PRs: work that depends on an open PR waits on its branch until that PR merges (D25). Commits use Conventional Commits (`feat:`, `fix:`) and DCO sign-off (`git commit -s`).
 6. Request a review from @rolling7ho on every PR (`gh pr edit <n> --add-reviewer rolling7ho`).
 
 ## Definition of done

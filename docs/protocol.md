@@ -1,6 +1,6 @@
 # Protocol
 
-This is the wire protocol for the guest agent and the daemon API (ROADMAP task P1.3). It becomes the source for the `proto` crate in P3.1. Nothing here is implemented yet.
+This is the wire protocol for the guest agent and the daemon API (ROADMAP task P1.3). It is the source for the `proto` crate, which implements all of it.
 
 The design fixes the shape: length-prefixed JSON messages, versioned from day one, with streamed output and a pseudo-terminal for `cave shell`, and the same message format on the daemon's Unix socket so the SDKs stay thin. The framing width, the maximum frame size, the version handshake and everything else below were proposed in the phase 1 PR and approved by Ivan there.
 
@@ -49,7 +49,7 @@ Every message is a JSON object with a `type` string. Field names are `snake_case
 
 `code` is a stable `snake_case` identifier for programs. `message` and the optional `fix` are for people, and follow the CLI's rule that errors say how to fix the problem. An `error` ends the operation, and the sender closes the connection after it.
 
-Codes in version 1: `bad_frame`, `frame_too_large`, `unsupported_version`, `unknown_type`, `bad_request`, `not_found`, `permission_denied`, `already_exists`, `not_running`, `busy`, `io`, `internal`.
+Codes in version 1: `bad_frame`, `frame_too_large`, `unsupported_version`, `unknown_type`, `bad_request`, `not_found`, `permission_denied`, `already_exists`, `not_running`, `busy`, `io`, `internal`, `conflict`. An `error` with `conflict` (from `pull`) also has `files`, the paths changed on both sides.
 
 ## Guest agent messages
 
@@ -188,7 +188,7 @@ Requests that take time (`start`, `snapshot`, `restore`, `fork`, image fetches d
 | Request | Fields | Reply |
 | --- | --- | --- |
 | `init` | `project`, `storage` (`"sealed"` or `"synced"`), `image` | `ok` |
-| `start` | `vm`, `net` (`"off"`, `"nat"`, `"lan"`), `ports` (list of `{mac, vm}`) | `policy` |
+| `start` | `vm`, `net` (optional: `"off"`, `"nat"` or `"lan"`, from `--net`; the mode in `cave.toml` when left out), `ports` (list of `{mac, vm}`) | `policy` |
 | `stop` | `vm` | `ok` |
 | `exec` | `vm`, the agent's `exec` fields, `credentials` (list of names) | the agent's stream, ending in `exit` |
 | `shell` | `vm`, the agent's `pty_open` fields | the agent's pty stream, ending in `exit` |
@@ -204,7 +204,23 @@ Requests that take time (`start`, `snapshot`, `restore`, `fork`, image fetches d
 | `images` | none | `images` |
 | `doctor` | none | `checks`, each with `name`, `ok` and `fix` |
 
-The exact fields of the reply objects (`policy`, `list`, `usage` and so on) mirror the `--json` output of the matching CLI command and are written down with the `proto` types in P3.1.
+Because a request and its reply can share a type (`snapshot`), the `proto` crate decodes each direction with its own message set. The daemon's stream messages are the agent's, relayed: the client sends `input`, `input_end`, `signal`, `pty_data`, `pty_resize`, `file_data` and `file_end`, and the daemon sends `output`, `exit`, `pty_data`, `file_info`, `file_data`, `file_end` and `file_written`.
+
+### Reply objects
+
+The reply objects mirror the `--json` output of the matching CLI command. Sizes are in bytes and times are Unix seconds unless a name says otherwise. Optional fields are left out.
+
+| Reply | Fields |
+| --- | --- |
+| `policy` | `name`, `image` (the pinned value), `storage`, `net`, `ports`, `cpus`, `memory_bytes`, optional `ttl_seconds`, and `widened`: the flags that widened the defaults, echoed back |
+| `snapshot` | `name`, `size` |
+| `restored` | `memory_restored` |
+| `forked` | `name` |
+| `list` | `entries`, each with `project`, `name`, `kind` (`vm`, `fork`, `snapshot`), `state` for VMs and forks (`running`, `suspended`, `stopped`), `auto` for automatic snapshots, `size` and `created_unix` |
+| `inspect` | `policy`, `resources` (`cpus`, `memory_bytes`, `disk_used`, `disk_size`), `audit` (the latest entries) and `audit_total`. An audit entry has `time_unix_ms` and an `event`: `exec` with `argv`, credential names and `exit_code`; `write` with `path` and `size`; or `connect` with `host`, `port`, `allowed` and an optional `reason` such as `LAN` |
+| `usage` | `images` (`name`, `digest`, `size`, `in_use`), `projects` (`project`, `disk`, `snapshots`, `forks`), `reclaimable` (`what`, `size`), and `reclaimed` when `apply` was set |
+| `images` | `images`, each with `name`, `digest`, `downloaded`, `used_by` (projects pinned to it), `base` when `base` stands for it, and `update` when a newer digest was seen |
+| `checks` | `checks`, each with `name`, `ok` and an optional `fix` |
 
 ### exec and shell
 
