@@ -98,6 +98,16 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
         }
         Request::Shell { vm, pty } => return relay(stream, vms, &vm, &Message::PtyOpen(pty)),
         Request::Start { vm, net, ports } => vms.start(&vm, net, &ports).map(Reply::Policy),
+        Request::Remove { vm, name: None } => vms.remove(&vm).map(|()| Reply::Ok),
+        Request::Remove {
+            vm,
+            name: Some(name),
+        } => vms
+            .remove(&VmId {
+                fork: Some(name),
+                ..vm
+            })
+            .map(|()| Reply::Ok),
         Request::Stop { vm } => vms.stop(&vm).map(|()| Reply::Ok),
         Request::List { project } => Ok(Reply::List {
             entries: vms.list(project.as_deref()),

@@ -16,6 +16,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- `cave rm [name] [--yes]`: removes the project's VM, deleting `.cave/` and the daemon's state for it while `cave.toml` stays. It asks first, showing the size and, for a sealed project, that code only in the VM is lost; without a terminal it needs `--yes`. A `.cave` that is a symbolic link is removed without being followed (P3.11d).
 - `cave shell`: an interactive shell in the VM as the `cave` user, booting it first if needed, on a pseudo-terminal that follows window resizes, with Ctrl-C going to the VM and the shell's exit code. Without a terminal it says to use `cave exec` (P3.11c).
 - `cave exec -- <cmd>`: runs one command in the VM, booting it first if needed, with stdin passed through, stdout and stderr kept separate, and the command's exit code (128 plus the signal number when a signal ended it, 125 when cave itself fails) (P3.11b).
 - `cave`: the command line's first commands, `init`, `run` (prints the startup policy and echoes widening flags), `stop` and `ls`, with project discovery, errors that say how to fix the problem, and a daemon client that starts the daemon on first use (P3.11a).

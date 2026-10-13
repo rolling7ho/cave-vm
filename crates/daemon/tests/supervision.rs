@@ -510,3 +510,50 @@ fn ports_listen_on_localhost_while_the_vm_runs() {
     assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, a)).is_err());
     assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, b)).is_err());
 }
+
+#[test]
+fn remove_stops_the_vm_and_deletes_only_its_state() {
+    let r = rig("rm", NORMAL);
+    let project = r.home.root().join("proj");
+    fs::create_dir_all(project.join(".cave")).unwrap();
+    fs::write(project.join("cave.toml"), "").unwrap();
+    fs::write(project.join(".cave/disk.img"), "disk").unwrap();
+    let id = VmId {
+        project: project.to_string_lossy().into_owned(),
+        fork: None,
+    };
+    let started = r.request(Request::Start {
+        vm: id.clone(),
+        net: None,
+        ports: Vec::new(),
+    });
+    assert!(matches!(started, Reply::Policy(_)), "{started:?}");
+
+    let remove = |name: Option<&str>| {
+        r.request(Request::Remove {
+            vm: id.clone(),
+            name: name.map(String::from),
+        })
+    };
+    match remove(Some("nope")) {
+        Reply::Error(e) => assert_eq!(e.code, ErrorCode::NotFound),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(remove(None), Reply::Ok);
+    assert!(!project.join(".cave").exists());
+    assert!(project.join("cave.toml").exists());
+    assert!(
+        matches!(r.request(Request::List { project: None }), Reply::List { entries } if entries.is_empty())
+    );
+    // Again, with nothing left, is fine.
+    assert_eq!(remove(None), Reply::Ok);
+
+    // A `.cave` that is a link is removed without following it.
+    let elsewhere = r.home.root().join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    fs::write(elsewhere.join("keep"), "keep").unwrap();
+    std::os::unix::fs::symlink(&elsewhere, project.join(".cave")).unwrap();
+    assert_eq!(remove(None), Reply::Ok);
+    assert!(fs::symlink_metadata(project.join(".cave")).is_err());
+    assert!(elsewhere.join("keep").exists());
+}
