@@ -33,6 +33,7 @@ fn config() -> VmmConfig {
         memory_bytes: 1 << 30,
         cpus: 2,
         net: NetMode::Nat,
+        restore: None,
     }
 }
 
@@ -102,8 +103,10 @@ fn an_unknown_message_gets_an_error_and_the_link_stays_up() {
 
 /// A VM whose agent connections are socket pairs; the test keeps the far
 /// ends to play the agent.
+#[derive(Default)]
 struct FakeVm {
     agents: Mutex<Vec<UnixStream>>,
+    snapshots: Mutex<Vec<std::path::PathBuf>>,
     fail: bool,
 }
 
@@ -116,14 +119,22 @@ impl RunningVm for FakeVm {
         self.agents.lock().unwrap().push(agent);
         Ok(ours)
     }
+
+    fn snapshot(&self, dir: &std::path::Path) -> Result<(), ErrorMessage> {
+        if self.fail {
+            return Err(ErrorMessage::new(ErrorCode::Io, "disk full"));
+        }
+        self.snapshots.lock().unwrap().push(dir.to_path_buf());
+        Ok(())
+    }
 }
 
 #[test]
 fn an_agent_connection_arrives_as_a_descriptor() {
     let (mut daemon, mut vmm) = UnixStream::pair().unwrap();
     let vm = FakeVm {
-        agents: Mutex::new(Vec::new()),
         fail: false,
+        ..FakeVm::default()
     };
     thread::scope(|s| {
         let server = s.spawn(|| serve(&mut vmm, &vm).unwrap());
@@ -155,11 +166,45 @@ fn an_agent_connection_arrives_as_a_descriptor() {
 }
 
 #[test]
+fn snapshots_are_saved_where_asked_and_failures_reported() {
+    for fail in [false, true] {
+        let (mut daemon, mut vmm) = UnixStream::pair().unwrap();
+        let vm = FakeVm {
+            fail,
+            ..FakeVm::default()
+        };
+        thread::scope(|s| {
+            let server = s.spawn(|| serve(&mut vmm, &vm).unwrap());
+            send(
+                &mut daemon,
+                &ToVmm::Snapshot {
+                    dir: "/p/.cave/snapshots/s".into(),
+                },
+            );
+            match receive(&mut daemon) {
+                FromVmm::Ok => assert!(!fail),
+                FromVmm::Error(e) => assert!(fail && e.message == "disk full", "{e:?}"),
+                other => panic!("{other:?}"),
+            }
+            drop(daemon);
+            assert_eq!(server.join().unwrap(), Ending::Closed);
+        });
+        let saved = vm.snapshots.lock().unwrap().clone();
+        let expect: Vec<std::path::PathBuf> = if fail {
+            vec![]
+        } else {
+            vec!["/p/.cave/snapshots/s".into()]
+        };
+        assert_eq!(saved, expect);
+    }
+}
+
+#[test]
 fn an_unreachable_agent_is_an_error_reply() {
     let (mut daemon, mut vmm) = UnixStream::pair().unwrap();
     let vm = FakeVm {
-        agents: Mutex::new(Vec::new()),
         fail: true,
+        ..FakeVm::default()
     };
     thread::scope(|s| {
         let server = s.spawn(|| serve(&mut vmm, &vm).unwrap());
@@ -234,8 +279,8 @@ fn many_agent_connections_arrive_open() {
             s.spawn(|| {
                 let (mut daemon, mut vmm) = UnixStream::pair().unwrap();
                 let vm = FakeVm {
-                    agents: Mutex::new(Vec::new()),
                     fail: false,
+                    ..FakeVm::default()
                 };
                 thread::scope(|s| {
                     s.spawn(|| serve(&mut vmm, &vm).unwrap());
@@ -257,4 +302,40 @@ fn many_agent_connections_arrive_open() {
             });
         }
     });
+}
+
+#[test]
+fn snapshot_preparation_waits_for_the_agent() {
+    let (ours, mut theirs) = UnixStream::pair().unwrap();
+    let agent = thread::spawn(move || {
+        let Some(Message::Hello(hello)) = read_frame::<_, Message>(&mut theirs).unwrap() else {
+            panic!("no hello");
+        };
+        let reply = hello.accept(VERSIONS, "agent test").unwrap();
+        write_frame(&mut theirs, &Message::Hello(reply)).unwrap();
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            seen.push(read_frame::<_, Message>(&mut theirs).unwrap().unwrap());
+        }
+        write_frame(&mut theirs, &Message::SnapshotReady).unwrap();
+        seen
+    });
+    prepare_snapshot(ours).unwrap();
+    assert_eq!(
+        agent.join().unwrap(),
+        [Message::Control, Message::SnapshotPrepare]
+    );
+
+    // An agent that answers something else is an error.
+    let (ours, mut theirs) = UnixStream::pair().unwrap();
+    thread::spawn(move || {
+        if let Ok(Some(Message::Hello(hello))) = read_frame::<_, Message>(&mut theirs) {
+            let reply = hello.accept(VERSIONS, "agent test").unwrap();
+            write_frame(&mut theirs, &Message::Hello(reply)).unwrap();
+            let _ = read_frame::<_, Message>(&mut theirs);
+            let _ = read_frame::<_, Message>(&mut theirs);
+            write_frame(&mut theirs, &Message::Pong).unwrap();
+        }
+    });
+    assert!(prepare_snapshot(ours).is_err());
 }

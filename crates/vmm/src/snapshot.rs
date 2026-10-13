@@ -10,7 +10,7 @@
 //! but not yet the stable format phase 4 needs.
 
 use std::fmt;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
@@ -18,9 +18,10 @@ use crate::backend::{self, Backend, BackendVcpu, IccReg, RedistReg, Reg, SysReg}
 use crate::devices::pl011::Pl011State;
 use crate::devices::virtio::Queue;
 use crate::devices::virtio::mmio::TransportState;
+use crate::host;
 use crate::layout;
 use crate::memory::{self, FileMode, GuestMemory, PAGE_SIZE, Region};
-use crate::runner::Power;
+use crate::runner::{self, Machine, Power};
 
 use cave_vm_hvf::{
     GUEST_STATE_ICC_REGS, GUEST_STATE_REDIST_REGS, GUEST_STATE_SYS_REGS, SIMD_FP_REGS,
@@ -35,6 +36,8 @@ const MAGIC: &[u8; 8] = b"CAVESNAP";
 const VERSION: u32 = 4;
 const STATE_FILE: &str = "state";
 const MEMORY_FILE: &str = "memory";
+/// The disk clone [`take`] writes next to `state` and `memory`.
+pub const DISK_FILE: &str = "disk.img";
 
 /// One vCPU's architectural state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +73,8 @@ pub enum Error {
     Io(io::Error),
     Backend(backend::Error),
     Memory(memory::Error),
+    /// The VM could not be paused.
+    Pause(runner::Error),
     /// The `state` file is not a snapshot this build can read.
     Format(String),
 }
@@ -80,6 +85,7 @@ impl fmt::Display for Error {
             Error::Io(e) => write!(f, "snapshot file error: {e}"),
             Error::Backend(e) => e.fmt(f),
             Error::Memory(e) => e.fmt(f),
+            Error::Pause(e) => e.fmt(f),
             Error::Format(why) => write!(f, "cannot read this snapshot: {why}"),
         }
     }
@@ -177,14 +183,73 @@ pub fn restore_vcpu<V: BackendVcpu>(
     Ok(())
 }
 
-/// Writes `state` and guest memory into `dir`, which must exist.
+/// Snapshots a running VM: pauses it, writes `state` and `memory` into
+/// `dir` (created if missing) with an APFS clone of `disk` as
+/// [`DISK_FILE`], and lets it run on, whether or not that worked. The disk
+/// is cloned while the guest is paused, so it matches memory.
+pub fn take<B: Backend, W: Write>(
+    dir: &Path,
+    machine: &Machine<W>,
+    backend: &B,
+    memory: &GuestMemory,
+    disk: &Path,
+) -> Result<()> {
+    fs::create_dir_all(dir)?;
+    let vcpus = machine.pause(backend).map_err(Error::Pause)?;
+    let saved = save_paused(dir, machine, backend, memory, disk, vcpus);
+    machine.resume();
+    saved
+}
+
+fn save_paused<B: Backend, W: Write>(
+    dir: &Path,
+    machine: &Machine<W>,
+    backend: &B,
+    memory: &GuestMemory,
+    disk: &Path,
+    vcpus: Vec<VcpuState>,
+) -> Result<()> {
+    let devices = machine.devices();
+    let state = State {
+        memory_size: memory.regions().iter().map(|r| r.size() as u64).sum(),
+        irqchip: backend.irqchip_state()?,
+        uart: devices.uart.state(),
+        devices: devices.save_virtio(),
+        vcpus,
+    };
+    drop(devices);
+    save(dir, &state, memory)?;
+    // The block device writes straight to the file; flush it so the clone
+    // has everything the guest wrote.
+    File::open(disk)?.sync_all()?;
+    let clone = dir.join(DISK_FILE);
+    match fs::remove_file(&clone) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e.into()),
+        _ => {}
+    }
+    host::clonefile(disk, &clone)?;
+    Ok(())
+}
+
+/// Writes `state` and guest memory into `dir`, which must exist. Each file
+/// is written under a temporary name and renamed into place, so a VM
+/// running from an older snapshot in `dir` keeps its own copy (it maps the
+/// old file) and a failed save leaves no half-written file behind.
 pub fn save(dir: &Path, state: &State, memory: &GuestMemory) -> Result<()> {
-    File::create(dir.join(STATE_FILE))?.write_all(&encode(state))?;
-    let mut file = File::create(dir.join(MEMORY_FILE))?;
-    file.set_len(state.memory_size)?;
+    let partial = |name: &str| dir.join(format!(".{name}.partial"));
+    File::create(partial(STATE_FILE))?.write_all(&encode(state))?;
+    write_memory(&partial(MEMORY_FILE), state.memory_size, memory)?;
+    fs::rename(partial(MEMORY_FILE), dir.join(MEMORY_FILE))?;
+    fs::rename(partial(STATE_FILE), dir.join(STATE_FILE))?;
+    Ok(())
+}
+
+fn write_memory(path: &Path, memory_size: u64, memory: &GuestMemory) -> Result<()> {
+    let mut file = File::create(path)?;
+    file.set_len(memory_size)?;
     let mut page = vec![0u8; PAGE_SIZE as usize];
     let mut offset = 0;
-    while offset < state.memory_size {
+    while offset < memory_size {
         memory.read(layout::RAM_BASE + offset, &mut page)?;
         if page.iter().any(|&b| b != 0) {
             file.seek(SeekFrom::Start(offset))?;

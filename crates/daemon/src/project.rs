@@ -239,6 +239,7 @@ impl VmSource for ProjectSource {
                 memory_bytes: settings.memory_bytes,
                 cpus: settings.cpus,
                 net: net_mode,
+                restore: None,
             },
             policy: Policy {
                 name,

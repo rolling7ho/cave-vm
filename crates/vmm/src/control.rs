@@ -8,6 +8,7 @@
 use std::io;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -24,6 +25,9 @@ use crate::host;
 pub trait RunningVm {
     /// A new connection to the guest agent.
     fn agent_connection(&self) -> io::Result<UnixStream>;
+
+    /// Pauses the VM, saves it into `dir`, and lets it run on.
+    fn snapshot(&self, dir: &Path) -> Result<(), ErrorMessage>;
 }
 
 /// How [`serve`] ended.
@@ -133,6 +137,10 @@ pub fn serve(link: &mut UnixStream, vm: &dyn RunningVm) -> io::Result<Ending> {
                 )?,
             },
             Some(ToVmm::Ping) => reply(link, &FromVmm::Pong)?,
+            Some(ToVmm::Snapshot { dir }) => match vm.snapshot(Path::new(&dir)) {
+                Ok(()) => reply(link, &FromVmm::Ok)?,
+                Err(e) => reply(link, &FromVmm::Error(e))?,
+            },
             Some(ToVmm::Stop) => {
                 reply(link, &FromVmm::Ok)?;
                 return Ok(Ending::Stop);
@@ -161,6 +169,9 @@ pub fn serve(link: &mut UnixStream, vm: &dyn RunningVm) -> io::Result<Ending> {
 const AGENT_ATTEMPT: Duration = Duration::from_secs(2);
 /// The pause between attempts while the guest boots.
 const AGENT_RETRY: Duration = Duration::from_millis(20);
+/// How long the agent may take to flush the guest's file systems before a
+/// snapshot.
+const PREPARE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Waits until the guest agent answers `ping` and has set the clock, trying `connect` again
 /// while the guest is still booting. Fails after `timeout`, or as soon as
@@ -196,17 +207,36 @@ pub fn wait_for_agent(
     }
 }
 
-/// The handshake, then `ping` and the clock (`restored`) on a control
-/// connection, as the protocol asks before `booted`.
-fn greet(stream: &mut UnixStream) -> io::Result<()> {
+/// Asks the guest agent to flush the guest's file systems, so the disk in
+/// a snapshot is complete on its own, for a restore that has to boot from
+/// it. Returns once the agent says it is safe to pause.
+pub fn prepare_snapshot(mut stream: UnixStream) -> io::Result<()> {
     stream.set_read_timeout(Some(AGENT_ATTEMPT))?;
+    open_control(&mut stream)?;
+    stream.set_read_timeout(Some(PREPARE_TIMEOUT))?;
+    send_agent(&mut stream, &Message::SnapshotPrepare)?;
+    match read_agent(&mut stream)? {
+        Message::SnapshotReady => Ok(()),
+        _ => Err(io::ErrorKind::InvalidData.into()),
+    }
+}
+
+/// The handshake and `control` on a new agent connection.
+fn open_control(stream: &mut UnixStream) -> io::Result<()> {
     let hello = Message::Hello(Hello::client(VERSIONS, software()));
     send_agent(stream, &hello)?;
     match read_agent(stream)? {
         Message::Hello(reply) if reply.agreed(VERSIONS).is_ok() => {}
         _ => return Err(io::ErrorKind::InvalidData.into()),
     }
-    send_agent(stream, &Message::Control)?;
+    send_agent(stream, &Message::Control)
+}
+
+/// The handshake, then `ping` and the clock (`restored`) on a control
+/// connection, as the protocol asks before `booted`.
+fn greet(stream: &mut UnixStream) -> io::Result<()> {
+    stream.set_read_timeout(Some(AGENT_ATTEMPT))?;
+    open_control(stream)?;
     send_agent(stream, &Message::Ping)?;
     if read_agent(stream)? != Message::Pong {
         return Err(io::ErrorKind::InvalidData.into());

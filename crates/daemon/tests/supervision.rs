@@ -137,6 +137,7 @@ fn config(vm: &VmId) -> VmmConfig {
         memory_bytes: 2 << 30,
         cpus: 2,
         net: NetMode::Nat,
+        restore: None,
     }
 }
 

@@ -241,9 +241,10 @@ The link uses the same framing, handshake and errors. Unlike the other links it 
 
 | Request | Fields | Reply |
 | --- | --- | --- |
-| `boot` | `config`: `kernel` and `disk` (absolute paths), `memory_bytes`, `cpus`, `net` (`"off"`, `"nat"`, `"lan"`) | `booted` once the guest agent answers `ping` and has set the guest clock (`restored`), or an `error` |
+| `boot` | `config`: `kernel` and `disk` (absolute paths), `memory_bytes`, `cpus`, `net` (`"off"`, `"nat"`, `"lan"`), and optionally `restore`, the absolute path of a snapshot folder to restore instead of booting. A restore needs `disk` to be the snapshot's disk (a clone of its `disk.img`) and `cpus` and `memory_bytes` to match the snapshot | `booted` once the guest agent answers `ping` and has set the guest clock (`restored`), or an `error` |
 | `agent_connect` | none | `agent_connection`, with the host end of a new connection to the guest agent attached as a file descriptor (`SCM_RIGHTS`) |
 | `ping` | none | `pong` |
+| `snapshot` | `dir`: the absolute path of a folder, created if missing | `ok` once the VM is saved into `dir` (`state`, `memory` and `disk.img`, `docs/snapshots.md`) and running again, or an `error`. The VMM first asks the agent to flush the guest's file systems (`snapshot_prepare`), then pauses every vCPU, saves, and resumes |
 | `stop` | none | `ok`, after which the VMM stops the VM and exits |
 
 The daemon then speaks the agent protocol, from the handshake on, over each connection it gets from `agent_connect`.
