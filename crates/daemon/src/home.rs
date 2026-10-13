@@ -21,6 +21,11 @@ fn private_dir(dir: &Path) -> io::Result<()> {
     fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
 }
 
+/// The file in a VM folder naming its project folder, so the daemon can
+/// find the projects it has seen after a restart. It lives in the data
+/// directory, never in `.cave/`.
+pub const PROJECT_FILE: &str = "project";
+
 impl Home {
     /// `CAVE_HOME` if set, otherwise `~/Library/Application Support/cave-vm`.
     pub fn from_env() -> io::Result<Home> {
@@ -72,6 +77,22 @@ impl Home {
         let dir = self.vms().join(name);
         private_dir(&dir)?;
         Ok(dir)
+    }
+
+    /// The project folders of every VM this data directory has seen, from
+    /// the [`PROJECT_FILE`] in each VM folder, each listed once.
+    pub fn projects(&self) -> io::Result<Vec<PathBuf>> {
+        let mut projects = Vec::new();
+        for dir in self.vm_dirs()? {
+            if let Ok(project) = fs::read_to_string(dir.join(PROJECT_FILE)) {
+                let project = PathBuf::from(project);
+                if !projects.contains(&project) {
+                    projects.push(project);
+                }
+            }
+        }
+        projects.sort();
+        Ok(projects)
     }
 
     /// Every VM folder.
