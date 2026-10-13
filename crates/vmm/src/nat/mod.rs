@@ -9,18 +9,25 @@
 //! LANs.
 //!
 //! The gateway answers ARP for itself and pings to it, and drops frames the
-//! guest sends with an address that is not its own. Outbound TCP goes
-//! through host sockets ([`tcp`]) for destinations the [`Policy`] allows;
-//! anything else gets a reset. UDP and DNS come next (ROADMAP P3.7d).
+//! guest sends with an address that is not its own. Outbound TCP ([`tcp`])
+//! and UDP ([`udp`]) go through host sockets for destinations the
+//! [`Policy`] allows; a denied TCP connection gets a reset and a denied
+//! datagram is dropped. DNS queries to the gateway go to the Mac's DNS
+//! servers.
 
 mod host;
 mod policy;
 mod tcp;
+mod udp;
 
 pub use host::{Connector, HostStream, TcpConnector};
 pub use policy::{Mode, Policy, Verdict};
+pub use udp::{
+    DNS_PORT, HostDatagram, HostUdp, IDLE_TIMEOUT, UdpConnector, host_dns_servers,
+    parse_resolv_conf,
+};
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -57,9 +64,23 @@ const BACKLOG: usize = 256;
 /// keep it from returning.
 const RELAY_ROUNDS: usize = 8;
 
-/// A connection attempt by the guest, for the audit log.
+/// What host threads report to the gateway.
+pub(crate) enum Event {
+    Tcp(HostEvent),
+    Udp(udp::HostEvent),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Protocol {
+    Tcp,
+    Udp,
+}
+
+/// A connection attempt by the guest, for the audit log. For UDP, the
+/// first datagram of a flow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectEvent {
+    pub protocol: Protocol,
     pub dst: SocketAddrV4,
     pub allowed: bool,
     /// Why it was denied, such as `LAN`.
@@ -81,11 +102,19 @@ pub struct Stack {
     policy: Policy,
     connector: Arc<dyn Connector>,
     flows: Flows,
-    events: Sender<HostEvent>,
-    host_events: Receiver<HostEvent>,
+    udp_connector: Option<Arc<dyn UdpConnector>>,
+    dns: Vec<SocketAddrV4>,
+    udp: udp::Flows,
+    /// Denied UDP flows already reported, and when, so a stream of
+    /// datagrams is reported once per [`IDLE_TIMEOUT`].
+    udp_denied: HashMap<udp::FlowKey, Duration>,
+    events: Sender<Event>,
+    host_events: Receiver<Event>,
     /// An event [`wait`](Self::wait) took off the channel.
-    waiting: Option<HostEvent>,
+    waiting: Option<Event>,
     connects: Vec<ConnectEvent>,
+    /// The time of the latest [`poll`](Self::poll).
+    now: Duration,
 }
 
 impl Stack {
@@ -116,11 +145,25 @@ impl Stack {
             policy,
             connector,
             flows: Flows::default(),
+            udp_connector: None,
+            dns: Vec::new(),
+            udp: udp::Flows::default(),
+            udp_denied: HashMap::new(),
             events,
             host_events,
             waiting: None,
             connects: Vec::new(),
+            now,
         }
+    }
+
+    /// Lets the guest send UDP through `connector`, and DNS queries to the
+    /// gateway on to `dns` (the first server; usually
+    /// [`host_dns_servers`]). Without it, UDP is dropped.
+    pub fn with_udp(mut self, connector: Arc<dyn UdpConnector>, dns: Vec<SocketAddrV4>) -> Stack {
+        self.udp_connector = Some(connector);
+        self.dns = dns;
+        self
     }
 
     /// Takes one frame the guest sent. Returns `false` if it was dropped:
@@ -129,10 +172,16 @@ impl Stack {
     ///
     /// A TCP SYN for a new connection is checked against the policy. If it
     /// is allowed, it is held while the host connects; if not, the guest
-    /// gets a reset.
+    /// gets a reset. A UDP datagram is sent on at once, or dropped.
     pub fn from_guest(&mut self, frame: &[u8]) -> bool {
         if self.link.from_guest.len() >= BACKLOG || !from_guest_address(frame) {
             return false;
+        }
+        if is_udp(frame) {
+            return match udp::parse(frame) {
+                Some(datagram) => self.udp_from_guest(datagram.key, datagram.payload),
+                None => false,
+            };
         }
         match classify(frame) {
             Packet::Other => {}
@@ -148,6 +197,7 @@ impl Stack {
                     match self.policy.check(*key.dst.ip()) {
                         Verdict::Forward => {
                             self.connects.push(ConnectEvent {
+                                protocol: Protocol::Tcp,
                                 dst: key.dst,
                                 allowed: true,
                                 reason: None,
@@ -157,6 +207,7 @@ impl Stack {
                             return true;
                         }
                         Verdict::Deny(reason) => self.connects.push(ConnectEvent {
+                            protocol: Protocol::Tcp,
                             dst: key.dst,
                             allowed: false,
                             reason: Some(reason),
@@ -169,6 +220,53 @@ impl Stack {
         }
         self.link.from_guest.push_back(frame.to_vec());
         true
+    }
+
+    fn udp_from_guest(&mut self, key: udp::FlowKey, payload: &[u8]) -> bool {
+        let Some(connector) = &self.udp_connector else {
+            return false;
+        };
+        let upstream = if self.udp.contains(&key) {
+            key.dst
+        } else if udp::is_dns(&key) {
+            match self.dns.first() {
+                Some(server) => *server,
+                None => return false,
+            }
+        } else {
+            match self.policy.check(*key.dst.ip()) {
+                Verdict::Forward => {
+                    self.connects.push(ConnectEvent {
+                        protocol: Protocol::Udp,
+                        dst: key.dst,
+                        allowed: true,
+                        reason: None,
+                    });
+                    key.dst
+                }
+                Verdict::Deny(reason) => {
+                    let now = self.now;
+                    let reported = self
+                        .udp_denied
+                        .get(&key)
+                        .is_some_and(|at| now.saturating_sub(*at) < IDLE_TIMEOUT);
+                    if !reported {
+                        self.udp_denied.insert(key, now);
+                        self.connects.push(ConnectEvent {
+                            protocol: Protocol::Udp,
+                            dst: key.dst,
+                            allowed: false,
+                            reason: Some(reason),
+                        });
+                    }
+                    return false;
+                }
+                // Only DNS listens on the gateway.
+                Verdict::Gateway => return false,
+            }
+        };
+        self.udp
+            .send(key, upstream, payload, self.now, connector, &self.events)
     }
 
     /// Waits up to `timeout` for a host connection to have news, so a
@@ -186,15 +284,32 @@ impl Stack {
     /// Processes waiting frames, host events and timers, and returns the
     /// frames to give the guest.
     pub fn poll(&mut self, now: Duration) -> Vec<Vec<u8>> {
+        self.now = now;
         let waiting = self.waiting.take();
-        for event in waiting.into_iter().chain(self.host_events.try_iter()) {
-            if let Some(syn) = self
-                .flows
-                .host_event(event, &mut self.sockets, &self.events)
-            {
-                self.link.from_guest.push_back(syn);
+        let events: Vec<Event> = waiting
+            .into_iter()
+            .chain(self.host_events.try_iter())
+            .collect();
+        for event in events {
+            match event {
+                Event::Tcp(event) => {
+                    if let Some(syn) = self
+                        .flows
+                        .host_event(event, &mut self.sockets, &self.events)
+                    {
+                        self.link.from_guest.push_back(syn);
+                    }
+                }
+                Event::Udp(event) => {
+                    if let Some(frame) = self.udp.host_event(event, now) {
+                        self.link.to_guest.push(frame);
+                    }
+                }
             }
         }
+        self.udp.expire(now);
+        self.udp_denied
+            .retain(|_, at| now.saturating_sub(*at) < IDLE_TIMEOUT);
         for _ in 0..RELAY_ROUNDS {
             self.iface
                 .poll(instant(now), &mut self.link, &mut self.sockets);
@@ -216,6 +331,14 @@ impl Stack {
             .poll_delay(instant(now), &self.sockets)
             .map(|d| Duration::from_micros(d.total_micros()))
     }
+}
+
+/// Whether an IPv4 frame carries UDP. `frame` has passed
+/// [`from_guest_address`].
+fn is_udp(frame: &[u8]) -> bool {
+    let eth = EthernetFrame::new_unchecked(frame);
+    eth.ethertype() == EthernetProtocol::Ipv4
+        && Ipv4Packet::new_unchecked(eth.payload()).next_header() == IpProtocol::Udp
 }
 
 fn instant(now: Duration) -> Instant {
