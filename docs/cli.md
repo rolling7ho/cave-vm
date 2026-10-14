@@ -137,7 +137,7 @@ Sets up the current directory as a project. It writes:
   - `.claude/skills/cave/SKILL.md`: the skill.
   - `AGENTS.md`: the skill without its frontmatter, between `<!-- cave:start -->` and `<!-- cave:end -->`.
   - `.mcp.json`: registers `cave mcp` as the `cave` server.
-  - `.claude/settings.json`: adds `Bash` to `permissions.deny` and `cave` to `enabledMcpjsonServers`, so Claude Code reaches the VM through MCP and has no shell on the Mac.
+  - `.claude/settings.json`: adds `Bash` to `permissions.deny`, so Claude Code has no shell on the Mac and reaches the VM through MCP. Claude Code asks once to approve the `cave` server, since a project's own settings cannot approve it.
 
   Other settings in those files are kept. A file that already has these entries is not rewritten. A file that is not valid JSON is an error that says to fix it, and is left alone.
 

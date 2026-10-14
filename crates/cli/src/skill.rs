@@ -86,11 +86,11 @@ pub fn write_agents_section(dir: &Path) -> io::Result<()> {
 }
 
 /// Adds `Bash` to Claude Code's denied tools, so the agent has no shell
-/// on the Mac, and enables the `cave` server from `.mcp.json`.
+/// on the Mac. Claude Code asks the user once to approve the `cave` server
+/// from `.mcp.json`; a project's own settings do not approve it.
 fn deny_host_bash(settings: &mut Map<String, Value>) -> std::result::Result<(), String> {
     let permissions = object(settings, "permissions")?;
-    push_unique(permissions, "deny", "Bash")?;
-    push_unique(settings, "enabledMcpjsonServers", "cave")
+    push_unique(permissions, "deny", "Bash")
 }
 
 /// Registers `cave mcp` as the `cave` server.
@@ -262,7 +262,7 @@ mod tests {
         write_all(&dir).unwrap();
         assert_eq!(
             read_json(&dir.join(CLAUDE_SETTINGS)),
-            json!({"permissions": {"deny": ["Bash"]}, "enabledMcpjsonServers": ["cave"]})
+            json!({"permissions": {"deny": ["Bash"]}})
         );
         assert_eq!(
             read_json(&dir.join(MCP_CONFIG)),
@@ -292,8 +292,7 @@ mod tests {
             read_json(&dir.join(CLAUDE_SETTINGS)),
             json!({
                 "model": "x",
-                "permissions": {"allow": ["Read"], "deny": ["WebFetch", "Bash"]},
-                "enabledMcpjsonServers": ["cave"]
+                "permissions": {"allow": ["Read"], "deny": ["WebFetch", "Bash"]}
             })
         );
         let servers = read_json(&dir.join(MCP_CONFIG))["mcpServers"].clone();
@@ -301,8 +300,7 @@ mod tests {
         assert_eq!(servers["cave"]["args"], json!(["mcp"]));
 
         // Complete already: the file is left byte for byte.
-        let complete =
-            "{\"permissions\":{\"deny\":[\"Bash\"]},\"enabledMcpjsonServers\":[\"cave\"]}";
+        let complete = "{\"permissions\":{\"deny\":[\"Bash\"]}}";
         fs::write(dir.join(CLAUDE_SETTINGS), complete).unwrap();
         write_all(&dir).unwrap();
         assert_eq!(
