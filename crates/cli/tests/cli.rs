@@ -247,7 +247,7 @@ fn init_writes_the_config_and_ignores_the_state_folder() {
         "Created cave.toml (sealed, debian, 2 CPUs, 2 GB)\n\
          Added .cave/ to .gitignore\n\
          Wrote the cave section of AGENTS.md and .claude/skills/cave\n\
-         Set up Claude Code to use cave mcp, with host Bash denied (.mcp.json, .claude/settings.json)\n\
+         Set up Claude Code to use cave mcp, with host Bash and reading .env denied (.mcp.json, .claude/settings.json)\n\
          Added an Include line to ~/.ssh/config for cave's SSH hosts\n\
          Edit in the VM: connect VS Code Remote-SSH or Zed to proj.cave\n\
          Next: cave shell, or cave agent claude\n"
@@ -701,7 +701,7 @@ fn agent_runs_claude_on_the_mac_through_cave_mcp_after_a_snapshot() {
     );
     assert_eq!(
         lines[3..],
-        ["--disallowedTools", "Bash", "-p", "fix the tests"]
+        ["--disallowedTools=Bash,Read(./.env)", "-p", "fix the tests"]
     );
     let requests = state.lock().unwrap().requests.clone();
     let snapshot = requests

@@ -2,8 +2,8 @@
 //! source, `skill/cave/SKILL.md` in the repository, is both what `cave init`
 //! writes into a project and the bootstrap skill on the website. `cave init`
 //! writes it as a Claude Code skill and as a section of `AGENTS.md`, and
-//! sets Claude Code up to use `cave mcp` with host Bash denied: the skill is
-//! guidance and the config is the guardrail.
+//! sets Claude Code up to use `cave mcp` with host Bash and reading `.env`
+//! denied: the skill is guidance and the config is the guardrail.
 
 use std::fs;
 use std::io;
@@ -11,6 +11,7 @@ use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
+use crate::agent;
 use crate::error::{CliError, Result};
 
 /// The skill, as written.
@@ -26,7 +27,8 @@ pub const AGENTS_FILE: &str = "AGENTS.md";
 const SECTION_START: &str = "<!-- cave:start -->";
 const SECTION_END: &str = "<!-- cave:end -->";
 
-/// Claude Code's project settings, where host Bash is denied.
+/// Claude Code's project settings, where host Bash and reading `.env` are
+/// denied.
 pub const CLAUDE_SETTINGS: &str = ".claude/settings.json";
 
 /// Claude Code's project MCP servers, where `cave mcp` is registered.
@@ -45,7 +47,7 @@ fn body() -> &'static str {
 pub fn write_all(dir: &Path) -> Result<()> {
     write_claude_skill(dir)?;
     write_agents_section(dir)?;
-    update_json(dir, CLAUDE_SETTINGS, deny_host_bash)?;
+    update_json(dir, CLAUDE_SETTINGS, deny_host_tools)?;
     update_json(dir, MCP_CONFIG, register_mcp)?;
     Ok(())
 }
@@ -85,12 +87,15 @@ pub fn write_agents_section(dir: &Path) -> io::Result<()> {
     fs::write(path, text)
 }
 
-/// Adds `Bash` to Claude Code's denied tools, so the agent has no shell
-/// on the Mac. Claude Code asks the user once to approve the `cave` server
-/// from `.mcp.json`; a project's own settings do not approve it.
-fn deny_host_bash(settings: &mut Map<String, Value>) -> std::result::Result<(), String> {
+/// Adds [`agent::DENIED_TOOLS`] to Claude Code's denied tools, so the
+/// agent has no shell on the Mac and cannot read `.env`. Claude Code asks
+/// the user once to approve the `cave` server from `.mcp.json`; a
+/// project's own settings do not approve it.
+fn deny_host_tools(settings: &mut Map<String, Value>) -> std::result::Result<(), String> {
     let permissions = object(settings, "permissions")?;
-    push_unique(permissions, "deny", "Bash")
+    agent::DENIED_TOOLS
+        .iter()
+        .try_for_each(|tool| push_unique(permissions, "deny", tool))
 }
 
 /// Registers `cave mcp` as the `cave` server.
@@ -257,12 +262,12 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_gets_cave_mcp_with_host_bash_denied() {
+    fn claude_code_gets_cave_mcp_with_host_bash_and_env_denied() {
         let dir = temp("claude");
         write_all(&dir).unwrap();
         assert_eq!(
             read_json(&dir.join(CLAUDE_SETTINGS)),
-            json!({"permissions": {"deny": ["Bash"]}})
+            json!({"permissions": {"deny": ["Bash", "Read(./.env)"]}})
         );
         assert_eq!(
             read_json(&dir.join(MCP_CONFIG)),
@@ -292,7 +297,7 @@ mod tests {
             read_json(&dir.join(CLAUDE_SETTINGS)),
             json!({
                 "model": "x",
-                "permissions": {"allow": ["Read"], "deny": ["WebFetch", "Bash"]}
+                "permissions": {"allow": ["Read"], "deny": ["WebFetch", "Bash", "Read(./.env)"]}
             })
         );
         let servers = read_json(&dir.join(MCP_CONFIG))["mcpServers"].clone();
@@ -300,7 +305,7 @@ mod tests {
         assert_eq!(servers["cave"]["args"], json!(["mcp"]));
 
         // Complete already: the file is left byte for byte.
-        let complete = "{\"permissions\":{\"deny\":[\"Bash\"]}}";
+        let complete = "{\"permissions\":{\"deny\":[\"Bash\",\"Read(./.env)\"]}}";
         fs::write(dir.join(CLAUDE_SETTINGS), complete).unwrap();
         write_all(&dir).unwrap();
         assert_eq!(
