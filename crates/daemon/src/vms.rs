@@ -40,6 +40,10 @@ use crate::project::STATE_DIR;
 /// crash.
 const PID_FILE: &str = "vmm.pid";
 
+/// The file in a VM's folder holding when it first booted, in seconds
+/// since the epoch, from which its TTL counts.
+pub const BOOTED_FILE: &str = "booted";
+
 /// A VMM process started but not yet booted. Dropping it stops the
 /// process.
 struct Spawned(Option<Launched>);
@@ -319,6 +323,21 @@ impl Vms {
         ports: &[PortMap],
     ) -> Result<Policy, ErrorMessage> {
         let vm = self.vm(id)?;
+        // A stopped VM whose TTL ran out while the daemon was not watching
+        // it is removed now, and this start boots a new one.
+        let stopped = !matches!(*vm.slot.lock().expect("vm lock"), Slot::Running(_));
+        if stopped && booted_unix(id).is_some() {
+            let ttl = self.source.policy(id).ok().and_then(|p| p.ttl_seconds);
+            if expired(id, ttl) {
+                self.remove(id)?;
+                eprintln!(
+                    "cave-daemon: removed {} because its TTL ran out",
+                    display_name(id)
+                );
+            }
+        }
+        // Removing forgets the VM, so look it up again.
+        let vm = self.vm(id)?;
         let mut slot = vm.idle_slot();
         if let Slot::Running(running) = &mut *slot {
             running.activity.touch();
@@ -420,6 +439,7 @@ impl Vms {
             Arc::clone(&child),
             Arc::clone(&stop_requested),
         );
+        record_boot(&vm.id);
         Ok(Running {
             link,
             child,
@@ -510,8 +530,8 @@ impl Vms {
         })
     }
 
-    /// Calls [`Vms::suspend_idle`] every `interval` on its own thread for
-    /// as long as the daemon runs.
+    /// Calls [`Vms::suspend_idle`] and [`Vms::remove_expired`] every
+    /// `interval` on its own thread for as long as the daemon runs.
     pub fn watch_idle(self: &Arc<Self>, interval: Duration) {
         let vms = Arc::downgrade(self);
         thread::spawn(move || {
@@ -521,8 +541,54 @@ impl Vms {
                     return;
                 };
                 vms.suspend_idle();
+                vms.remove_expired();
             }
         });
+    }
+
+    /// Removes every VM the daemon knows whose TTL has run out, as
+    /// `cave rm --yes` would (D21), and returns them.
+    pub fn remove_expired(&self) -> Vec<VmId> {
+        let vms: Vec<Arc<Vm>> = self
+            .vms
+            .lock()
+            .expect("vms lock")
+            .values()
+            .cloned()
+            .collect();
+        let mut removed = Vec::new();
+        for vm in vms {
+            if booted_unix(&vm.id).is_none() {
+                continue;
+            }
+            let running = match &*vm.slot.lock().expect("vm lock") {
+                Slot::Running(running) => Some(running.policy.ttl_seconds),
+                Slot::Busy => continue,
+                Slot::Stopped => None,
+            };
+            let ttl = match running {
+                Some(ttl) => ttl,
+                None => self.source.policy(&vm.id).ok().and_then(|p| p.ttl_seconds),
+            };
+            if !expired(&vm.id, ttl) {
+                continue;
+            }
+            match self.remove(&vm.id) {
+                Ok(()) => {
+                    eprintln!(
+                        "cave-daemon: removed {} because its TTL ran out",
+                        display_name(&vm.id)
+                    );
+                    removed.push(vm.id.clone());
+                }
+                Err(e) => eprintln!(
+                    "cave-daemon: {}'s TTL ran out but it could not be removed: {}",
+                    display_name(&vm.id),
+                    e.message
+                ),
+            }
+        }
+        removed
     }
 
     /// Moves the connection attempts every running VMM kept into the VMs'
@@ -895,6 +961,32 @@ fn remove_state(state: &Path) -> Result<(), ErrorMessage> {
         Err(e) => Err(failed(e)),
         Ok(meta) if meta.is_dir() => fs::remove_dir_all(state).map_err(failed),
         Ok(_) => fs::remove_file(state).map_err(failed),
+    }
+}
+
+/// When `id` first booted, if it has.
+fn booted_unix(id: &VmId) -> Option<u64> {
+    fs::read_to_string(vm_state_dir(id).join(BOOTED_FILE))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// Records now as when `id` first booted, unless it has booted before.
+fn record_boot(id: &VmId) {
+    let path = vm_state_dir(id).join(BOOTED_FILE);
+    if !path.exists() {
+        let _ = fs::write(path, now_unix().to_string());
+    }
+}
+
+/// Whether the lifetime of `ttl_seconds`, counted from `id`'s first boot,
+/// has passed. Never without a TTL.
+fn expired(id: &VmId, ttl_seconds: Option<u64>) -> bool {
+    match (ttl_seconds, booted_unix(id)) {
+        (Some(ttl), Some(booted)) => now_unix() >= booted.saturating_add(ttl),
+        _ => false,
     }
 }
 
