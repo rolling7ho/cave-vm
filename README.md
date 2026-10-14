@@ -49,7 +49,7 @@ The full command reference, with every flag and error, is in [docs/cli.md](docs/
 - **Credentials:** injected into the single command that needs them, never returned to the agent and never written to the audit log.
 - **Widening access** always takes an explicit flag, and the flag is echoed back when the VM starts.
 
-A VM protects your Mac from a misbehaving or prompt-injected agent. It does not protect secrets you place inside it, or anything the agent can reach over the network. See [SECURITY.md](SECURITY.md) for what counts as a vulnerability.
+A VM protects your Mac from a misbehaving or prompt-injected agent. It does not protect secrets you place inside it, or anything the agent can reach over the network, and an agent that still has a host shell can step outside the VM. [docs/safety.md](docs/safety.md) describes the model and its limits, and [SECURITY.md](SECURITY.md) says what counts as a vulnerability.
 
 ## How it works
 

@@ -438,7 +438,7 @@ Wrote 2 files to your Mac: src/app.ts, src/util.ts
 1 file you changed on your Mac waits for `cave pull`: README.md
 ```
 
-When nothing changed in the VM it prints `The Mac mirror is up to date`. After `cave snapshot` and at the end of `cave agent`, the sync runs on its own; a failed one is reported and does not change the command's result.
+The mirror backs up source only: it lacks dependencies, build output, `.git` and running processes, so snapshots remain the safety net ([docs/safety.md](safety.md#the-mac-mirror-backs-up-source-only)). When nothing changed in the VM it prints `The Mac mirror is up to date`. After `cave snapshot` and at the end of `cave agent`, the sync runs on its own; a failed one is reported and does not change the command's result.
 
 Errors:
 
@@ -532,6 +532,8 @@ Undo everything the agent did with: cave restore my-project-2026-10-12-debian-4
 `--in-vm` runs the agent inside the VM instead, which needs the VM's network to reach the model API. On first use it installs the agent inside the VM with the agent's own installer, and you sign in inside the VM.
 
 Arguments after `--` go to the agent unchanged.
+
+Denying Bash is a guardrail with limits: Claude Code keeps its other tools on the Mac, and an agent started some other way keeps its shell. [docs/safety.md](safety.md#the-agent-boundary) lists them.
 
 Agents in v1: `claude` (Claude Code). The README also lists Codex; it is added once its MCP and permission settings are checked.
 
