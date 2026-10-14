@@ -24,7 +24,8 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cave_vm_proto::daemon::{
-    EntryKind, ImageInfo, ListEntry, NetMode, Policy, PortMap, Reply, Resources, VmId, VmState,
+    Check, EntryKind, ImageInfo, ListEntry, NetMode, Policy, PortMap, Reply, Resources, VmId,
+    VmState,
 };
 use cave_vm_proto::vmm::{FromVmm, ToVmm, VmmConfig};
 use cave_vm_proto::{ErrorCode, ErrorMessage};
@@ -927,6 +928,11 @@ impl Vms {
             .map_err(|e| error(ErrorCode::Io, format!("cannot list the VM folders: {e}")))?;
         let projects: Vec<PathBuf> = projects.into_iter().filter(|p| p.is_dir()).collect();
         self.source.images(&projects)
+    }
+
+    /// The daemon's checks for `cave doctor`: the image cache, verified.
+    pub fn doctor(&self) -> Vec<Check> {
+        crate::doctor::image_checks(&self.home.images())
     }
 
     /// Stops every running VM, when the daemon exits.

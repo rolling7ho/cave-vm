@@ -28,7 +28,7 @@ pub fn data_dir() -> Result<PathBuf> {
 }
 
 /// The daemon executable: `CAVE_DAEMON`, or `cave-daemon` next to `cave`.
-fn daemon_program() -> Result<PathBuf> {
+pub fn daemon_program() -> Result<PathBuf> {
     if let Some(program) = std::env::var_os("CAVE_DAEMON") {
         return Ok(PathBuf::from(program));
     }

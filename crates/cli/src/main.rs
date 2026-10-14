@@ -6,6 +6,7 @@ mod agent;
 mod client;
 mod commands;
 mod copy;
+mod doctor;
 mod error;
 mod exec;
 mod export;
@@ -169,6 +170,8 @@ enum Cmd {
         #[arg(long)]
         fork: Option<String>,
     },
+    /// Check this Mac, cave's signature and the image cache.
+    Doctor,
     /// List the base images.
     Images {
         /// One JSON document, for scripts.
@@ -225,6 +228,10 @@ fn main() -> ExitCode {
             Err(e) => Err(e),
         },
         Cmd::Cp { paths } => copy::run(paths),
+        Cmd::Doctor => match doctor::run() {
+            Ok(code) => return ExitCode::from(code),
+            Err(e) => Err(e),
+        },
         Cmd::Exec { fork, argv } => match exec::run(fork, argv) {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),

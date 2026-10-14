@@ -1051,3 +1051,28 @@ fn gate_5() {
     );
     rig.exec(&["test", "!", "-e", "hello.txt"], 0);
 }
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn doctor_passes_on_a_signed_install_and_verifies_the_image() {
+    let rig = Rig::new();
+    let out = rig.cave(&["doctor"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(
+        stdout.contains("ok    cave is signed with the hypervisor entitlement")
+            && stdout.contains("ok    no images downloaded yet"),
+        "{stdout}"
+    );
+
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    rig.exec(&["true"], 0);
+    let out = rig.cave(&["doctor"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(
+        stdout.contains(" image sha256:") && stdout.contains("ok    kernel for "),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("fail"), "{stdout}");
+}

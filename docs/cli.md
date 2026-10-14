@@ -572,15 +572,26 @@ If the update detector has seen a newer image, it says so here and in `cave doct
 cave doctor
 ```
 
-Re-runs the first-run checks (design): Apple Silicon, macOS version, the hypervisor entitlement and signature, disk space, the kernel and image state, and the daemon. Each line passes or fails, and each failure has its fix. It changes nothing. report-only.
+Re-runs the first-run checks (design). Each line passes or fails, and each failure has its fix. It changes nothing and downloads nothing.
+
+The checks, in order:
+
+- The chip is Apple Silicon, and Hypervisor.framework is available (it is not inside a VM).
+- macOS is 26 or later.
+- `cave-vmm`, next to `cave-daemon`, is signed with the hypervisor entitlement.
+- At least 5 GB is free on the volume of the current folder.
+- The daemon answers. It then hashes every image and kernel in its cache again and checks each against its digest. A damaged file is reported with its path, for you to delete; the next `cave run` downloads it again.
 
 ```
 ok    Apple Silicon (M3 Pro)
+ok    Hypervisor.framework is available
 ok    macOS 26.1
 fail  cave is not signed with the hypervisor entitlement
       fix: brew reinstall cave-vm, which re-signs it on first run
 ok    48 GB free on the volume with your projects
+ok    the cave daemon is running
 ok    debian image sha256:3f2a9c1e verified
+ok    kernel for debian sha256:9b1c44d0 verified
 ```
 
 Exit code: 1 if any check fails.
