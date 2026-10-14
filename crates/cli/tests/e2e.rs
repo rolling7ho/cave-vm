@@ -1123,3 +1123,41 @@ fn typescript_sdk_drives_a_real_vm() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built Ubuntu image"]
+fn ubuntu_image_boots() {
+    let manifest = fs::read_to_string(Rig::image_dir().join("images.json")).unwrap();
+    if !manifest.contains("\"ubuntu\"") {
+        eprintln!(
+            "skipped: no ubuntu image; build one with image/ubuntu/build.sh && image/manifest.sh"
+        );
+        return;
+    }
+    let rig = Rig::new();
+    let init = rig.cave(&["init", "--sealed", "--image", "ubuntu"]);
+    assert!(
+        init.status.success(),
+        "{}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    let os = rig.exec(&["cat", "/etc/os-release"], 0);
+    assert!(os.contains("ID=ubuntu"), "{os}");
+    let toml = fs::read_to_string(rig.project().join("cave.toml")).unwrap();
+    assert!(
+        toml.contains("ubuntu@sha256:"),
+        "the image is pinned: {toml}"
+    );
+    assert_eq!(rig.exec(&["whoami"], 0).trim(), "cave");
+    assert_eq!(rig.exec(&["pwd"], 0).trim(), "/workspace");
+    rig.exec(&["sudo", "-n", "true"], 0);
+    // What the design preinstalls.
+    rig.exec(&["sh", "-c", "git --version && node --version && npm --version && python3 --version && curl --version && vim --version"], 0);
+    rig.exec(&["test", "-x", "/usr/sbin/sshd"], 0);
+    // Files go in and out, and a snapshot restores.
+    rig.exec(&["sh", "-c", "echo hi > a.txt"], 0);
+    assert!(rig.cave(&["snapshot", "s"]).status.success());
+    rig.exec(&["rm", "a.txt"], 0);
+    assert!(rig.cave(&["restore", "s"]).status.success());
+    assert_eq!(rig.exec(&["cat", "a.txt"], 0), "hi\n");
+}
