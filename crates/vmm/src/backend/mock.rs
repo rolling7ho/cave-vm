@@ -63,6 +63,8 @@ pub enum Event {
 #[derive(Debug, Clone)]
 pub struct Step {
     pub regs: Vec<(Reg, u64)>,
+    /// GIC CPU interface registers the "guest" leaves behind.
+    pub icc_regs: Vec<(IccReg, u64)>,
     pub exit: Exit,
     /// Wait for a kick before reporting the exit, like a guest idling in
     /// the hypervisor.
@@ -74,6 +76,7 @@ impl Step {
     pub fn exit(exit: Exit) -> Step {
         Step {
             regs: Vec::new(),
+            icc_regs: Vec::new(),
             exit,
             wait_for_kick: false,
         }
@@ -91,6 +94,13 @@ impl Step {
     /// Sets a register before the exit is reported, as the guest would.
     pub fn with_reg(mut self, reg: Reg, value: u64) -> Step {
         self.regs.push((reg, value));
+        self
+    }
+
+    /// Sets a GIC CPU interface register before the exit is reported, as
+    /// the guest taking or finishing an interrupt would.
+    pub fn with_icc_reg(mut self, reg: IccReg, value: u64) -> Step {
+        self.icc_regs.push((reg, value));
         self
     }
 }
@@ -249,6 +259,7 @@ impl BackendVcpu for MockVcpu {
             .and_then(VecDeque::pop_front)
             .ok_or(Error::ScriptExhausted { vcpu: self.index })?;
         self.regs.extend(step.regs);
+        self.icc.extend(step.icc_regs);
         if step.wait_for_kick {
             let state = self.backend.state();
             let (mut state, timeout) = self

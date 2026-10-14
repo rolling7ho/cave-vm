@@ -197,6 +197,19 @@ pub fn restore_vcpu<V: BackendVcpu>(
     Ok(())
 }
 
+impl VcpuState {
+    /// Whether the vCPU was inside an interrupt handler: the GIC CPU
+    /// interface holds an active priority. Such a state does not restore:
+    /// on hardware, the guest's end of interrupt left the restored
+    /// priority set, so the vCPU took no interrupt again and the guest
+    /// hung (about one restore in 80 under load).
+    pub fn in_interrupt(&self) -> bool {
+        self.icc_regs.iter().any(|&(reg, value)| {
+            (reg == IccReg::AP0R0_EL1 || reg == IccReg::AP1R0_EL1) && value != 0
+        })
+    }
+}
+
 /// What a VM's memory held when [`GuestMemory::dirty`] was last cleared:
 /// every page not marked since is as it was then.
 #[derive(Debug)]
