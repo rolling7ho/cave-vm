@@ -82,6 +82,12 @@ impl Connection {
         })
     }
 
+    /// The connection itself, for a request after which it carries raw
+    /// bytes (`ssh`).
+    pub fn into_stream(self) -> UnixStream {
+        self.stream
+    }
+
     /// The next message from the daemon.
     pub fn receive(&mut self) -> Result<Reply> {
         match read_frame::<_, Reply>(&mut self.stream) {

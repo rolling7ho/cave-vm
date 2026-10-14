@@ -193,6 +193,7 @@ Requests that take time (`start`, `snapshot`, `restore`, `fork`, image fetches d
 | `stop` | `vm` | `ok` |
 | `exec` | `vm`, the agent's `exec` fields, `credentials` (list of names) | the agent's stream, ending in `exit` |
 | `shell` | `vm`, the agent's `pty_open` fields | the agent's pty stream, ending in `exit` |
+| `ssh` | `vm` | `ok` once the agent has connected to sshd, port 22 in the guest, with `port_forward`. From then on the connection carries raw bytes, for remote editing. A `not_found` error means sshd is not listening yet |
 | `file_read` / `file_write` | `vm`, the agent's fields | as on the agent link |
 | `snapshot` | `vm`, `name` (optional; the default name otherwise) | `snapshot` with the name and size. A running VM keeps running and its memory is saved; a stopped VM's disk is saved |
 | `restore` | `vm`, `name` (optional; the newest snapshot taken by name otherwise) | `restored` once the VM runs from the snapshot. The state before is saved first as an automatic snapshot. `memory_restored` is `false` when it fell back to a disk boot |

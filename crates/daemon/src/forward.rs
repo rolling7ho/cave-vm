@@ -124,17 +124,7 @@ fn carry(tcp: TcpStream, connect: &Connect, port: u16) -> Result<(), ErrorMessag
     let io_error = |e: io::Error| ErrorMessage::new(ErrorCode::Io, e.to_string());
     tcp.set_nonblocking(false).map_err(io_error)?;
     let (mut agent, _held) = connect()?;
-    relay::open(&mut agent, &Message::PortForward { port })?;
-    match relay::read_agent(&mut agent)? {
-        Message::PortForwardOk => {}
-        Message::Error(e) => return Err(e),
-        other => {
-            return Err(ErrorMessage::new(
-                ErrorCode::Io,
-                format!("the guest agent answered port_forward with {other:?}"),
-            ));
-        }
-    }
+    open_port(&mut agent, port)?;
     let (mut tcp_in, mut agent_out) = (
         tcp.try_clone().map_err(io_error)?,
         agent.try_clone().map_err(io_error)?,
@@ -146,6 +136,35 @@ fn carry(tcp: TcpStream, connect: &Connect, port: u16) -> Result<(), ErrorMessag
     let (mut agent_in, mut tcp_out) = (agent, tcp);
     let _ = io::copy(&mut agent_in, &mut tcp_out);
     let _ = tcp_out.shutdown(Shutdown::Write);
+    let _ = up.join();
+    Ok(())
+}
+
+/// Asks the agent on a new connection to connect to `port` in the guest.
+/// Afterwards `agent` carries that connection's raw bytes.
+pub fn open_port(agent: &mut UnixStream, port: u16) -> Result<(), ErrorMessage> {
+    relay::open(agent, &Message::PortForward { port })?;
+    match relay::read_agent(agent)? {
+        Message::PortForwardOk => Ok(()),
+        Message::Error(e) => Err(e),
+        other => Err(ErrorMessage::new(
+            ErrorCode::Io,
+            format!("the guest agent answered port_forward with {other:?}"),
+        )),
+    }
+}
+
+/// Carries raw bytes between `client` and `agent` until both directions
+/// end.
+pub fn splice(client: UnixStream, agent: UnixStream) -> io::Result<()> {
+    let (mut client_in, mut agent_out) = (client.try_clone()?, agent.try_clone()?);
+    let up = thread::spawn(move || {
+        let _ = io::copy(&mut client_in, &mut agent_out);
+        let _ = agent_out.shutdown(Shutdown::Write);
+    });
+    let (mut agent_in, mut client_out) = (agent, client);
+    let _ = io::copy(&mut agent_in, &mut client_out);
+    let _ = client_out.shutdown(Shutdown::Write);
     let _ = up.join();
     Ok(())
 }

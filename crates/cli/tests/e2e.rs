@@ -786,3 +786,45 @@ fn agent_on_the_mac_reaches_the_vm_only_through_mcp() {
     let log = fs::read_to_string(rig.project().join(".cave/audit.log")).unwrap();
     assert!(log.contains("uname -s"), "{log}");
 }
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn editors_reach_sshd_in_the_vm_through_the_proxy() {
+    let rig = Rig::new();
+    let out = rig.cave(&["init", "--sealed"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("connect VS Code Remote-SSH or Zed to proj.cave"),
+        "{stdout}"
+    );
+    rig.exec(&["sh", "-c", "echo edited-in-vm > /workspace/marker"], 0);
+    // ssh reads the config of the real user's home, not $HOME, so the
+    // rig's config is passed by hand, as an editor would find it.
+    let ssh = |args: &[&str]| {
+        Command::new("/usr/bin/ssh")
+            .arg("-F")
+            .arg(rig.root.join("home/.ssh/config"))
+            .args(["-o", "BatchMode=yes", "proj.cave"])
+            .args(args)
+            .env("HOME", rig.root.join("home"))
+            .env("CAVE_HOME", rig.root.join("data"))
+            .env("CAVE_IMAGE_DIR", Rig::image_dir())
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let out = ssh(&["cat", "/workspace/marker", "&&", "whoami"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "edited-in-vm\ncave\n");
+    // The key is added once.
+    assert!(ssh(&["true"]).status.success());
+    assert_eq!(
+        rig.exec(&["sh", "-c", "wc -l < ~/.ssh/authorized_keys"], 0)
+            .trim(),
+        "1"
+    );
+}

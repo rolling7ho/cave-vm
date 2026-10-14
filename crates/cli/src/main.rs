@@ -18,6 +18,7 @@ mod remove;
 mod shell;
 mod skill;
 mod snapshot;
+mod ssh;
 
 use std::process::ExitCode;
 
@@ -159,6 +160,14 @@ enum Cmd {
         #[arg(long)]
         fork: Option<String>,
     },
+    /// Carry an SSH connection to a project's VM, for editors.
+    #[command(hide = true)]
+    SshProxy {
+        /// The project folder.
+        project: std::path::PathBuf,
+        #[arg(long)]
+        fork: Option<String>,
+    },
     /// List the base images.
     Images {
         /// One JSON document, for scripts.
@@ -232,6 +241,7 @@ fn main() -> ExitCode {
             Err(e) => Err(e),
         },
         Cmd::Snapshot { name, fork } => snapshot::snapshot(name, fork),
+        Cmd::SshProxy { project, fork } => ssh::proxy(&project, fork),
         Cmd::Stop { fork } => commands::stop(fork),
         Cmd::Ls { all, json } => commands::ls(all, json),
     };

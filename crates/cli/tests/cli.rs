@@ -248,8 +248,14 @@ fn init_writes_the_config_and_ignores_the_state_folder() {
          Added .cave/ to .gitignore\n\
          Wrote the cave section of AGENTS.md and .claude/skills/cave\n\
          Set up Claude Code to use cave mcp, with host Bash denied (.mcp.json, .claude/settings.json)\n\
+         Added an Include line to ~/.ssh/config for cave's SSH hosts\n\
+         Edit in the VM: connect VS Code Remote-SSH or Zed to proj.cave\n\
          Next: cave shell, or cave agent claude\n"
     );
+    let entry = fs::read_to_string(s.data().join("ssh/hosts/proj.cave.conf")).unwrap();
+    assert!(entry.contains("ssh-proxy"), "{entry}");
+    let ssh_config = fs::read_to_string(s.home().join(".ssh/config")).unwrap();
+    assert!(ssh_config.contains("Include"), "{ssh_config}");
     let skill = fs::read_to_string(s.project().join(".claude/skills/cave/SKILL.md")).unwrap();
     assert!(skill.starts_with("---\nname: cave\n"), "{skill}");
     let config = fs::read_to_string(s.project().join("cave.toml")).unwrap();

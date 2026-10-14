@@ -14,10 +14,14 @@ use cave_vm_proto::{ErrorCode, ErrorMessage, VERSIONS, read_frame, write_frame};
 
 use crate::audit;
 use crate::credentials::{self, Redactor};
+use crate::forward;
 use crate::home::Home;
 use crate::link::daemon_software;
 use crate::relay;
 use crate::vms::Vms;
+
+/// The port sshd listens on in the VM, for remote editing.
+const SSH_PORT: u16 = 22;
 
 /// Binds the daemon socket, readable and writable by this user only. A
 /// socket left by a daemon that is gone is replaced; a live one is an error.
@@ -139,6 +143,18 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
         }
         Request::Shell { vm, pty } => {
             return relay(stream, vms, &vm, &Message::PtyOpen(pty)).map(drop);
+        }
+        Request::Ssh { vm } => {
+            let opened = vms.agent_connection(&vm).and_then(|(mut agent, in_use)| {
+                forward::open_port(&mut agent, SSH_PORT)?;
+                Ok((agent, in_use))
+            });
+            let (agent, _in_use) = match opened {
+                Ok(opened) => opened,
+                Err(e) => return send_error(&mut stream, e),
+            };
+            write_frame(&mut stream, &Reply::Ok).map_err(io::Error::other)?;
+            return forward::splice(stream, agent);
         }
         Request::Start { vm, net, ports } => vms.start(&vm, net, &ports).map(Reply::Policy),
         Request::Remove { vm, name: None } => vms.remove(&vm).map(|()| Reply::Ok),

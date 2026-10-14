@@ -9,6 +9,7 @@ use cave_vm_proto::daemon::Storage;
 use crate::error::{CliError, Result};
 use crate::project::{self, CONFIG_FILE, STATE_DIR};
 use crate::skill;
+use crate::ssh;
 
 /// Image names `cave init --image` accepts, and what each stands for.
 const IMAGES: [(&str, &str); 3] = [
@@ -140,6 +141,11 @@ pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
     println!(
         "Set up Claude Code to use cave mcp, with host Bash denied (.mcp.json, .claude/settings.json)"
     );
+    let (host, included) = ssh::set_up(&dir)?;
+    if included {
+        println!("Added an Include line to ~/.ssh/config for cave's SSH hosts");
+    }
+    println!("Edit in the VM: connect VS Code Remote-SSH or Zed to {host}");
     println!("Next: cave shell, or cave agent claude");
     Ok(())
 }
@@ -162,6 +168,7 @@ pub fn project_or_set_up() -> Result<std::path::PathBuf> {
     fs::create_dir_all(dir.join(STATE_DIR))?;
     ignore_state_dir(&dir)?;
     skill::write_all(&dir)?;
+    ssh::set_up(&dir)?;
     eprintln!(
         "Set up this folder as a cave project with the defaults (sealed, debian); see cave.toml"
     );

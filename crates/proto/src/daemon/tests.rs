@@ -85,6 +85,10 @@ fn requests_round_trip() {
             },
         ),
         (
+            json!({"type": "ssh", "vm": {"project": "/p"}}),
+            Request::Ssh { vm: p() },
+        ),
+        (
             json!({"type": "shell", "vm": {"project": "/p"}, "term": "xterm-256color", "cols": 80, "rows": 24}),
             Request::Shell {
                 vm: p(),
