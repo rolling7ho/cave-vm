@@ -970,6 +970,7 @@ fn a_restore_brings_back_the_disk_and_memory_and_can_be_undone() {
         memory_restored,
         reason,
         saved,
+        ..
     } = r.restore(&id, None)
     else {
         panic!("not restored")
@@ -1283,7 +1284,10 @@ fn a_fork_of_the_running_vm_starts_from_its_memory() {
         }),
         Reply::Policy(_)
     ));
-    let Reply::Forked { name, from, reason } = r.fork(&id, None, None) else {
+    let Reply::Forked {
+        name, from, reason, ..
+    } = r.fork(&id, None, None)
+    else {
         panic!("not forked")
     };
     assert_eq!(
@@ -1386,6 +1390,7 @@ fn a_fork_from_a_snapshot() {
             name,
             from,
             reason: Some(reason),
+            ..
         } => {
             assert_eq!((name.as_str(), from.as_str()), ("try", "cold"));
             assert!(reason.contains("without memory state"), "{reason}");
@@ -1404,4 +1409,71 @@ fn a_fork_from_a_snapshot() {
 fn manifest_in(dir: &std::path::Path) -> serde_json::Value {
     let text = fs::read_to_string(dir.join("snapshot.json")).unwrap();
     serde_json::from_str(&text).unwrap()
+}
+
+#[test]
+fn snapshots_record_the_credentials_injected_since_the_memory_began() {
+    let r = rig("creds", NORMAL);
+    let (id, project) = snapshot_project(&r);
+    let start = |id: &VmId| {
+        let reply = r.request(Request::Start {
+            vm: id.clone(),
+            net: None,
+            ports: Vec::new(),
+        });
+        assert!(matches!(reply, Reply::Policy(_)), "{reply:?}");
+    };
+    start(&id);
+    r.snapshot(&id, Some("clean"));
+    assert_eq!(
+        manifest(&project, "clean")["credentials"],
+        serde_json::json!([])
+    );
+
+    let names = ["API_KEY".to_string()];
+    drop(r.vms.agent_connection_with(&id, &names).unwrap());
+    r.snapshot(&id, Some("after"));
+    assert_eq!(
+        manifest(&project, "after")["credentials"],
+        serde_json::json!(["API_KEY"])
+    );
+
+    // A suspension keeps the memory, and so the names.
+    assert_eq!(r.request(Request::Stop { vm: id.clone() }), Reply::Ok);
+    start(&id);
+    r.snapshot(&id, Some("resumed"));
+    assert_eq!(
+        manifest(&project, "resumed")["credentials"],
+        serde_json::json!(["API_KEY"])
+    );
+
+    // Restoring or forking such a snapshot names them.
+    match r.restore(&id, Some("after")) {
+        Reply::Restored { credentials, .. } => assert_eq!(credentials, names),
+        other => panic!("{other:?}"),
+    }
+    match r.restore(&id, Some("clean")) {
+        Reply::Restored { credentials, .. } => assert!(credentials.is_empty()),
+        other => panic!("{other:?}"),
+    }
+    let Reply::Forked { credentials, .. } = r.fork(&id, Some("f"), Some("after")) else {
+        panic!("not forked")
+    };
+    assert_eq!(credentials, names);
+    // The fork's memory came from that snapshot, so its suspension
+    // carries the names on.
+    let fork = fork_id(&id, "f");
+    assert_eq!(r.request(Request::Stop { vm: fork }), Reply::Ok);
+    let suspended = manifest_in(&project.join(".cave/forks/f/suspended"));
+    assert_eq!(suspended["credentials"], serde_json::json!(["API_KEY"]));
+
+    // A boot from the disk starts clean.
+    r.vms.stop(&id).unwrap();
+    let _ = fs::remove_dir_all(project.join(".cave/suspended"));
+    start(&id);
+    r.snapshot(&id, Some("rebooted"));
+    assert_eq!(
+        manifest(&project, "rebooted")["credentials"],
+        serde_json::json!([])
+    );
 }

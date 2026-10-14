@@ -673,3 +673,68 @@ fn forks_run_on_their_own() {
         }
     }
 }
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn credentials_reach_the_command_but_not_the_agent() {
+    const VALUE: &str = "snednao_#m34nr";
+    let rig = Rig::new();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    fs::write(rig.project().join(".env"), format!("API_KEY={VALUE}\n")).unwrap();
+    rig.exec(&["true"], 0);
+
+    // Through the MCP server, as an agent would. The value is printed
+    // whole, then split across two writes.
+    let script = "test \"${#API_KEY}\" = 14 && echo \"API_KEY: $API_KEY\" && \
+                  printf %s \"${API_KEY:0:5}\" && sleep 0.3 && printf '%s\\n' \"${API_KEY:5}\"";
+    let calls = [
+        serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "e2e", "version": "1"}}}),
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+            "name": "exec", "arguments": {"command": script, "credentials": ["API_KEY"]}}}),
+    ];
+    let mut input = String::new();
+    for call in &calls {
+        input.push_str(&format!("{call}\n"));
+    }
+    let mut mcp = rig
+        .command(&["mcp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    mcp.stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let out = mcp.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains(VALUE), "{stdout}");
+    assert!(
+        stdout.contains("exit code 0") && stdout.contains("API_KEY: [API_KEY]\\n[API_KEY]\\n"),
+        "{stdout}"
+    );
+
+    // The audit log and a snapshot name it, but never hold the value.
+    let log = fs::read_to_string(rig.project().join(".cave/audit.log")).unwrap();
+    assert!(log.contains(r#""credentials":["API_KEY"]"#), "{log}");
+    assert!(!log.contains(VALUE));
+    assert!(rig.cave(&["snapshot", "after"]).status.success());
+    let manifest =
+        fs::read_to_string(rig.project().join(".cave/snapshots/after/snapshot.json")).unwrap();
+    assert!(!manifest.contains(VALUE));
+    let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert_eq!(manifest["credentials"], serde_json::json!(["API_KEY"]));
+
+    // Forking it warns.
+    let out = rig.cave(&["fork", "f", "--from", "after"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("warning: snapshot after was taken after API_KEY was injected")
+            && stderr.contains("the fork's memory may contain it"),
+        "{stderr}"
+    );
+}

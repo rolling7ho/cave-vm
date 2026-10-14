@@ -12,7 +12,7 @@
 //!
 //! Snapshots and restores of a project's VM are in [`snapshots`].
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io;
 use std::os::unix::net::UnixStream;
@@ -222,6 +222,9 @@ struct Running {
     idle_suspend: Option<Duration>,
     activity: Arc<Activity>,
     started_unix: u64,
+    /// Credentials injected since the VM's memory began, by name: since it
+    /// booted, or those its snapshot recorded if it was restored from one.
+    credentials: BTreeSet<String>,
 }
 
 struct Vm {
@@ -449,13 +452,25 @@ impl Vms {
             idle_suspend: prepared.idle_suspend,
             activity: Arc::new(Activity::new(Arc::clone(&self.clock))),
             started_unix: now_unix(),
+            credentials: BTreeSet::new(),
         })
     }
 
     /// A new connection to a running VM's guest agent. The VM counts as
     /// in use until the [`InUse`] is dropped.
     pub fn agent_connection(&self, id: &VmId) -> Result<(UnixStream, InUse), ErrorMessage> {
-        agent_connection(&*self.vm(id)?)
+        agent_connection(&*self.vm(id)?, &[])
+    }
+
+    /// [`Vms::agent_connection`] for a command that is given
+    /// `credentials`. Their names are kept with the running VM, for the
+    /// metadata of snapshots taken from now on.
+    pub fn agent_connection_with(
+        &self,
+        id: &VmId,
+        credentials: &[String],
+    ) -> Result<(UnixStream, InUse), ErrorMessage> {
+        agent_connection(&*self.vm(id)?, credentials)
     }
 
     /// Suspends every running VM left unused for its `idle_suspend` time,
@@ -1020,7 +1035,7 @@ fn collect_connects(id: &VmId, link: &mut VmmLink) {
     }
 }
 
-fn agent_connection(vm: &Vm) -> Result<(UnixStream, InUse), ErrorMessage> {
+fn agent_connection(vm: &Vm, credentials: &[String]) -> Result<(UnixStream, InUse), ErrorMessage> {
     let mut slot = vm.idle_slot();
     let Slot::Running(running) = &mut *slot else {
         return Err(error(
@@ -1029,6 +1044,7 @@ fn agent_connection(vm: &Vm) -> Result<(UnixStream, InUse), ErrorMessage> {
         )
         .with_fix("start it with `cave run`"));
     };
+    running.credentials.extend(credentials.iter().cloned());
     let stream = running.link.agent_connect().map_err(|e| match e {
         LinkError::Vmm(e) => e,
         e => error(
@@ -1048,7 +1064,7 @@ fn bind_all(ports: &[PortMap]) -> Result<Vec<Bound>, ErrorMessage> {
 fn serve_all(vm: &Arc<Vm>, bound: Vec<Bound>) -> Vec<Forward> {
     let weak = Arc::downgrade(vm);
     let connect: forward::Connect = Arc::new(move || match weak.upgrade() {
-        Some(vm) => agent_connection(&vm)
+        Some(vm) => agent_connection(&vm, &[])
             .map(|(stream, in_use)| (stream, Box::new(in_use) as forward::Held)),
         None => Err(error(ErrorCode::NotRunning, "the VM is gone")),
     });

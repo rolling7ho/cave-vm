@@ -59,6 +59,11 @@ impl Tools {
                     "type": "object",
                     "properties": {
                         "command": { "type": "string", "description": "The command, run as `bash -c <command>`." },
+                        "credentials": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Names of credentials from the project's .env, such as API_KEY, to give the command as environment variables. You never see the values: output that prints one shows [API_KEY] instead."
+                        },
                         "cwd": { "type": "string", "description": "The working directory in the VM." },
                         "fork": fork,
                     },
@@ -174,6 +179,9 @@ impl Tools {
         if let Some(cwd) = args.optional("cwd")? {
             command = command.cwd(cwd);
         }
+        for name in args.strings("credentials")? {
+            command = command.credential(name);
+        }
         let output = self.sandbox(args)?.run(&command).map_err(text)?;
         Ok(exec_text(&output))
     }
@@ -228,6 +236,7 @@ impl Tools {
                 " The state before was saved as {saved}; restore it to undo this."
             ));
         }
+        out.push_str(&memory_note(&restored.credentials, "the VM's memory"));
         Ok(out)
     }
 
@@ -248,6 +257,7 @@ impl Tools {
                 " Its memory could not be loaded ({reason}), so it booted from the disk and processes were not kept."
             ));
         }
+        out.push_str(&memory_note(&forked.credentials, "the fork's memory"));
         Ok(out)
     }
 
@@ -270,10 +280,33 @@ impl Args<'_> {
         }
     }
 
+    fn strings(&self, key: &str) -> Result<Vec<&str>, String> {
+        let invalid = || format!("\"{key}\" must be a list of strings");
+        match self.0.get(key) {
+            None | Some(Value::Null) => Ok(Vec::new()),
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|item| item.as_str().ok_or_else(invalid))
+                .collect(),
+            Some(_) => Err(invalid()),
+        }
+    }
+
     fn required(&self, key: &str) -> Result<&str, String> {
         self.optional(key)?
             .ok_or_else(|| format!("\"{key}\" is required"))
     }
+}
+
+/// The note for a snapshot that recorded injected credentials, by name.
+fn memory_note(credentials: &[String], holder: &str) -> String {
+    if credentials.is_empty() {
+        return String::new();
+    }
+    format!(
+        " Warning: the snapshot was taken after {} had been injected, so {holder} may contain them.",
+        credentials.join(", ")
+    )
 }
 
 fn text(e: Error) -> String {

@@ -290,7 +290,12 @@ warning: could not load the memory state of my-project-2026-10-12-debian (format
   restored the disk state and booted normally; processes from the snapshot were not kept
 ```
 
-If injected credentials were recorded in the snapshot's metadata, it names them.
+If injected credentials were recorded in the snapshot's metadata, it names them:
+
+```
+warning: snapshot before was taken after API_KEY was injected
+  the VM's memory may contain it
+```
 
 Errors:
 
@@ -316,6 +321,8 @@ The fork starts running. Use it with `--fork <name>` on other commands. Forking 
 warning: snapshot my-project-2026-10-12-debian was taken after API_KEY was injected
   the fork's memory may contain it
 ```
+
+Forking the VM's current state names the fresh snapshot it was made from as `the snapshot of my-project`.
 
 Output: `Forked fork-1 from my-project-2026-10-12-debian (0.3s). Use it with: cave shell --fork fork-1`.
 
@@ -471,7 +478,7 @@ Errors:
 cave export [snapshot] [-o <dir>]
 ```
 
-Decided by [D19](../ROADMAP.md#decisions). The design lists `cave export` with `cave cp` as the way to "move files in and out" and as an escape hatch for code in sealed mode. `cave export` copies the project directory out of the VM, or out of a snapshot's disk, into a folder on the Mac. Without `-o`, the folder is `./<ProjectFolder>-export-<YYYY-MM-DD>`. It copies everything, including `.git`, and leaves out nothing, so it is a full copy of the work. Exporting from a snapshot that recorded injected credentials shows the same warning as `cave fork`.
+Decided by [D19](../ROADMAP.md#decisions). The design lists `cave export` with `cave cp` as the way to "move files in and out" and as an escape hatch for code in sealed mode. `cave export` copies the project directory out of the VM, or out of a snapshot's disk, into a folder on the Mac. Without `-o`, the folder is `./<ProjectFolder>-export-<YYYY-MM-DD>`. It copies everything, including `.git`, and leaves out nothing, so it is a full copy of the work. Exporting from a snapshot that recorded injected credentials shows the same warning as `cave fork`, ending in `the exported files may contain it`.
 
 Output: `Exported 1,204 files (38 MB) to ./my-project-export-2026-10-12`.
 
@@ -559,7 +566,7 @@ The server is written by hand ([decision 0013](decisions/0013-mcp-server-by-hand
 
 | Tool | Arguments | Does |
 | --- | --- | --- |
-| `exec` | `command`, optional `cwd` and `fork` | Runs `bash -c <command>` in the VM, starting it if needed, and returns the exit code, stdout and stderr. Each stream keeps its first and last 50 KB when longer |
+| `exec` | `command`, optional `cwd`, `fork` and `credentials` (a list of names) | Runs `bash -c <command>` in the VM, starting it if needed, and returns the exit code, stdout and stderr. Each stream keeps its first and last 50 KB when longer. Each credential named is given to the command as an environment variable (see [Credentials](#credentials)) |
 | `read_file` | `path`, optional `fork` | Returns a UTF-8 text file up to 1 MiB; relative paths are under `/workspace` |
 | `write_file` | `path`, `content`, optional `fork` | Writes a text file, creating missing folders |
 | `snapshot` | `name`, optional `fork` | As `cave snapshot <name>` |
@@ -570,6 +577,21 @@ The server is written by hand ([decision 0013](decisions/0013-mcp-server-by-hand
 A tool that fails returns the error and its fix as text, marked `isError`, so the agent can act on it.
 
 ---
+
+## Credentials
+
+A command run through the MCP server's `exec` tool, or the SDK's `Command::credential`, can name credentials, such as `API_KEY` (design, "Credentials"). The daemon reads each value from `.env` in the project folder and gives it to that command only, as an environment variable. The agent never gets the value:
+
+- Output that prints it has the exact value replaced with the name in brackets, so `API_KEY: snednao_#m34nr` comes back as `API_KEY: [API_KEY]`, even when the value is split across two writes [D9]. This is best effort: a command can still leak the value through files it writes or the network.
+- The audit log records the name, never the value.
+- A snapshot taken afterwards records the names, since the VM's memory may still hold the values, and `cave restore`, `cave fork` and `cave export` of it warn.
+
+`.env` has one `NAME=value` per line, optionally after `export `. Lines starting with `#` are comments. A value in single quotes is taken as written, one in double quotes may use `\n`, `\"` and `\\`, and an unquoted value ends at ` #`. A name that is not in `.env` is an error, and the command does not run:
+
+```
+error: no credential named API_KEY in /Users/ivan/my-project/.env
+  fix: Add a line `API_KEY=<value>` to /Users/ivan/my-project/.env
+```
 
 ## Guest layout
 

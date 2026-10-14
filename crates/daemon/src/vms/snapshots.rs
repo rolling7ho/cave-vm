@@ -53,6 +53,8 @@ pub struct Forked {
     pub from: String,
     /// Why the fork's memory was not restored, if it was not.
     pub fallback: Option<String>,
+    /// Credentials the snapshot recorded, by name.
+    pub credentials: Vec<String>,
 }
 
 /// What a restore did.
@@ -63,6 +65,8 @@ pub struct Restored {
     pub fallback: Option<String>,
     /// The automatic snapshot taken first.
     pub saved: Option<String>,
+    /// Credentials the snapshot recorded, by name.
+    pub credentials: Vec<String>,
 }
 
 impl Vms {
@@ -163,6 +167,13 @@ impl Vms {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).map_err(|e| failed("create the snapshot folder", &e))?;
         let has_memory = running.is_some() || suspended.as_ref().is_some_and(|(_, m)| m.has_memory);
+        // A snapshot without memory holds no credential the VM was given,
+        // short of one written to its disk.
+        let credentials = match (&running, &suspended) {
+            (Some(running), _) => running.credentials.iter().cloned().collect(),
+            (None, Some((_, m))) if m.has_memory => m.credentials.clone(),
+            _ => Vec::new(),
+        };
         let saved = match (running, &suspended) {
             (Some(running), _) => running
                 .link
@@ -202,7 +213,7 @@ impl Vms {
                 .as_ref()
                 .map_or(policy.memory_bytes, |(_, m)| m.memory_bytes),
             net: suspended.as_ref().map_or(policy.net, |(_, m)| m.net),
-            credentials: Vec::new(),
+            credentials,
             has_memory,
             auto,
         };
@@ -244,6 +255,7 @@ impl Vms {
             name: name.clone(),
             fallback,
             saved,
+            credentials: manifest.credentials.clone(),
         })
     }
 
@@ -343,7 +355,10 @@ impl Vms {
                     },
                 )?;
                 match self.launch_in(vm, spawned.take(), restoring) {
-                    Ok(running) => return Ok((running, None)),
+                    Ok(mut running) => {
+                        running.credentials = manifest.credentials.iter().cloned().collect();
+                        return Ok((running, None));
+                    }
                     Err(e) => {
                         // The guest may have run and written the disk.
                         if let Some(disks) = disks {
@@ -454,10 +469,11 @@ impl Vms {
         };
         let booted = self.start_fork(&fork, &dir);
         match booted {
-            Ok(fallback) => Ok(Forked {
+            Ok((fallback, credentials)) => Ok(Forked {
                 name,
                 from: source,
                 fallback,
+                credentials,
             }),
             Err(e) => {
                 let _ = fs::remove_dir_all(&dir);
@@ -468,8 +484,14 @@ impl Vms {
 
     /// Boots a new fork from the snapshot in its folder. The fork's disk
     /// moves on from there, so the snapshot's memory is deleted once
-    /// booted: a later boot of the fork starts from its disk.
-    fn start_fork(&self, fork: &VmId, dir: &Path) -> Result<Option<String>, ErrorMessage> {
+    /// booted: a later boot of the fork starts from its disk. Returns why
+    /// its memory was not restored, if it was not, and the credentials the
+    /// snapshot recorded.
+    fn start_fork(
+        &self,
+        fork: &VmId,
+        dir: &Path,
+    ) -> Result<(Option<String>, Vec<String>), ErrorMessage> {
         let manifest = snapshot::read_manifest(dir).map_err(|e| {
             error(
                 ErrorCode::Internal,
@@ -486,6 +508,7 @@ impl Vms {
         }
         vm.set(slot, Slot::Busy);
         let result = self.boot_from(&vm, dir, &manifest, &[], None, None);
+        let credentials = manifest.credentials.clone();
         if manifest.has_memory {
             let _ = fs::remove_file(dir.join(snapshot::MEMORY_FILE));
             let _ = fs::remove_file(dir.join(snapshot::STATE_FILE));
@@ -501,7 +524,7 @@ impl Vms {
         match result {
             Ok((running, fallback)) => {
                 vm.set(slot, Slot::Running(running));
-                Ok(fallback)
+                Ok((fallback, credentials))
             }
             Err(e) => {
                 vm.set(slot, Slot::Stopped);

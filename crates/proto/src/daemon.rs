@@ -233,6 +233,11 @@ pub enum Reply {
         /// undoes it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         saved: Option<String>,
+
+        /// Credentials injected before the snapshot was taken, by name.
+        /// The VM's memory may still hold them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        credentials: Vec<String>,
     },
     Forked {
         name: String,
@@ -244,6 +249,11 @@ pub enum Reply {
         /// disk, if it was not.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+
+        /// Credentials injected before the snapshot it was made from was
+        /// taken, by name. The fork's memory may hold them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        credentials: Vec<String>,
     },
     List {
         entries: Vec<ListEntry>,

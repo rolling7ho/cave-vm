@@ -181,6 +181,31 @@ fn exec_starts_the_vm_and_collects_the_output() {
 }
 
 #[test]
+fn a_command_names_its_credentials() {
+    let fake = Fake::new(|request, _| match request {
+        Request::Start { .. } => vec![Reply::Policy(policy())],
+        Request::Exec { .. } => vec![Reply::Exit {
+            code: Some(0),
+            signal: None,
+        }],
+        _ => Vec::new(),
+    });
+    let command = Command::new("./deploy.sh")
+        .credential("API_KEY")
+        .credential("DB");
+    fake.sandbox().run(&command).unwrap();
+    let requests = fake.requests();
+    let Request::Exec {
+        exec, credentials, ..
+    } = &requests[1]
+    else {
+        panic!("{requests:?}");
+    };
+    assert_eq!(credentials, &["API_KEY", "DB"]);
+    assert!(exec.env.is_empty());
+}
+
+#[test]
 fn a_command_sends_its_stdin_cwd_and_env() {
     let fake = Fake::new(|request, history| match request {
         Request::Start { .. } => vec![Reply::Policy(policy())],
@@ -264,11 +289,13 @@ fn snapshot_restore_fork_and_destroy_send_the_matching_requests() {
             memory_restored: true,
             reason: None,
             saved: Some("app-2026-10-14-debian".into()),
+            credentials: vec!["API_KEY".into()],
         }],
         Request::Fork { from, .. } => vec![Reply::Forked {
             name: "fork-1".into(),
             from: from.clone().unwrap_or_else(|| "app".into()),
             reason: Some("format 1 is not supported".into()),
+            credentials: Vec::new(),
         }],
         Request::Remove { .. } => vec![Reply::Ok],
         _ => Vec::new(),
@@ -279,6 +306,7 @@ fn snapshot_restore_fork_and_destroy_send_the_matching_requests() {
     let restored = sb.restore("before").unwrap();
     assert!(restored.memory_restored);
     assert_eq!(restored.saved.as_deref(), Some("app-2026-10-14-debian"));
+    assert_eq!(restored.credentials, ["API_KEY"]);
     let forked = sb.fork_from("before").unwrap();
     assert_eq!(forked.from, "before");
     assert_eq!(forked.reason.as_deref(), Some("format 1 is not supported"));
@@ -330,6 +358,7 @@ fn a_fork_runs_commands_in_itself() {
             name: "fork-1".into(),
             from: "app".into(),
             reason: None,
+            credentials: Vec::new(),
         }],
         Request::Start { .. } => vec![Reply::Policy(policy())],
         Request::Exec { .. } => vec![Reply::Exit {

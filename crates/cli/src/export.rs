@@ -12,6 +12,7 @@ use crate::commands::{ensure_running, folder_name, vm_id};
 use crate::copy;
 use crate::error::{CliError, Result};
 use crate::project;
+use crate::snapshot::credential_warning;
 
 /// The project directory inside the VM (docs/cli.md, "Guest layout").
 const WORKSPACE: &str = "/workspace";
@@ -119,14 +120,19 @@ pub fn run(snapshot: Option<String>, out: Option<PathBuf>) -> Result<()> {
         }
         Some(snapshot) => {
             let name = format!("export-{}", std::process::id());
-            let Reply::Forked { .. } = Connection::call(&Request::Fork {
+            let Reply::Forked { credentials, .. } = Connection::call(&Request::Fork {
                 vm: main.clone(),
                 name: Some(name.clone()),
-                from: Some(snapshot),
+                from: Some(snapshot.clone()),
             })?
             else {
                 return Err(CliError::new("the daemon sent an unexpected reply to fork"));
             };
+            if !credentials.is_empty() {
+                let source = format!("snapshot {snapshot}");
+                let warning = credential_warning(&source, &credentials, "the exported files");
+                eprintln!("{warning}");
+            }
             let fork = TempFork {
                 project: main,
                 name: name.clone(),
