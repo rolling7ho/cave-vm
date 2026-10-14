@@ -828,3 +828,96 @@ fn editors_reach_sshd_in_the_vm_through_the_proxy() {
         "1"
     );
 }
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn synced_mode_mirrors_the_vm_and_pulls_mac_edits() {
+    let rig = Rig::new();
+    let mac = rig.project();
+    assert!(rig.cave(&["init", "--synced"]).status.success());
+    fs::create_dir_all(mac.join("src")).unwrap();
+    fs::write(mac.join("src/app.ts"), "one\n").unwrap();
+    fs::write(mac.join("both.txt"), "base\n").unwrap();
+    rig.exec(&["true"], 0);
+    let sync = |rig: &Rig| {
+        let out = rig.cave(&["sync"]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    // Whatever the VM lacks comes in with a pull, and then both sides
+    // agree.
+    let out = rig.cave(&["pull"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(rig.exec(&["cat", "src/app.ts"], 0), "one\n");
+    assert_eq!(sync(&rig), "The Mac mirror is up to date\n");
+
+    // VM edits reach the Mac; the VM's .env and node_modules do not.
+    rig.exec(
+        &[
+            "sh",
+            "-c",
+            "echo two > src/app.ts && echo new > new.txt && echo K=v > .env && \
+             mkdir -p node_modules/x && echo y > node_modules/x/i.js",
+        ],
+        0,
+    );
+    let out = sync(&rig);
+    assert!(
+        out.contains("Wrote 2 files to your Mac: new.txt, src/app.ts"),
+        "{out}"
+    );
+    assert_eq!(fs::read_to_string(mac.join("src/app.ts")).unwrap(), "two\n");
+    assert!(!mac.join(".env").exists() && !mac.join("node_modules").exists());
+
+    // A Mac edit is never written over by a sync, and a pull brings it in
+    // after a snapshot.
+    fs::write(mac.join("src/app.ts"), "mac\n").unwrap();
+    assert!(
+        sync(&rig).contains("1 file you changed on your Mac waits for `cave pull`: src/app.ts")
+    );
+    let out = rig.cave(&["pull"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("Saved snapshot ") && stdout.contains(" before pulling"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("Applied 1 file from your Mac: src/app.ts"),
+        "{stdout}"
+    );
+    assert_eq!(rig.exec(&["cat", "src/app.ts"], 0), "mac\n");
+
+    // A file changed on both sides stops the pull and is listed.
+    fs::write(mac.join("both.txt"), "mac\n").unwrap();
+    rig.exec(&["sh", "-c", "echo vm > both.txt"], 0);
+    let out = rig.cave(&["pull"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("1 file changed both on your Mac and in the VM since the last sync, so nothing was pulled\n  both.txt\n  fix: "),
+        "{stderr}"
+    );
+    assert_eq!(rig.exec(&["cat", "both.txt"], 0), "vm\n");
+
+    // A snapshot syncs too, once the client has its answer.
+    rig.exec(&["sh", "-c", "echo snap > snap.txt"], 0);
+    assert!(rig.cave(&["snapshot", "s1"]).status.success());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !mac.join("snap.txt").exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(fs::read_to_string(mac.join("snap.txt")).unwrap(), "snap\n");
+}

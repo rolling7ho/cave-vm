@@ -67,6 +67,7 @@ const WATCH_INTERVAL: Duration = Duration::from_millis(20);
 /// exits within a few milliseconds of `stop`, and a restore waits on it.
 const STOP_POLL: Duration = Duration::from_millis(1);
 
+mod mirror;
 mod snapshots;
 
 /// What a VM needs to boot, from its project: read from `cave.toml` and
