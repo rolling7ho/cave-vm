@@ -179,7 +179,7 @@ This object is written `vm` below.
 Requests that take time (`start`, `snapshot`, `restore`, `fork`, image fetches during setup) send progress before the result:
 
 ```json
-{"type": "progress", "message": "Downloading the debian image", "done": 104857600, "total": 524288000}
+{"type": "progress", "message": "downloading the debian image: 20% of 0.5 GB", "done": 104857600, "total": 524288000}
 ```
 
 `done` and `total` are in bytes or steps, and both are optional.

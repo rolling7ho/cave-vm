@@ -85,7 +85,7 @@ pub fn sysctl(name: &str) -> Option<String> {
     output("/usr/sbin/sysctl", &["-n", name])
 }
 
-fn chip() -> Check {
+pub fn chip() -> Check {
     chip_check(sysctl("machdep.cpu.brand_string").as_deref())
 }
 
@@ -99,7 +99,7 @@ fn chip_check(brand: Option<&str>) -> Check {
     }
 }
 
-fn hypervisor() -> Check {
+pub fn hypervisor() -> Check {
     if sysctl("kern.hv_support").as_deref() == Some("1") {
         pass("Hypervisor.framework is available")
     } else {
@@ -110,7 +110,7 @@ fn hypervisor() -> Check {
     }
 }
 
-fn macos() -> Check {
+pub fn macos() -> Check {
     macos_check(output("/usr/bin/sw_vers", &["-productVersion"]).as_deref())
 }
 
@@ -144,7 +144,7 @@ fn signature() -> Check {
     signature_check(&vmm, entitlements(&vmm).as_deref())
 }
 
-fn entitlements(vmm: &Path) -> Option<String> {
+pub fn entitlements(vmm: &Path) -> Option<String> {
     let path = vmm.to_str()?;
     output(
         "/usr/bin/codesign",
@@ -167,12 +167,12 @@ fn signature_check(vmm: &Path, entitlements: Option<&str>) -> Check {
     } else {
         fail(
             "cave is not signed with the hypervisor entitlement",
-            "brew reinstall cave-vm, which re-signs it on first run",
+            "Reinstall cave (brew reinstall cave-vm); cave signs cave-vmm when it next starts its daemon",
         )
     }
 }
 
-fn disk_space() -> Check {
+pub fn disk_space() -> Check {
     let free = output("/bin/df", &["-k", "."]).and_then(|text| free_bytes(&text));
     disk_check(free)
 }
@@ -216,14 +216,14 @@ mod tests {
             pass("Apple Silicon (M3 Pro)"),
             fail(
                 "cave is not signed with the hypervisor entitlement",
-                "brew reinstall cave-vm, which re-signs it on first run",
+                "Reinstall cave (brew reinstall cave-vm); cave signs cave-vmm when it next starts its daemon",
             ),
         ];
         assert_eq!(
             render(&checks),
             "ok    Apple Silicon (M3 Pro)\n\
              fail  cave is not signed with the hypervisor entitlement\n      \
-             fix: brew reinstall cave-vm, which re-signs it on first run"
+             fix: Reinstall cave (brew reinstall cave-vm); cave signs cave-vmm when it next starts its daemon"
         );
     }
 

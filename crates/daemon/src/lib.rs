@@ -13,6 +13,7 @@ pub mod home;
 pub mod image;
 pub mod launch;
 pub mod link;
+pub mod progress;
 pub mod project;
 pub mod relay;
 pub mod server;
