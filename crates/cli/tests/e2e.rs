@@ -20,6 +20,7 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream, UdpSocket};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
@@ -408,13 +409,13 @@ fn snapshot_and_restore() {
     );
     assert!(stderr.contains("booted normally"), "{stderr}");
     assert_eq!(rig.exec(&["cat", "marker"], 0), "before\n");
-    // A fresh boot can give another process the same PID, so check that
-    // it is not the sleep.
+    // A fresh boot can give another process the same PID, even this
+    // shell, so check that it is not the sleep.
     rig.exec(
         &[
             "sh",
             "-c",
-            &format!("! grep -qs 100000 /proc/{pid}/cmdline"),
+            &format!("test \"$(cat /proc/{pid}/comm 2>/dev/null)\" != sleep"),
         ],
         0,
     );
@@ -476,7 +477,9 @@ fn export_copies_the_project_out_of_the_vm_and_a_snapshot() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(stdout.starts_with("Exported 3 files ("), "{stdout}");
+    // The three above, and the six `cave init` wrote, which the first boot
+    // copied in.
+    assert!(stdout.starts_with("Exported 9 files ("), "{stdout}");
     let dir = rig
         .project()
         .join(stdout.trim().rsplit(" to ").next().unwrap());
@@ -556,13 +559,13 @@ fn stop_suspends_and_the_next_command_resumes() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    // A fresh boot can give another process the same PID, so check that
-    // it is not the sleep.
+    // A fresh boot can give another process the same PID, even this
+    // shell, so check that it is not the sleep.
     rig.exec(
         &[
             "sh",
             "-c",
-            &format!("! grep -qs 100000 /proc/{pid}/cmdline"),
+            &format!("test \"$(cat /proc/{pid}/comm 2>/dev/null)\" != sleep"),
         ],
         0,
     );
@@ -848,13 +851,11 @@ fn synced_mode_mirrors_the_vm_and_pulls_mac_edits() {
         );
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
-    // Whatever the VM lacks comes in with a pull, and then both sides
-    // agree.
+    // The first boot copied the folder in, so both sides agree.
     let out = rig.cave(&["pull"]);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "Nothing to pull: the VM has every edit from your Mac\n"
     );
     assert_eq!(rig.exec(&["cat", "src/app.ts"], 0), "one\n");
     assert_eq!(sync(&rig), "The Mac mirror is up to date\n");
@@ -920,4 +921,43 @@ fn synced_mode_mirrors_the_vm_and_pulls_mac_edits() {
         std::thread::sleep(Duration::from_millis(100));
     }
     assert_eq!(fs::read_to_string(mac.join("snap.txt")).unwrap(), "snap\n");
+}
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn the_first_boot_copies_the_folder_in_except_env() {
+    let rig = Rig::new();
+    let mac = rig.project();
+    fs::create_dir_all(mac.join("src/deep")).unwrap();
+    fs::write(mac.join("src/deep/a.txt"), "deep\n").unwrap();
+    fs::write(mac.join("run.sh"), "#!/bin/sh\necho ran\n").unwrap();
+    fs::set_permissions(mac.join("run.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(mac.join(".env"), "API_KEY=secret\n").unwrap();
+    fs::write(mac.join(".env.example"), "API_KEY=\n").unwrap();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+
+    let out = rig.cave(&["run"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("Copied this folder's files into the VM, where the code lives now"),
+        "{stderr}"
+    );
+    assert_eq!(rig.exec(&["cat", "src/deep/a.txt"], 0), "deep\n");
+    assert_eq!(rig.exec(&["./run.sh"], 0), "ran\n");
+    assert_eq!(rig.exec(&["cat", ".env.example"], 0), "API_KEY=\n");
+    rig.exec(&["test", "!", "-e", ".env"], 0);
+    rig.exec(&["test", "!", "-e", ".cave"], 0);
+    assert_eq!(
+        rig.exec(&["stat", "-c", "%U", "src/deep/a.txt"], 0),
+        "cave\n"
+    );
+    assert!(!mac.join(".cave/copy-pending").exists());
+
+    // Only once: a file deleted in the VM stays deleted after a restart.
+    rig.exec(&["rm", "src/deep/a.txt"], 0);
+    assert!(rig.cave(&["stop"]).status.success());
+    let out = rig.cave(&["run"]);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("Copied"));
+    rig.exec(&["test", "!", "-e", "src/deep/a.txt"], 0);
 }

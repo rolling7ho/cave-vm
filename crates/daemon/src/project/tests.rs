@@ -94,6 +94,13 @@ fn first_boot_fetches_pins_and_creates_the_disk() {
     assert_eq!(&fs::read(&disk).unwrap()[..DISK.len()], DISK);
     assert_eq!(fs::read(&prepared.config.kernel).unwrap(), KERNEL);
     assert_eq!(prepared.config.cpus, 4);
+
+    // The new disk is marked for the first-boot copy, once.
+    let marker = s.project.join(".cave").join(COPY_PENDING_FILE);
+    assert!(marker.is_file());
+    fs::remove_file(&marker).unwrap();
+    s.source.prepare(&vm(&s.project), None, &[]).unwrap();
+    assert!(!marker.exists());
     fs::remove_dir_all(&s.root).unwrap();
 }
 

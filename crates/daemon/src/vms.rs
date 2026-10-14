@@ -67,6 +67,7 @@ const WATCH_INTERVAL: Duration = Duration::from_millis(20);
 /// exits within a few milliseconds of `stop`, and a restore waits on it.
 const STOP_POLL: Duration = Duration::from_millis(1);
 
+mod first_copy;
 mod mirror;
 mod snapshots;
 
@@ -362,6 +363,7 @@ impl Vms {
             Ok(running) => {
                 let policy = running.policy.clone();
                 vm.set(slot, Slot::Running(running));
+                self.copy_if_pending(id)?;
                 Ok(policy)
             }
             Err(e) => {

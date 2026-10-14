@@ -24,6 +24,10 @@ use crate::vms::{AutoSnapshots, Prepared, VmSource};
 /// The project's machine-specific folder.
 pub const STATE_DIR: &str = ".cave";
 
+/// The marker in `.cave/` for the first-boot copy (D13): set when the
+/// project disk is made, cleared once the folder's files are in the VM.
+pub const COPY_PENDING_FILE: &str = "copy-pending";
+
 /// The extension of the file next to a cached disk image that holds the
 /// image's name.
 pub const NAME_RECORD: &str = "name";
@@ -130,7 +134,8 @@ fn pin(project: &Path, image: &ImageRef) -> Result<(), ErrorMessage> {
     fs::write(&file, pinned).map_err(io_error)
 }
 
-/// Creates the project disk on first boot, and grows it when `cave.toml`
+/// Creates the project disk on first boot, marking it for the first-boot
+/// copy, and grows it when `cave.toml`
 /// asks for more room. A smaller size is left alone: disks do not shrink.
 fn project_disk(base: &Path, state: &Path, size: u64) -> Result<PathBuf, ErrorMessage> {
     let path = disk::path(state);
@@ -146,6 +151,13 @@ fn project_disk(base: &Path, state: &Path, size: u64) -> Result<PathBuf, ErrorMe
                 )
             })?;
             disk::create(base, state, size).map_err(disk_error)?;
+            // A new disk is a first boot: the folder's files go in once.
+            fs::write(state.join(COPY_PENDING_FILE), b"").map_err(|e| {
+                ErrorMessage::new(
+                    ErrorCode::Io,
+                    format!("cannot write to {}: {e}", state.display()),
+                )
+            })?;
         }
         Err(e) => {
             return Err(ErrorMessage::new(

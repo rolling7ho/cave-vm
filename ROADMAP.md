@@ -167,6 +167,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | P5.9 | Remote editing: sshd in the VM reached over vsock through a `cave` proxy command, with keys generated automatically, so VS Code Remote and Zed work. | E2E connection test. |
 | P5.10 | Synced mode: `cave sync` and `cave pull` with the per-file SHA-256 rules, an automatic snapshot before a pull, and dependency and build folders excluded. | Tests for each rule: Mac-only change applied, VM-only change left, both-sides change stops the pull and is listed; exclusions. |
 | P5.11 | Docs: the agent boundary limit (an agent with a host shell can step outside the VM), the threat model, and that the mirror backs up source only. | Reviewed against the design's wording. |
+| P5.12 | The first-boot copy [D13, D33]: on a project VM's first boot, the folder's files except `.cave/` and the top-level `.env` go into `/workspace` once, and `cave` says what that means for the Mac files. D13 was decided without a task; found while building P5.10. | E2E: files, modes and owner arrive, `.env` does not, and a restart does not copy again. |
 
 **Exit gate 5.** On a real Mac: after `cave init`, Claude Code completes a task using only the MCP server with host Bash denied; `cave inspect` shows the policy and an audit log of what it did; a credential is used by a command without appearing in any MCP response or the audit log; snapshot before and restore after an agent run works.
 
