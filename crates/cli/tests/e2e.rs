@@ -1,4 +1,4 @@
-//! Gate 3 end to end, and snapshots: the real `cave`, `cave-daemon` and
+//! Gates 3 and 5 end to end, and snapshots: the real `cave`, `cave-daemon` and
 //! `cave-vmm` boot a real VM from a locally built image. `#[ignore]`d, since it needs an
 //! Apple Silicon Mac with the hypervisor entitlement and a built image:
 //!
@@ -10,7 +10,9 @@
 //!
 //! `CAVE_E2E_IMAGE_DIR` points at another image folder; the default is
 //! `target/image`. `CAVE_E2E_KEEP` keeps the test's folder, with the VMM
-//! logs. Nothing here reaches the network: the image comes from
+//! logs. `CAVE_E2E_CLAUDE=1` also runs the tests that start the signed-in
+//! Claude Code, which reaches its API. Otherwise nothing here reaches the
+//! network: the image comes from
 //! that folder, and the only connections the guest makes are the denied
 //! ones, which the VMM refuses without opening a host socket. Outbound
 //! HTTPS, `apt` and Docker need the network and are checked by hand.
@@ -965,4 +967,87 @@ fn the_first_boot_copies_the_folder_in_except_env() {
     let out = rig.cave(&["run"]);
     assert!(!String::from_utf8_lossy(&out.stderr).contains("Copied"));
     rig.exec(&["test", "!", "-e", "src/deep/a.txt"], 0);
+}
+
+/// Gate 5 (ROADMAP): after `cave init`, Claude Code completes a task with
+/// only the MCP server and host Bash denied; `cave inspect` shows the
+/// policy and what it did; a credential is used without appearing in an
+/// MCP response or the audit log; and the snapshot before the run undoes
+/// it.
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn gate_5() {
+    // A real Claude Code run uses the signed-in account, so it runs only
+    // when asked for.
+    if std::env::var_os("CAVE_E2E_CLAUDE").is_none() {
+        eprintln!("skipped: set CAVE_E2E_CLAUDE=1 to run Claude Code");
+        return;
+    }
+    const VALUE: &str = "gk5-e2e-credential";
+    let rig = Rig::new();
+    fs::write(rig.project().join(".env"), format!("API_KEY={VALUE}\n")).unwrap();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    let settings = fs::read_to_string(rig.project().join(".claude/settings.json")).unwrap();
+    assert!(settings.contains("\"Bash\""), "{settings}");
+
+    let path = format!(
+        "{}:{}",
+        rig.bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let out = rig
+        .command(&[
+            "agent",
+            "claude",
+            "--",
+            "-p",
+            "Use only the cave MCP tools. First write a file hello.txt containing the line `gate five` \
+             with write_file. Then run `echo \"key: $API_KEY\"` with exec, passing the credential API_KEY. \
+             Reply with the exec output, exactly as returned.",
+            "--allowedTools",
+            "mcp__cave__write_file,mcp__cave__exec",
+        ])
+        .env("PATH", path)
+        .env("HOME", std::env::var("HOME").unwrap())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}\n{stderr}");
+    assert!(stdout.contains("key: [API_KEY]"), "{stdout}");
+    assert!(!stdout.contains(VALUE) && !stderr.contains(VALUE));
+    assert_eq!(rig.exec(&["cat", "hello.txt"], 0), "gate five\n");
+
+    // cave inspect shows the policy and what the agent did, with the
+    // credential by name only.
+    let out = rig.cave(&["inspect", "--log"]);
+    let inspect = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success());
+    assert!(
+        inspect.contains("sealed: nothing on your Mac is reachable from the VM")
+            && inspect.contains("nat: outbound only; LAN ranges and this Mac are blocked"),
+        "{inspect}"
+    );
+    assert!(inspect.contains("/workspace/hello.txt"), "{inspect}");
+    assert!(
+        inspect.contains("API_KEY") && !inspect.contains(VALUE),
+        "{inspect}"
+    );
+    let log = fs::read_to_string(rig.project().join(".cave/audit.log")).unwrap();
+    assert!(!log.contains(VALUE), "{log}");
+
+    // The snapshot taken before the run undoes it.
+    let undo = stderr
+        .lines()
+        .find_map(|l| l.strip_prefix("Undo everything the agent did with: "))
+        .expect("the undo line")
+        .to_string();
+    let argv: Vec<&str> = undo.split_whitespace().skip(1).collect();
+    let out = rig.cave(&argv);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    rig.exec(&["test", "!", "-e", "hello.txt"], 0);
 }
