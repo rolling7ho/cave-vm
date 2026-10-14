@@ -72,3 +72,25 @@ What remains is the undo point (3,000 to 5,000 changed pages at about 5 µs each
 A fork maps a clone of the snapshot's memory, a new file whose pages are not yet in the Mac's file cache, so the guest's first reads go to the drive. Mapping the snapshot's own memory file instead brought a fork to about 50 ms, but each fork then counted about 80 MB of that file's cached pages in its own memory (130 MB per fork), even after flushing the file and dropping it from the cache. The clone stays.
 
 Only booted memory is still missed. The guest uses about 130 MB after boot but has touched about 280 MB, and freed guest pages are not handed back. That needs free page reporting or a balloon device (P6.1, pulled forward by D29).
+
+## Free page reporting, 2026-10-14
+
+A balloon device now takes the free memory the guest reports and hands it back to macOS (P4.12c). Same Mac, 3 runs each, old and new kernel back to back:
+
+| Measure | Without | With | Target |
+|---|---|---|---|
+| `cave restore` until `cave exec` | 74 ms | 53 ms | under 100 ms |
+| `cave fork --from` until the fork runs a command | 122 ms | 116 ms | under 150 ms |
+| Ten forks | 422 ms | 358 ms | under 1 s |
+| Idle memory, booted VM | 287 MB | 288 MB | under 128 MB |
+| Idle memory, fork | 28 MB | 27 MB | under 32 MB |
+
+What it changes is memory the guest frees later: writing 500 MB to `/dev/shm` and deleting it takes the VM from 765 MB back to about 290 MB within a few seconds. Without it, the VM stays at 765 MB.
+
+It does not change booted memory, because right after boot the guest holds that memory. It has about 50 MB in processes, 52 MB of kernel reservations (mostly the page array for 2 GiB) and over 100 MB of file cache. Dropping the guest's file cache by hand (`echo 3 > /proc/sys/vm/drop_caches`) brings the VM to 165–190 MB. A kernel with 16 KiB pages saves about 15 MB more. Neither reaches 128 MB.
+
+Measured along the way:
+
+- `MADV_FREE_REUSABLE` alone frees nothing while the hypervisor maps the range. Unmapping, discarding and mapping again works.
+- Reporting order 2 (16 KiB) slowed restores, because a booted guest soon reports all its free memory, one remap per block. Order 9 (2 MiB) left most freed memory unreported. Order 5 (128 KiB) keeps every time target and frees the most in these tests.
+

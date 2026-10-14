@@ -34,7 +34,7 @@ mod vmm {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use cave_vm_hvf::{Vm, VmConfig};
+    use cave_vm_hvf::{MemFlags, Vm, VmConfig};
     use cave_vm_proto::daemon::NetMode;
     use cave_vm_proto::vmm::{FromVmm, VmmConfig};
     use cave_vm_proto::{AGENT_PORT, ErrorCode, ErrorMessage};
@@ -42,7 +42,9 @@ mod vmm {
     use cave_vm_vmm::backend::hvf::HvfBackend;
     use cave_vm_vmm::boot::{self, BootConfig};
     use cave_vm_vmm::control::{self, RunningVm};
+    use cave_vm_vmm::devices::virtio::balloon::Balloon;
     use cave_vm_vmm::devices::virtio::block::Block;
+    use cave_vm_vmm::devices::virtio::device_type;
     use cave_vm_vmm::devices::virtio::mmio::MmioTransport;
     use cave_vm_vmm::devices::virtio::net::{Net, NetBackend, NetReceiver};
     use cave_vm_vmm::devices::virtio::vsock::{self, Vsock};
@@ -114,7 +116,14 @@ mod vmm {
     /// (so a failed boot is reported at once), and the network address when
     /// there is one.
     fn cmdline(net: NetMode) -> String {
-        let mut line = String::from("console=ttyAMA0 root=/dev/vda rw panic=-1");
+        // Free memory is reported to the balloon in blocks of 128 KiB.
+        // Memory freed after boot is too scattered to form the default
+        // 4 MiB blocks, and blocks of 16 KiB, the Mac's page size, cost a
+        // remap each: a VM reports its whole free memory soon after boot,
+        // and restores were slower.
+        let mut line = String::from(
+            "console=ttyAMA0 root=/dev/vda rw panic=-1 page_reporting.page_reporting_order=5",
+        );
         if net != NetMode::Off {
             line.push(' ');
             line.push_str(&nat::kernel_ip_arg());
@@ -215,7 +224,9 @@ mod vmm {
         let vsock = Vsock::new(GUEST_CID);
         let connector = vsock.connector();
 
-        let vm = Vm::new(&VmConfig::default()).map_err(|e| failed("cannot create the VM", e))?;
+        // Shared with the balloon, which remaps memory the guest frees.
+        let vm =
+            Arc::new(Vm::new(&VmConfig::default()).map_err(|e| failed("cannot create the VM", e))?);
         let mut backend = HvfBackend::new(&vm);
         let (memory, layout) = match (&saved, &config.restore) {
             (Some(state), Some(dir)) => {
@@ -236,7 +247,7 @@ mod vmm {
                     cmdline: cmdline(config.net),
                     memory_size: config.memory_bytes,
                     cpus: config.cpus,
-                    virtio_slots: 2 + u32::from(config.net != NetMode::Off),
+                    virtio_slots: 3 + u32::from(config.net != NetMode::Off),
                 };
                 let prepared = boot::prepare(&mut backend, &boot_config)
                     .map_err(|e| failed("cannot load the kernel", e))?;
@@ -279,6 +290,33 @@ mod vmm {
             let receiver = net.receiver();
             machine.add_virtio(MmioTransport::new(Box::new(net), memory.clone()));
             gateway = gateway.map(|(stack, _)| (stack, Some(receiver)));
+        }
+        // The balloon hands memory the guest frees back to the Mac. A
+        // snapshot from before it existed is restored without one, since
+        // its guest knows only the slots it booted with.
+        let balloon = saved.as_ref().is_none_or(|state| {
+            state
+                .devices
+                .iter()
+                .any(|d| d.device_type == device_type::BALLOON)
+        });
+        if balloon {
+            // Tracked memory stays read-only to the guest until it writes.
+            let flags = match base {
+                Some(_) => MemFlags::READ.union(MemFlags::EXEC),
+                None => MemFlags::RWX,
+            };
+            let vm = Arc::clone(&vm);
+            let discard = Box::new(move |memory: &GuestMemory, gpa, len| {
+                // A range that cannot be handed back stays in use.
+                if let Err(e) = memory.discard_mapped(&vm, gpa, len, flags) {
+                    note(format!("cannot free guest memory at {gpa:#x}: {e}"));
+                }
+            });
+            machine.add_virtio(MmioTransport::new(
+                Box::new(Balloon::new(discard)),
+                memory.clone(),
+            ));
         }
         let machine = machine;
         if let Some(state) = &saved {
