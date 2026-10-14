@@ -2,7 +2,7 @@
 //! (docs/cli.md, "cave agent"; decision 0002).
 //!
 //! By default the agent runs on the Mac and reaches the VM only through
-//! `cave mcp`, with host Bash denied, so the model API key stays on the
+//! `cave mcp`, with host Bash and reading `.env` denied, so the model API key stays on the
 //! Mac. `--in-vm` runs it inside the VM on a pseudo-terminal instead,
 //! installing it there with its own installer on first use. Either way a
 //! snapshot is taken first, and the way back to it is printed at the end.
@@ -122,8 +122,13 @@ fn snapshot_before(vm: &VmId) -> Result<Option<String>> {
     }
 }
 
+/// What Claude Code on the Mac may not use: a shell, and its Read tool on
+/// `.env`, which holds the credentials (D33). Checked with Claude Code 2.1:
+/// the Read rule covers Grep too.
+pub const DENIED_TOOLS: [&str; 2] = ["Bash", "Read(./.env)"];
+
 /// The arguments for Claude Code on the Mac: `cave mcp` as its MCP server,
-/// for the fork if one is given, the Bash tool denied, then `extra`.
+/// for the fork if one is given, [`DENIED_TOOLS`] denied, then `extra`.
 fn claude_args(cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String> {
     let mut mcp_args = vec!["mcp".to_string()];
     if let Some(fork) = fork {
@@ -134,12 +139,10 @@ fn claude_args(cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String>
         "command": cave.to_string_lossy(),
         "args": mcp_args,
     }}});
-    let mut args = vec![
-        "--mcp-config".to_string(),
-        config.to_string(),
-        "--disallowedTools".into(),
-        "Bash".into(),
-    ];
+    // One argument with `=`: the option takes a list, and would otherwise
+    // swallow a prompt in `extra`.
+    let denied = format!("--disallowedTools={}", DENIED_TOOLS.join(","));
+    let mut args = vec!["--mcp-config".to_string(), config.to_string(), denied];
     args.extend(extra.iter().cloned());
     args
 }
@@ -188,7 +191,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_gets_cave_mcp_and_no_bash() {
+    fn claude_gets_cave_mcp_and_no_bash_or_env() {
         let args = claude_args(Path::new("/opt/cave"), None, &["-p".into(), "hi".into()]);
         assert_eq!(args[0], "--mcp-config");
         let config: serde_json::Value = serde_json::from_str(&args[1]).unwrap();
@@ -196,7 +199,10 @@ mod tests {
             config,
             json!({"mcpServers": {"cave": {"type": "stdio", "command": "/opt/cave", "args": ["mcp"]}}})
         );
-        assert_eq!(args[2..], ["--disallowedTools", "Bash", "-p", "hi"]);
+        assert_eq!(
+            args[2..],
+            ["--disallowedTools=Bash,Read(./.env)", "-p", "hi"]
+        );
 
         let args = claude_args(Path::new("/opt/cave"), Some("try"), &[]);
         let config: serde_json::Value = serde_json::from_str(&args[1]).unwrap();

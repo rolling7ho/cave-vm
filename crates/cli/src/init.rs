@@ -139,7 +139,7 @@ pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
     skill::write_all(&dir)?;
     println!("Wrote the cave section of AGENTS.md and .claude/skills/cave");
     println!(
-        "Set up Claude Code to use cave mcp, with host Bash denied (.mcp.json, .claude/settings.json)"
+        "Set up Claude Code to use cave mcp, with host Bash and reading .env denied (.mcp.json, .claude/settings.json)"
     );
     let (host, included) = ssh::set_up(&dir)?;
     if included {

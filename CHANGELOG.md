@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Fixed
 
+- Claude Code on the Mac could read the credentials in `.env` with its Read tool, since only Bash was denied. `cave agent` and the `.claude/settings.json` that `cave init` writes now also deny `Read(./.env)`, which covers Grep too. `cave agent` passes the list as one `--disallowedTools=` argument, so a prompt after `--` is no longer taken as a tool name.
 - About one restore or fork in 80 under load never reached the guest agent and fell back to a disk boot after 50 seconds. A snapshot taken while a vCPU was inside an interrupt handler restored with that handler's priority still active in the GIC CPU interface, and the guest's end of interrupt did not clear it, so the vCPU took no interrupt again, not even its timer. `Machine::pause` now lets the vCPUs run on briefly and pauses again until none is in a handler. 450 stress rounds that each snapshot right after heavy guest writes now pass without a hang.
 - `cave ls` sizes count blocks shared through APFS clones once, in the first row that uses them, and leave out blocks a disk shares with its base image, as `docs/cli.md` says. Before, a snapshot counted the whole disk it was cloned from.
 - `cave gc` failed with a lost connection while a VM was running: data the VM had written but not flushed has no place on the volume yet, and its negative offset overflowed. It is now skipped.
