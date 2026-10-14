@@ -13,6 +13,7 @@
 //! if !out.success() {
 //!     sb.restore("before")?;
 //! }
+//! sb.write_file("notes.txt", b"tests failed")?;
 //! let fork = sb.fork_from("before")?.sandbox;
 //! fork.exec(["uname", "-a"])?;
 //! fork.destroy()?;
@@ -26,7 +27,9 @@ mod error;
 mod project;
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::thread;
 
 use cave_vm_proto::MAX_CHUNK;
@@ -37,6 +40,10 @@ pub use cave_vm_proto::ErrorCode;
 pub use cave_vm_proto::daemon::Policy;
 pub use client::Daemon;
 pub use error::{Error, Result};
+
+/// The project folder in the VM, where commands start and relative paths
+/// point (docs/cli.md, "Guest layout").
+pub const WORKSPACE: &str = "/workspace";
 
 /// A project's VM, or one of its forks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +156,44 @@ pub struct Forked {
     pub reason: Option<String>,
 }
 
+/// `path` in the VM: as given when absolute, otherwise under
+/// [`WORKSPACE`].
+fn vm_path(path: &str) -> String {
+    if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("{WORKSPACE}/{}", path.trim_start_matches("./"))
+    }
+}
+
+/// The SHA-256 of `data` as lowercase hex, from `shasum`, as `cave cp`
+/// computes it.
+fn sha256(data: &[u8]) -> Result<String> {
+    let failed = |e: &dyn std::fmt::Display| {
+        Error::new(format!(
+            "cannot compute a SHA-256 with /usr/bin/shasum: {e}"
+        ))
+    };
+    let mut child = std::process::Command::new("/usr/bin/shasum")
+        .args(["-a", "256"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| failed(&e))?;
+    // shasum reads all of its input before it writes, so the whole input
+    // can go in before the output is read.
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(data).map_err(|e| failed(&e))?;
+    }
+    let out = child.wait_with_output().map_err(|e| failed(&e))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    match text.split_whitespace().next() {
+        Some(hex) if out.status.success() && hex.len() == 64 => Ok(hex.to_string()),
+        _ => Err(failed(&"no digest in its output")),
+    }
+}
+
 impl Sandbox {
     /// The VM of the project `path` is in: the folder with `cave.toml`, or
     /// its nearest parent with one, as `cave` finds it. Talks to the daemon
@@ -257,6 +302,63 @@ impl Sandbox {
                 }
                 other => return Err(Error::unexpected("exec", other)),
             }
+        }
+    }
+
+    /// The contents of the file at `path` in the VM, starting the VM first
+    /// if needed. A relative path is relative to [`WORKSPACE`].
+    pub fn read_file(&self, path: &str) -> Result<Vec<u8>> {
+        self.start()?;
+        let path = vm_path(path);
+        let mut connection = self.daemon.connect()?;
+        connection.send(&Request::FileRead {
+            vm: self.vm(),
+            path: path.clone(),
+        })?;
+        let mut contents = Vec::new();
+        loop {
+            match connection.reply()? {
+                Reply::FileInfo { size, .. } => {
+                    contents.reserve(usize::try_from(size).unwrap_or(0));
+                }
+                Reply::FileData { data } => contents.extend_from_slice(&data.0),
+                Reply::FileEnd { sha256: expected } => {
+                    if sha256(&contents)? != expected {
+                        return Err(Error::new(format!(
+                            "the copy of {path} does not match the VM's file"
+                        ))
+                        .fix("Try again"));
+                    }
+                    return Ok(contents);
+                }
+                other => return Err(Error::unexpected("file_read", other)),
+            }
+        }
+    }
+
+    /// Writes `contents` to the file at `path` in the VM, replacing it and
+    /// creating missing folders, starting the VM first if needed. A
+    /// relative path is relative to [`WORKSPACE`]. Returns the bytes
+    /// written.
+    pub fn write_file(&self, path: &str, contents: &[u8]) -> Result<u64> {
+        self.start()?;
+        let digest = sha256(contents)?;
+        let mut connection = self.daemon.connect()?;
+        connection.send(&Request::FileWrite {
+            vm: self.vm(),
+            path: vm_path(path),
+            mode: None,
+            create_dirs: true,
+        })?;
+        for chunk in contents.chunks(MAX_CHUNK) {
+            connection.send(&Request::FileData {
+                data: chunk.to_vec().into(),
+            })?;
+        }
+        connection.send(&Request::FileEnd { sha256: digest })?;
+        match connection.reply()? {
+            Reply::FileWritten { size } => Ok(size),
+            other => Err(Error::unexpected("file_write", other)),
         }
     }
 
