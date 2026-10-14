@@ -166,6 +166,8 @@ Created cave.toml (sealed, debian, 2 CPUs, 2 GB)
 Added .cave/ to .gitignore
 Wrote the cave section of AGENTS.md and .claude/skills/cave
 Set up Claude Code to use cave mcp, with host Bash denied (.mcp.json, .claude/settings.json)
+Added an Include line to ~/.ssh/config for cave's SSH hosts
+Edit in the VM: connect VS Code Remote-SSH or Zed to my-project.cave
 Next: cave shell, or cave agent claude
 ```
 
@@ -588,6 +590,16 @@ The server is written by hand ([decision 0013](decisions/0013-mcp-server-by-hand
 A tool that fails returns the error and its fix as text, marked `isError`, so the agent can act on it.
 
 ---
+
+## Remote editing
+
+sshd runs in the VM and is reached over vsock, so an editor that expects SSH, such as VS Code Remote-SSH or Zed, edits the code where it lives without the user touching SSH (design, "Remote editing"). `cave init`, and the setup on first use, prepare it:
+
+- An SSH key in the data directory, `ssh/id_ed25519`, made once with `ssh-keygen`.
+- A host entry for the project, `ssh/hosts/<folder>.cave.conf`, named after the project folder in lowercase, with `-2`, `-3` and so on when another project has the name. It connects as the `cave` user through `cave ssh-proxy <project>`. It does not check the VM's host key, since the connection never leaves the Mac.
+- An `Include` line at the top of `~/.ssh/config` for those entries, added once ([D34](../ROADMAP.md#decisions)). The rest of the file is kept.
+
+`cave ssh-proxy` is the entry's `ProxyCommand`. People do not run it by hand, and it is left out of `cave --help`. It starts the VM if needed, adds the public key to the `cave` user's `authorized_keys` the first time, waits up to 30 seconds for sshd after a first boot, then carries the connection. Forks have no host entry yet.
 
 ## Credentials
 

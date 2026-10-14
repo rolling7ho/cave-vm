@@ -81,6 +81,11 @@ pub enum Request {
         #[serde(flatten)]
         pty: PtyOpen,
     },
+    /// A connection to sshd in a running VM, for remote editing. After
+    /// `ok` the connection carries raw bytes, without framing.
+    Ssh {
+        vm: VmId,
+    },
     FileRead {
         vm: VmId,
         path: String,
