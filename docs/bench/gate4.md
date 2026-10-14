@@ -94,3 +94,20 @@ Measured along the way:
 - `MADV_FREE_REUSABLE` alone frees nothing while the hypervisor maps the range. Unmapping, discarding and mapping again works.
 - Reporting order 2 (16 KiB) slowed restores, because a booted guest soon reports all its free memory, one remap per block. Order 9 (2 MiB) left most freed memory unreported. Order 5 (128 KiB) keeps every time target and frees the most in these tests.
 
+## Gate 4 met, 2026-10-14
+
+Same Mac and build settings, 5 runs, with the guest agent dropping the boot-time file cache and idle memory measured 8 seconds after the VM's last command (P4.12d). The booted memory target is 200 MB for the Debian guest (decision 0012).
+
+| Measure | Median | Min | Max | Target | Result |
+|---|---|---|---|---|---|
+| Boot until a command runs | 480 ms | 400 ms | 497 ms | none | |
+| `cave snapshot` of a running VM | 30 ms | 18 ms | 124 ms | under 500 ms | met |
+| `cave restore` until `cave exec` runs a command | 53 ms | 52 ms | 56 ms | under 100 ms | met |
+| The same with `[snapshots] auto = false` | 47 ms | 46 ms | 48 ms | | |
+| `cave fork --from` until the fork runs a command | 106 ms | 105 ms | 108 ms | under 150 ms | met |
+| Ten forks of one snapshot, all ran a command | 448 ms | 437 ms | 459 ms | under 1 s | met |
+| Idle memory, booted VM | 191 MB | | | under 200 MB | met |
+| Idle memory, fork | 18 MB | | | under 32 MB | met |
+
+Two more runs measured booted memory at 192 and 194 MB.
+
