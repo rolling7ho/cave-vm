@@ -18,6 +18,10 @@ use cave_vm_daemon::vms::Vms;
 /// How often the daemon looks for VMs to suspend for being unused.
 const IDLE_CHECK: Duration = Duration::from_secs(10);
 
+/// How often the daemon moves the VMs' connection attempts into their
+/// audit logs.
+const CONNECTS_CHECK: Duration = Duration::from_secs(1);
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -44,6 +48,7 @@ fn run() -> std::io::Result<()> {
     launcher.sandbox = Some(images);
     let vms = Arc::new(Vms::new(home.clone(), Arc::new(launcher), Arc::new(source)));
     vms.watch_idle(IDLE_CHECK);
+    vms.watch_connects(CONNECTS_CHECK);
     let sleeping = Arc::downgrade(&vms);
     let watched = cave_vm_vmm::host::on_system_sleep(move || {
         if let Some(vms) = sleeping.upgrade() {

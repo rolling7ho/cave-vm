@@ -13,6 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cave_vm_proto::agent::Message;
+use cave_vm_proto::daemon::AuditEntry;
 use cave_vm_proto::frame::encode;
 use cave_vm_proto::vmm::{FromVmm, ToVmm, VmmConfig};
 use cave_vm_proto::{
@@ -28,6 +29,13 @@ pub trait RunningVm {
 
     /// Pauses the VM, saves it into `dir`, and lets it run on.
     fn snapshot(&self, dir: &Path) -> Result<(), ErrorMessage>;
+
+    /// The guest's connection attempts since the last call, and how many
+    /// were dropped meanwhile ([`crate::nat::Connects::take`]). None for a
+    /// VM without a network.
+    fn take_connects(&self) -> (Vec<AuditEntry>, u64) {
+        (Vec::new(), 0)
+    }
 }
 
 /// How [`serve`] ended.
@@ -144,6 +152,10 @@ pub fn serve(link: &mut UnixStream, vm: &dyn RunningVm) -> io::Result<Ending> {
             Some(ToVmm::Stop) => {
                 reply(link, &FromVmm::Ok)?;
                 return Ok(Ending::Stop);
+            }
+            Some(ToVmm::TakeConnects) => {
+                let (entries, dropped) = vm.take_connects();
+                reply(link, &FromVmm::Connects { entries, dropped })?;
             }
             Some(ToVmm::Boot { .. }) => reply(
                 link,

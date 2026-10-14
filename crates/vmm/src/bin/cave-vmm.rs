@@ -35,7 +35,7 @@ mod vmm {
     use std::time::{Duration, Instant};
 
     use cave_vm_hvf::{MemFlags, Vm, VmConfig};
-    use cave_vm_proto::daemon::NetMode;
+    use cave_vm_proto::daemon::{AuditEntry, NetMode};
     use cave_vm_proto::vmm::{FromVmm, VmmConfig};
     use cave_vm_proto::{AGENT_PORT, ErrorCode, ErrorMessage};
     use cave_vm_vmm::backend::Backend;
@@ -52,7 +52,7 @@ mod vmm {
     use cave_vm_vmm::kernel::BootLayout;
     use cave_vm_vmm::memory::GuestMemory;
     use cave_vm_vmm::nat::{
-        self, ConnectEvent, GuestFrames, HostUdp, OpenFlows, Policy, Stack, TcpConnector,
+        self, ConnectEvent, Connects, GuestFrames, HostUdp, OpenFlows, Policy, Stack, TcpConnector,
     };
     use cave_vm_vmm::runner::{self, Machine};
     use cave_vm_vmm::snapshot::{self, State};
@@ -146,6 +146,8 @@ mod vmm {
         flows: Option<OpenFlows>,
         /// Set when the guest's writes are tracked.
         base: Option<Mutex<snapshot::Base>>,
+        /// Connection attempts for the daemon's audit log.
+        connects: Connects,
     }
 
     impl<B: Backend> RunningVm for Booted<'_, B> {
@@ -181,6 +183,10 @@ mod vmm {
                 started.elapsed()
             ));
             Ok(())
+        }
+
+        fn take_connects(&self) -> (Vec<AuditEntry>, u64) {
+            self.connects.take()
         }
     }
 
@@ -337,6 +343,7 @@ mod vmm {
             disk: Path::new(&config.disk),
             flows: gateway.as_ref().map(|(stack, _)| stack.open_flows()),
             base,
+            connects: Connects::default(),
         };
 
         // When the guest stops by itself, closing our side of the link ends
@@ -392,10 +399,12 @@ mod vmm {
             gic_ready.wait();
             let closer = gateway.as_ref().map(|(stack, _)| stack.guest_frames());
             if let Some((mut stack, Some(receiver))) = gateway {
+                let connects = vm_agent.connects.clone();
                 scope.spawn(move || {
                     let mut deliver = |frame: &[u8]| {
                         receiver.deliver(frame);
                     };
+                    let mut record = |event: ConnectEvent| connects.push(now_unix_ms(), &event);
                     stack.run(&clock, &mut deliver, &mut record);
                 });
             }
@@ -442,15 +451,11 @@ mod vmm {
         START.get_or_init(Instant::now).elapsed()
     }
 
-    /// Connection attempts go to `vmm.log` until the daemon's audit log
-    /// takes them.
-    fn record(event: ConnectEvent) {
-        let verdict = match event.reason {
-            None if event.allowed => "allowed".to_string(),
-            None => "denied".to_string(),
-            Some(reason) => format!("denied ({reason})"),
-        };
-        note(format!("{:?} to {} {verdict}", event.protocol, event.dst));
+    /// Milliseconds since the Unix epoch, for audit entries.
+    fn now_unix_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
     }
 
     /// Frames from the guest go to the network stack's thread.

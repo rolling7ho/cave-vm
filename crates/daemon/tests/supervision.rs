@@ -18,7 +18,8 @@ use cave_vm_daemon::launch::{Launcher, ProcessLauncher};
 use cave_vm_daemon::server;
 use cave_vm_daemon::vms::{AutoSnapshots, Clock, Prepared, VmSource, Vms};
 use cave_vm_proto::daemon::{
-    EntryKind, NetMode, Policy, PortMap, Reply, Request, Storage, VmId, VmState,
+    AuditEntry, AuditEvent, EntryKind, NetMode, Policy, PortMap, Reply, Request, Storage, VmId,
+    VmState,
 };
 use cave_vm_proto::frame::encode;
 use cave_vm_proto::vmm::{FromVmm, ToVmm, VmmConfig};
@@ -47,6 +48,7 @@ fn fake_vmm() {
     // in cave-vmm: closing it while in flight can lose it on macOS.
     let mut in_flight = None;
     let mut booted: Option<VmmConfig> = None;
+    let mut taken = 0u64;
     loop {
         let message = match read_frame::<_, ToVmm>(&mut link) {
             Ok(Some(message)) => message,
@@ -78,6 +80,22 @@ fn fake_vmm() {
                 FromVmm::Ok
             }
             ToVmm::Ping => FromVmm::Pong,
+            // One attempt per take, timed by the count so far.
+            ToVmm::TakeConnects => {
+                taken += 1;
+                FromVmm::Connects {
+                    entries: vec![AuditEntry {
+                        time_unix_ms: taken,
+                        event: AuditEvent::Connect {
+                            host: "192.168.1.10".into(),
+                            port: 445,
+                            allowed: false,
+                            reason: Some("LAN".into()),
+                        },
+                    }],
+                    dropped: 0,
+                }
+            }
             ToVmm::AgentConnect => {
                 // The far end echoes, standing in for the guest agent.
                 let (ours, mut agent) = UnixStream::pair().unwrap();
@@ -541,6 +559,36 @@ fn agent_connections_come_from_the_running_vmm() {
     }
     // The link still answers after handing out connections.
     assert_eq!(r.state(), Some(VmState::Running));
+}
+
+#[test]
+fn connection_attempts_reach_the_audit_log_while_running_and_on_stop() {
+    let r = rig("connects", NORMAL);
+    assert!(matches!(r.start(), Reply::Policy(_)));
+    let state = PathBuf::from(vm().project).join(".cave");
+    fs::create_dir_all(&state).unwrap();
+    let log = state.join("audit.log");
+    r.vms.collect_connects();
+    let lines = || {
+        fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(lines().len(), 1);
+    assert_eq!(lines()[0]["event"], "connect");
+    assert_eq!(lines()[0]["host"], "192.168.1.10");
+    assert_eq!(lines()[0]["reason"], "LAN");
+    // A stop collects what is left before the VMM exits.
+    assert!(matches!(r.request(Request::Stop { vm: vm() }), Reply::Ok));
+    assert_eq!(
+        lines()
+            .iter()
+            .map(|l| l["time_unix_ms"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
 }
 
 #[test]

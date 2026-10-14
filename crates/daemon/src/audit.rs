@@ -40,26 +40,39 @@ pub fn now_ms() -> u64 {
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
-/// Appends `entry` to the log at `path`.
-pub fn append(path: &Path, entry: &AuditEntry) -> io::Result<()> {
-    let mut line = serde_json::to_vec(entry).map_err(io::Error::other)?;
-    line.push(b'\n');
+/// Appends `entries` to the log at `path`, in one write.
+pub fn append(path: &Path, entries: &[AuditEntry]) -> io::Result<()> {
+    let mut lines = Vec::new();
+    for entry in entries {
+        serde_json::to_writer(&mut lines, entry).map_err(io::Error::other)?;
+        lines.push(b'\n');
+    }
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    file.write_all(&line)
+    file.write_all(&lines)
 }
 
-/// Appends `event`, timed `time_unix_ms`, to the log of `vm`. A log that
-/// cannot be written is reported on the daemon's output, and the operation
-/// it records is not undone.
+/// Appends `event`, timed `time_unix_ms`, to the log of `vm`.
 pub fn record(vm: &VmId, time_unix_ms: u64, event: AuditEvent) {
+    record_all(
+        vm,
+        &[AuditEntry {
+            time_unix_ms,
+            event,
+        }],
+    );
+}
+
+/// Appends `entries` to the log of `vm`. A log that cannot be written is
+/// reported on the daemon's output, and the operations it records are not
+/// undone.
+pub fn record_all(vm: &VmId, entries: &[AuditEntry]) {
     let Some(path) = path(vm) else {
         return;
     };
-    let entry = AuditEntry {
-        time_unix_ms,
-        event,
-    };
-    if let Err(e) = append(&path, &entry) {
+    if entries.is_empty() {
+        return;
+    }
+    if let Err(e) = append(&path, entries) {
         eprintln!("cannot write the audit log {}: {e}", path.display());
     }
 }

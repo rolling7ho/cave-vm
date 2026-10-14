@@ -107,6 +107,7 @@ fn an_unknown_message_gets_an_error_and_the_link_stays_up() {
 struct FakeVm {
     agents: Mutex<Vec<UnixStream>>,
     snapshots: Mutex<Vec<std::path::PathBuf>>,
+    connects: crate::nat::Connects,
     fail: bool,
 }
 
@@ -127,6 +128,47 @@ impl RunningVm for FakeVm {
         self.snapshots.lock().unwrap().push(dir.to_path_buf());
         Ok(())
     }
+
+    fn take_connects(&self) -> (Vec<AuditEntry>, u64) {
+        self.connects.take()
+    }
+}
+
+#[test]
+fn connection_attempts_are_handed_over_once() {
+    use crate::nat::{ConnectEvent, Protocol};
+    use std::net::{Ipv4Addr, SocketAddrV4};
+
+    let (mut daemon, mut vmm) = UnixStream::pair().unwrap();
+    let vm = FakeVm::default();
+    vm.connects.push(
+        9,
+        &ConnectEvent {
+            protocol: Protocol::Tcp,
+            dst: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 22),
+            allowed: false,
+            reason: Some("LAN"),
+        },
+    );
+    thread::scope(|s| {
+        let server = s.spawn(|| serve(&mut vmm, &vm).unwrap());
+        send(&mut daemon, &ToVmm::TakeConnects);
+        let FromVmm::Connects { entries, dropped } = receive(&mut daemon) else {
+            panic!("no connects");
+        };
+        assert_eq!((entries.len(), dropped), (1, 0));
+        assert_eq!(entries[0].time_unix_ms, 9);
+        send(&mut daemon, &ToVmm::TakeConnects);
+        assert_eq!(
+            receive(&mut daemon),
+            FromVmm::Connects {
+                entries: Vec::new(),
+                dropped: 0
+            }
+        );
+        drop(daemon);
+        assert_eq!(server.join().unwrap(), Ending::Closed);
+    });
 }
 
 #[test]

@@ -29,6 +29,7 @@ use cave_vm_proto::daemon::{
 use cave_vm_proto::vmm::{FromVmm, ToVmm, VmmConfig};
 use cave_vm_proto::{ErrorCode, ErrorMessage};
 
+use crate::audit;
 use crate::forward::{self, Bound, Forward};
 use crate::home::{Home, PROJECT_FILE};
 use crate::launch::{Launched, Launcher};
@@ -510,6 +511,38 @@ impl Vms {
         });
     }
 
+    /// Moves the connection attempts every running VMM kept into the VMs'
+    /// audit logs.
+    pub fn collect_connects(&self) {
+        let vms: Vec<Arc<Vm>> = self
+            .vms
+            .lock()
+            .expect("vms lock")
+            .values()
+            .cloned()
+            .collect();
+        for vm in vms {
+            if let Slot::Running(running) = &mut *vm.slot.lock().expect("vm lock") {
+                collect_connects(&vm.id, &mut running.link);
+            }
+        }
+    }
+
+    /// Calls [`Vms::collect_connects`] every `interval` on its own thread
+    /// for as long as the daemon runs.
+    pub fn watch_connects(self: &Arc<Self>, interval: Duration) {
+        let vms = Arc::downgrade(self);
+        thread::spawn(move || {
+            loop {
+                thread::sleep(interval);
+                let Some(vms) = vms.upgrade() else {
+                    return;
+                };
+                vms.collect_connects();
+            }
+        });
+    }
+
     /// Stops a VM. Stopping a stopped VM is not an error.
     pub fn stop(&self, id: &VmId) -> Result<(), ErrorMessage> {
         let vm = self.vm(id)?;
@@ -526,6 +559,7 @@ impl Vms {
             ..
         } = running;
         stop_requested.store(true, Ordering::Release);
+        collect_connects(id, &mut link);
         let _ = link.call(&ToVmm::Stop);
         drop(link);
         let deadline = Instant::now() + STOP_TIMEOUT;
@@ -803,6 +837,20 @@ fn remove_state(state: &Path) -> Result<(), ErrorMessage> {
         Err(e) => Err(failed(e)),
         Ok(meta) if meta.is_dir() => fs::remove_dir_all(state).map_err(failed),
         Ok(_) => fs::remove_file(state).map_err(failed),
+    }
+}
+
+/// Takes the connection attempts `link`'s VMM kept and appends them to the
+/// audit log of `id`. A failed call is ignored: the VM is stopping or gone.
+fn collect_connects(id: &VmId, link: &mut VmmLink) {
+    if let Ok(FromVmm::Connects { entries, dropped }) = link.call(&ToVmm::TakeConnects) {
+        audit::record_all(id, &entries);
+        if dropped > 0 {
+            eprintln!(
+                "cave-daemon: {} made connection attempts faster than the audit log took them; {dropped} were not recorded",
+                display_name(id)
+            );
+        }
     }
 }
 

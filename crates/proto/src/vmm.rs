@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::daemon::NetMode;
+use crate::daemon::{AuditEntry, NetMode};
 use crate::error::ErrorMessage;
 use crate::frame;
 use crate::handshake::Hello;
@@ -45,6 +45,9 @@ pub enum ToVmm {
         dir: String,
     },
     Stop,
+    /// The guest's connection attempts since the last `take_connects`, for
+    /// the audit log. Replied to with `connects`.
+    TakeConnects,
     /// A `type` this build does not know; never returned by
     /// [`frame::decode`].
     #[serde(other, skip_serializing)]
@@ -63,10 +66,21 @@ pub enum FromVmm {
     AgentConnection,
     Pong,
     Ok,
+    /// The reply to `take_connects`: `connect` audit entries, oldest first.
+    Connects {
+        entries: Vec<AuditEntry>,
+        /// Attempts not kept because too many were waiting.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        dropped: u64,
+    },
     /// A `type` this build does not know; never returned by
     /// [`frame::decode`].
     #[serde(other, skip_serializing)]
     Unknown,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 impl frame::Message for ToVmm {
@@ -152,6 +166,7 @@ mod tests {
             ToVmm::AgentConnect,
             ToVmm::Ping,
             ToVmm::Stop,
+            ToVmm::TakeConnects,
         ] {
             let frame = encode(&message).unwrap();
             assert_eq!(decode::<ToVmm>(&frame[4..]).unwrap(), message);
@@ -169,6 +184,28 @@ mod tests {
             serde_json::to_value(FromVmm::AgentConnection).unwrap(),
             json!({"type": "agent_connection"})
         );
+        assert_eq!(
+            serde_json::to_value(ToVmm::TakeConnects).unwrap(),
+            json!({"type": "take_connects"})
+        );
+        let connects = FromVmm::Connects {
+            entries: vec![AuditEntry {
+                time_unix_ms: 5,
+                event: crate::daemon::AuditEvent::Connect {
+                    host: "192.168.1.10".into(),
+                    port: 445,
+                    allowed: false,
+                    reason: Some("LAN".into()),
+                },
+            }],
+            dropped: 0,
+        };
+        assert_eq!(
+            serde_json::to_value(&connects).unwrap(),
+            json!({"type": "connects", "entries": [{"time_unix_ms": 5, "event": "connect", "host": "192.168.1.10", "port": 445, "allowed": false, "reason": "LAN"}]})
+        );
+        let frame = encode(&connects).unwrap();
+        assert_eq!(decode::<FromVmm>(&frame[4..]).unwrap(), connects);
     }
 
     #[test]
