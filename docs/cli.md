@@ -133,7 +133,7 @@ Sets up the current directory as a project. It writes:
 
 - `cave.toml` with the design's minimal keys (see [config.md](config.md)).
 - `.cave/`, and adds `.cave/` to `.gitignore`, creating the file if needed.
-- The agent skill files: a cave section in `AGENTS.md` (existing content is kept; the section sits between marker comments so it can be updated), a `.claude/skills/` entry, and, for agents that support it, a permissions config that denies host Bash. The skill's text is [`skill/cave/SKILL.md`](../skill/cave/SKILL.md) in this repository, the same text as the bootstrap skill on the website (design, "Bootstrap skill"). For Claude Code that means:
+- The agent skill files: a cave section in `AGENTS.md` (existing content is kept; the section sits between marker comments so it can be updated), a `.claude/skills/` entry, and, for agents that support it, a permissions config that denies host Bash. The skill's text is [`skill/cave/SKILL.md`](../skill/cave/SKILL.md) in this repository, the same text as the bootstrap skill on the website ([docs/bootstrap.md](bootstrap.md)). For Claude Code that means:
   - `.claude/skills/cave/SKILL.md`: the skill.
   - `AGENTS.md`: the skill without its frontmatter, between `<!-- cave:start -->` and `<!-- cave:end -->`.
   - `.mcp.json`: registers `cave mcp` as the `cave` server.
