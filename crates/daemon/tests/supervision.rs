@@ -209,6 +209,7 @@ struct Source {
     prepared: AtomicUsize,
     idle_suspend: Mutex<Option<Duration>>,
     auto_snapshots: Mutex<AutoSnapshots>,
+    ttl_seconds: Mutex<Option<u64>>,
 }
 
 impl VmSource for Source {
@@ -220,6 +221,10 @@ impl VmSource for Source {
     ) -> Result<Prepared, ErrorMessage> {
         self.prepared.fetch_add(1, Ordering::SeqCst);
         let net = net.unwrap_or(NetMode::Nat);
+        // As the real source does when it makes the disk.
+        if let Some(dir) = std::path::Path::new(&config(vm).disk).parent() {
+            let _ = fs::create_dir_all(dir);
+        }
         Ok(Prepared {
             config: VmmConfig { net, ..config(vm) },
             policy: Policy {
@@ -230,7 +235,7 @@ impl VmSource for Source {
                 ports: ports.to_vec(),
                 cpus: 2,
                 memory_bytes: 2 << 30,
-                ttl_seconds: None,
+                ttl_seconds: *self.ttl_seconds.lock().unwrap(),
                 widened: Vec::new(),
             },
             idle_suspend: *self.idle_suspend.lock().unwrap(),
@@ -713,6 +718,46 @@ fn ports_listen_on_localhost_while_the_vm_runs() {
     thread::sleep(Duration::from_millis(300));
     assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, a)).is_err());
     assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, b)).is_err());
+}
+
+#[test]
+fn a_vm_is_removed_once_its_ttl_runs_out() {
+    let r = rig("ttl", NORMAL);
+    let project = PathBuf::from(vm().project);
+    let state = project.join(".cave");
+    fs::create_dir_all(&state).unwrap();
+    fs::write(project.join("cave.toml"), "").unwrap();
+    let booted = state.join("booted");
+    let age = |seconds: u64| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        fs::write(&booted, (now - seconds).to_string()).unwrap();
+    };
+
+    // Without a TTL, age does not matter.
+    assert!(matches!(r.start(), Reply::Policy(_)));
+    assert!(booted.is_file());
+    age(100_000);
+    assert!(r.vms.remove_expired().is_empty());
+
+    *r.source.ttl_seconds.lock().unwrap() = Some(3600);
+    assert!(matches!(r.request(Request::Stop { vm: vm() }), Reply::Ok));
+    let reply = r.start();
+    assert!(matches!(reply, Reply::Policy(_)), "{reply:?}");
+    // The start removed the expired VM and booted a new one.
+    assert!(r.vms.remove_expired().is_empty());
+
+    // A running VM is removed once its TTL passes, with its state.
+    age(3599);
+    assert!(r.vms.remove_expired().is_empty());
+    age(3601);
+    assert_eq!(r.vms.remove_expired(), [vm()]);
+    // Removed, so no longer listed.
+    assert_eq!(r.state(), None);
+    assert!(!state.exists());
+    assert!(project.join("cave.toml").is_file());
 }
 
 #[test]
