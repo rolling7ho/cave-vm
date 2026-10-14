@@ -7,3 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+[dependencies]
+cave-vm-proto = { path = "../proto" }

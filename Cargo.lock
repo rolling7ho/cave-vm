@@ -121,6 +121,9 @@ dependencies = [
 [[package]]
 name = "cave-vm-sdk"
 version = "0.0.0"
+dependencies = [
+ "cave-vm-proto",
+]
 
 [[package]]
 name = "cave-vm-vmm"
