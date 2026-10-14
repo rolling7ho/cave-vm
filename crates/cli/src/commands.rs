@@ -5,7 +5,8 @@ use std::process::Command;
 use std::time::Instant;
 
 use cave_vm_proto::daemon::{
-    EntryKind, ImageInfo, ListEntry, NetMode, Policy, PortMap, Reply, Request, VmId, VmState,
+    EntryKind, ImageInfo, ListEntry, NetMode, Policy, PortMap, Reply, Request, Storage, VmId,
+    VmState,
 };
 
 use crate::client::Connection;
@@ -74,6 +75,7 @@ pub fn ensure_running(
     always_print: bool,
 ) -> Result<Policy> {
     let was_running = is_running(vm)?;
+    let first_boot = vm.fork.is_none() && !Path::new(&vm.project).join(BOOTED_FILE).exists();
     let started = Instant::now();
     let Reply::Policy(policy) = Connection::call(&Request::Start {
         vm: vm.clone(),
@@ -93,7 +95,26 @@ pub fn ensure_running(
         let headline = format!("started in {}", policy::seconds(started.elapsed()));
         eprintln!("{}", policy::render(&policy, &headline));
     }
+    if first_boot && !was_running {
+        eprintln!("{}", first_copy_line(policy.storage));
+    }
     Ok(policy)
+}
+
+/// The daemon's record of a project VM's first boot, in the project
+/// folder; the folder's files were copied in on that boot (D13).
+const BOOTED_FILE: &str = ".cave/booted";
+
+/// What the first boot did with the folder's files (D13).
+fn first_copy_line(storage: Storage) -> &'static str {
+    match storage {
+        Storage::Sealed => {
+            "Copied this folder's files into the VM, where the code lives now. The files on your Mac are left as they are and no longer updated"
+        }
+        Storage::Synced => {
+            "Copied this folder's files into the VM. The VM's copy is the one to work on; cave sync updates this folder from it"
+        }
+    }
 }
 
 /// `cave run`.

@@ -141,7 +141,13 @@ Sets up the current directory as a project. It writes:
 
   Other settings in those files are kept. A file that already has these entries is not rewritten. A file that is not valid JSON is an error that says to fix it, and is left alone.
 
-It does not boot the VM. The files already in the folder, everything except `.cave/` and `.env`, are copied into the VM once when it first boots. `.env` stays on the Mac because it holds the credentials ([D33](../ROADMAP.md#decisions)). In sealed mode the Mac files are left untouched but are no longer updated, and cave says so ([D13](../ROADMAP.md#decisions)).
+It does not boot the VM. The files already in the folder, everything except `.cave/` and `.env`, are copied into the VM once when it first boots. `.env` stays on the Mac because it holds the credentials ([D33](../ROADMAP.md#decisions)). In sealed mode the Mac files are left untouched but are no longer updated, and cave says so ([D13](../ROADMAP.md#decisions)). The first command that boots the VM prints, in sealed mode:
+
+```
+Copied this folder's files into the VM, where the code lives now. The files on your Mac are left as they are and no longer updated
+```
+
+and in synced mode `Copied this folder's files into the VM. The VM's copy is the one to work on; cave sync updates this folder from it`. File modes and symbolic links are kept, and the files belong to the VM's `cave` user. If the copy fails, the command says so, and the next command that starts the VM tries again.
 
 When stdin is a terminal and neither `--sealed` nor `--synced` is given, it asks the design's setup question, with sealed as the default:
 
