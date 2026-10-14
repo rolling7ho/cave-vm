@@ -1076,3 +1076,27 @@ fn doctor_passes_on_a_signed_install_and_verifies_the_image() {
     );
     assert!(!stdout.contains("fail"), "{stdout}");
 }
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn python_sdk_drives_a_real_vm() {
+    let rig = Rig::new();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    let sdk = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sdks/python");
+    let out = Command::new("/usr/bin/python3")
+        .arg(sdk.join("examples/smoke.py"))
+        .current_dir(rig.project())
+        .env("PYTHONPATH", sdk.join("src"))
+        .env("HOME", rig.root.join("home"))
+        .env("CAVE_HOME", rig.root.join("data"))
+        .env("CAVE_DAEMON", rig.bin.join("cave-daemon"))
+        .env("CAVE_IMAGE_DIR", Rig::image_dir())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && stdout.contains("python sdk ok"),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
