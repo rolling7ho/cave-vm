@@ -49,6 +49,7 @@ fn setup(name: &str, toml: &str) -> Setup {
     let source = ProjectSource {
         cache: Cache::new(root.join("cache")),
         origin: Origin::Dir(images.clone()),
+        updates: None,
     };
     Setup {
         root,
@@ -253,4 +254,27 @@ fn snapshot_settings_come_from_cave_toml() {
         AutoSnapshots::default()
     );
     fs::remove_dir_all(&s.root).unwrap();
+}
+
+#[test]
+fn a_start_looks_for_newer_images_unless_the_project_turns_it_off() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    for (check, expected) in [(false, 0), (true, 1)] {
+        let toml = format!("{TOML}\n[updates]\ncheck = {check}\n");
+        let mut s = setup(&format!("updates-{check}"), &toml);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&calls);
+        s.source.updates = Some(Detector::new(
+            s.root.join(crate::updates::FILE),
+            Box::new(move || {
+                counted.fetch_add(1, Ordering::SeqCst);
+                Ok(String::new())
+            }),
+        ));
+        s.source.prepare(&vm(&s.project), None, &[]).unwrap();
+        s.source.updates.as_ref().unwrap().wait();
+        assert_eq!(calls.load(Ordering::SeqCst), expected, "check = {check}");
+    }
 }

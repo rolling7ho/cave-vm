@@ -581,6 +581,7 @@ The checks, in order:
 - `cave-vmm`, next to `cave-daemon`, is signed with the hypervisor entitlement.
 - At least 5 GB is free on the volume of the current folder.
 - The daemon answers. It then hashes every image and kernel in its cache again and checks each against its digest. A damaged file is reported with its path, for you to delete; the next `cave run` downloads it again.
+- If the update detector has seen a newer version of a downloaded image, a line says so. Doctor itself looks nothing up; see [config.md](config.md#updates).
 
 ```
 ok    Apple Silicon (M3 Pro)

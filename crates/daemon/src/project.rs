@@ -19,6 +19,7 @@ use crate::config;
 use crate::image::manifest::{Entry, Manifest, Origin};
 use crate::image::{BASE_ALIAS_TARGET, Cache, Digest, ImageRef};
 use crate::snapshot;
+use crate::updates::Detector;
 use crate::vms::{AutoSnapshots, Prepared, VmSource};
 
 /// The project's machine-specific folder.
@@ -40,6 +41,9 @@ pub const KERNEL_RECORD: &str = "kernel";
 pub struct ProjectSource {
     pub cache: Cache,
     pub origin: Origin,
+    /// Looks for newer images when a VM starts, unless the project turns
+    /// it off.
+    pub updates: Option<Detector>,
 }
 
 /// An error whose text is a message, a newline and how to fix it, as the
@@ -273,6 +277,9 @@ impl VmSource for ProjectSource {
             .parse()
             .map_err(|e| error(ErrorCode::BadRequest, e))?;
         let (pinned, base, kernel) = self.fetch(&image)?;
+        if let Some(updates) = &self.updates {
+            updates.check_soon(settings.updates_check);
+        }
         if image.digest.is_none() {
             pin(project, &pinned)?;
         }

@@ -930,9 +930,16 @@ impl Vms {
         self.source.images(&projects)
     }
 
-    /// The daemon's checks for `cave doctor`: the image cache, verified.
+    /// The daemon's checks for `cave doctor`: the image cache, verified,
+    /// and any newer image the update detector has seen.
     pub fn doctor(&self) -> Vec<Check> {
-        crate::doctor::image_checks(&self.home.images())
+        let images = self.home.images();
+        let mut checks = crate::doctor::image_checks(&images);
+        checks.extend(crate::doctor::update_checks(
+            &images,
+            &self.home.root().join(crate::updates::FILE),
+        ));
+        checks
     }
 
     /// Stops every running VM, when the daemon exits.
