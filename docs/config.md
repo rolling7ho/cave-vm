@@ -50,7 +50,7 @@ check        = true
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `image` | string | `"base"` | Base image name from `cave images`. `base` and `debian` are Debian 13 (trixie), the recommended default, and `ubuntu` is Ubuntu 26.04 LTS (design: the user chooses Debian or Ubuntu). On first run cave pins it by writing the digest to `.cave/` and uses that digest from then on. The pin is written into this key ([D22](../ROADMAP.md#decisions)) |
+| `image` | string | `"base"` | Base image name from `cave images`. `base` and `debian` are Debian 13 (trixie), the recommended default, and `ubuntu` is Ubuntu 26.04 LTS (design: the user chooses Debian or Ubuntu). On first run cave pins it by writing the digest into this key, as `base@sha256:...`, and uses that digest from then on ([D22](../ROADMAP.md#decisions)) |
 | `cpus` | integer | `2` | Virtual CPUs, 1 to the Mac's CPU count |
 | `memory` | size | `"2G"` | Guest memory. The configurable guest address size bounds the maximum [A4] |
 | `idle_suspend` | duration or `"off"` | `"30m"` | Suspend the VM after this long idle, as `cave stop` would. Idle means no `cave` or SDK or MCP connection to the VM and no traffic on a forwarded port: the time counts from when the last command, shell, file copy or forwarded connection closed, or from `cave run`. An open forwarded connection counts as traffic even when quiet. The daemon checks every 10 seconds |
