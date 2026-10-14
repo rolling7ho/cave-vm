@@ -140,7 +140,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | P4.9 | `cave gc`: show disk usage and reclaim it. Shared APFS clone blocks are reported honestly rather than double-counted [A9]. | Tests on cloned temp files. |
 | P4.10 | `cave export`: move a project or snapshot out as files. | E2E round trip. |
 | P4.11 | Benchmark harness for boot, restore and fork time and idle memory, run on the self-hosted Mac. | Results compared against the P2.11 targets. |
-| P4.12 | Meet the gate 4 targets (D29): snapshots write only the pages changed since the last one (P4.12a), faster restore and fork (P4.12b), then booted memory. | `scripts/bench/gate4.py` meets every target. |
+| P4.12 | Meet the gate 4 targets (D29): snapshots write only the pages changed since the last one (P4.12a), faster restore and fork (P4.12b), free page reporting (P4.12c), then booted memory. | `scripts/bench/gate4.py` meets every target. |
 
 **Exit gate 4 (the headline demo).** On a real Mac: start a project VM with a running process, snapshot it, break the VM, restore it with the process intact, and fork it into several copies, each in well under a second. The exact restore and fork targets are the ones approved in P2.11. A snapshot written before a `cave` upgrade still loads, or falls back to a disk boot.
 
@@ -182,7 +182,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 
 | ID | Task | Tests / check |
 | --- | --- | --- |
-| P6.1 | virtio-balloon, and a warning when host memory gets tight (no hard cap on VM count). | Mock-backend tests; idle memory measured on the self-hosted Mac. |
+| P6.1 | virtio-balloon (free page reporting landed early in P4.12c), and a warning when host memory gets tight (no hard cap on VM count). | Mock-backend tests; idle memory measured on the self-hosted Mac. |
 | P6.2 | `cave doctor`: entitlements, macOS version, disk space and image state, each failure with its fix. | Tests with each check failing. |
 | P6.3 | First-run setup: fetch kernel and base image, ad hoc sign with the hypervisor entitlement [A5], create the data directory, run the health check. | E2E on a clean Mac account. |
 | P6.4 | Python and TypeScript SDKs, thin clients over the daemon socket with no native extensions. | Tests against a fake daemon. |

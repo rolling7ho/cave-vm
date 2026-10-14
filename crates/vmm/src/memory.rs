@@ -221,7 +221,7 @@ mod host {
     use std::ptr::{self, NonNull};
     use std::sync::Arc;
 
-    use super::{DirtyPages, Error, Result, check_layout, locate};
+    use super::{DirtyPages, Error, PAGE_SIZE, Result, check_layout, locate};
 
     // From <sys/mman.h> on macOS.
     const PROT_READ: c_int = 0x01;
@@ -230,6 +230,7 @@ mod host {
     const MAP_PRIVATE: c_int = 0x0002;
     const MAP_ANON: c_int = 0x1000;
     const MAP_FAILED: *mut c_void = !0usize as *mut c_void;
+    const MADV_FREE_REUSABLE: c_int = 7;
 
     unsafe extern "C" {
         fn mmap(
@@ -241,6 +242,7 @@ mod host {
             offset: i64,
         ) -> *mut c_void;
         fn munmap(addr: *mut c_void, len: usize) -> c_int;
+        fn madvise(addr: *mut c_void, len: usize, advice: c_int) -> c_int;
     }
 
     /// How a file-backed region shares changes with its file.
@@ -327,6 +329,21 @@ mod host {
         }
     }
 
+    /// The whole host pages inside `[gpa, gpa + len)`, as a start and a
+    /// size, or none if there are none.
+    fn whole_pages(gpa: u64, len: u64) -> Result<Option<(u64, usize)>> {
+        let overflow = || Error::Overflow { gpa, size: len };
+        let start = gpa
+            .checked_next_multiple_of(PAGE_SIZE)
+            .ok_or_else(overflow)?;
+        let end = gpa.checked_add(len).ok_or_else(overflow)? / PAGE_SIZE * PAGE_SIZE;
+        if end <= start {
+            return Ok(None);
+        }
+        let size = usize::try_from(end - start).map_err(|_| overflow())?;
+        Ok(Some((start, size)))
+    }
+
     impl Drop for Region {
         fn drop(&mut self) {
             // SAFETY: `host` and `size` describe a mapping this region created
@@ -396,6 +413,55 @@ mod host {
             unsafe { ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len()) };
             self.dirty.mark(gpa, data.len());
             Ok(())
+        }
+
+        /// Hands the host pages wholly inside `[gpa, gpa + len)` back to
+        /// macOS, for memory the guest freed. They stop counting toward
+        /// this process's memory, and their contents are undefined until
+        /// written again: the guest may read back old data or zeroes. Dirty
+        /// bits are left alone: a page already marked keeps its mark, and an
+        /// unmarked one can keep its old contents in the next snapshot,
+        /// since the guest treats it as free. Returns the bytes handed back.
+        pub fn discard(&self, gpa: u64, len: u64) -> Result<u64> {
+            let Some((start, size)) = whole_pages(gpa, len)? else {
+                return Ok(0);
+            };
+            let host = self.host_ptr(start, size)?;
+            // SAFETY: `host` and `size` lie inside one region's mapping
+            // (checked by `host_ptr`) and are page-aligned. The advice only
+            // lets the kernel reclaim the pages; the mapping stays valid, so
+            // the guest and later host copies still read and write it.
+            if unsafe { madvise(host.cast(), size, MADV_FREE_REUSABLE) } != 0 {
+                return Err(Error::Mmap(std::io::Error::last_os_error()));
+            }
+            Ok(size as u64)
+        }
+
+        /// [`GuestMemory::discard`] for memory mapped into `vm`. The
+        /// hypervisor's mapping keeps the pages in use, so the range is
+        /// unmapped first and mapped again with `flags` afterwards; the
+        /// guest must not touch it meanwhile, which holds for memory it
+        /// reported free.
+        #[cfg(target_arch = "aarch64")]
+        pub fn discard_mapped(
+            &self,
+            vm: &cave_vm_hvf::Vm,
+            gpa: u64,
+            len: u64,
+            flags: cave_vm_hvf::MemFlags,
+        ) -> Result<u64> {
+            let Some((start, size)) = whole_pages(gpa, len)? else {
+                return Ok(0);
+            };
+            let host = self.host_ptr(start, size)?;
+            vm.unmap(start, size).map_err(Error::Hypervisor)?;
+            let discarded = self.discard(start, size as u64);
+            // SAFETY: `host` is `size` bytes inside one region (checked by
+            // `host_ptr`), page-aligned, and was mapped at `start` until
+            // just now. The region outlives the mapping: the `Mapping` from
+            // `map_into` holds the regions and unmaps them on drop.
+            let mapped = unsafe { vm.map(host, start, size, flags) }.map_err(Error::Hypervisor);
+            mapped.and(discarded)
         }
 
         /// Maps every region into `vm` with read, write and execute access.
@@ -573,6 +639,23 @@ mod tests {
             assert_eq!(&buf, b"hello");
             assert_eq!(mem.dirty().take(), [4 * P], "writes mark their pages");
             assert!(mem.write(P - 2, b"abcd").is_err(), "past the first region");
+        }
+
+        #[test]
+        fn discard_hands_back_whole_pages_and_keeps_the_memory_usable() {
+            let mem = GuestMemory::new(vec![Region::anonymous(0, 8 * P).unwrap()]).unwrap();
+            mem.write(0, &vec![1; 8 * P as usize]).unwrap();
+            mem.dirty().take();
+            assert_eq!(mem.discard(P / 2, 3 * P).unwrap(), 2 * P, "pages 1 and 2");
+            assert_eq!(mem.discard(P + 1, P).unwrap(), 0, "no whole page");
+            assert!(mem.dirty().take().is_empty(), "discarding marks nothing");
+            assert!(mem.discard(7 * P, 2 * P).is_err(), "past the end");
+            mem.write(P, b"again").unwrap();
+            let mut buf = [0u8; 5];
+            mem.read(P, &mut buf).unwrap();
+            assert_eq!(&buf, b"again");
+            mem.read(0, &mut buf).unwrap();
+            assert_eq!(buf, [1; 5], "a page left alone");
         }
 
         #[test]

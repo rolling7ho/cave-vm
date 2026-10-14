@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::memory::GuestMemory;
 
+pub mod balloon;
 pub mod block;
 pub mod mmio;
 pub mod net;
@@ -32,6 +33,7 @@ pub use queue::{DescriptorChain, Queue};
 pub mod device_type {
     pub const NET: u32 = 1;
     pub const BLOCK: u32 = 2;
+    pub const BALLOON: u32 = 5;
     pub const VSOCK: u32 = 19;
 }
 
