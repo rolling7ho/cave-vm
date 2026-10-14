@@ -81,7 +81,7 @@ fn output(program: &str, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn sysctl(name: &str) -> Option<String> {
+pub fn sysctl(name: &str) -> Option<String> {
     output("/usr/sbin/sysctl", &["-n", name])
 }
 

@@ -12,6 +12,7 @@ use cave_vm_proto::daemon::{
 use crate::client::Connection;
 use crate::error::{CliError, Result};
 use crate::init;
+use crate::memory;
 use crate::policy;
 use crate::project;
 
@@ -94,6 +95,7 @@ pub fn ensure_running(
     } else {
         let headline = format!("started in {}", policy::seconds(started.elapsed()));
         eprintln!("{}", policy::render(&policy, &headline));
+        memory::warn_if_tight(policy.memory_bytes);
     }
     if first_boot && !was_running {
         eprintln!("{}", first_copy_line(policy.storage));

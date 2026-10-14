@@ -13,6 +13,7 @@ mod export;
 mod gc;
 mod init;
 mod inspect;
+mod memory;
 mod mirror;
 mod policy;
 mod project;
