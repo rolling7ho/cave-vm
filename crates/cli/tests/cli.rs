@@ -141,6 +141,10 @@ fn handle(state: &Mutex<State>, request: Request) -> Reply {
             s.running = false;
             Reply::Ok
         }
+        Request::Snapshot { name, .. } => Reply::Snapshot {
+            name: name.unwrap_or_else(|| "proj-2026-10-14-debian".into()),
+            size: 1,
+        },
         Request::Gc { apply } => Reply::Usage(Usage {
             images: Vec::new(),
             projects: Vec::new(),
@@ -623,4 +627,100 @@ fn cp_needs_exactly_one_side_in_the_vm() {
     let out = s.cave(&s.project(), &["cp", ":a"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(stderr(&out).contains("needs a source and a destination"));
+}
+
+/// A fake `claude` on `PATH` that records its arguments and working
+/// directory, then exits 3.
+fn fake_claude(s: &Scratch) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = s.root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let script = bin.join("claude");
+    let log = s.root.join("claude.log");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\npwd > {log}\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> {log}; done\nexit 3\n",
+            log = log.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    bin
+}
+
+fn cave_with_path(s: &Scratch, path: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_cave"))
+        .args(args)
+        .current_dir(s.project())
+        .env("HOME", s.home())
+        .env("CAVE_HOME", s.data())
+        .env("CAVE_DAEMON", s.root.join("no-daemon-here"))
+        .env("PATH", format!("{}:/usr/bin:/bin", path.display()))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn agent_runs_claude_on_the_mac_through_cave_mcp_after_a_snapshot() {
+    let s = Scratch::new();
+    let state = fake_daemon(&s);
+    let bin = fake_claude(&s);
+    let out = cave_with_path(&s, &bin, &["agent", "claude", "--", "-p", "fix the tests"]);
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(err.contains("started in"), "{err}");
+    assert!(
+        err.ends_with(
+            "Snapshot before this run: proj-2026-10-14-debian\n\
+             Undo everything the agent did with: cave restore proj-2026-10-14-debian\n"
+        ),
+        "{err}"
+    );
+    let log = fs::read_to_string(s.root.join("claude.log")).unwrap();
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(lines[0], s.project().to_str().unwrap());
+    assert_eq!(lines[1], "--mcp-config");
+    let config: serde_json::Value = serde_json::from_str(lines[2]).unwrap();
+    assert_eq!(
+        config["mcpServers"]["cave"]["args"],
+        serde_json::json!(["mcp"])
+    );
+    assert!(
+        config["mcpServers"]["cave"]["command"]
+            .as_str()
+            .unwrap()
+            .ends_with("/cave")
+    );
+    assert_eq!(
+        lines[3..],
+        ["--disallowedTools", "Bash", "-p", "fix the tests"]
+    );
+    let requests = state.lock().unwrap().requests.clone();
+    let snapshot = requests
+        .iter()
+        .position(|r| matches!(r, Request::Snapshot { name: None, .. }));
+    let start = requests
+        .iter()
+        .position(|r| matches!(r, Request::Start { .. }));
+    assert!(start < snapshot && snapshot.is_some(), "{requests:?}");
+}
+
+#[test]
+fn agent_errors_say_how_to_fix_them_before_anything_boots() {
+    let s = Scratch::new();
+    let state = fake_daemon(&s);
+    let empty = s.root.join("empty");
+    fs::create_dir_all(&empty).unwrap();
+    let out = cave_with_path(&s, &empty, &["agent", "claude"]);
+    assert_eq!(out.status.code(), Some(125));
+    let err = stderr(&out);
+    assert!(err.contains("claude is not installed on this Mac"), "{err}");
+    assert!(err.contains("cave agent claude --in-vm"), "{err}");
+    let out = cave_with_path(&s, &empty, &["agent", "codex"]);
+    let err = stderr(&out);
+    assert!(err.contains("unknown agent \"codex\""), "{err}");
+    assert!(err.contains("Supported agents: claude"), "{err}");
+    assert!(state.lock().unwrap().requests.is_empty());
 }

@@ -513,7 +513,11 @@ Undo everything the agent did with: cave restore my-project-2026-10-12-debian-4
 
 Arguments after `--` go to the agent unchanged.
 
-Agents in v1: `claude` (Claude Code). The README also lists Codex; it is added once its MCP and permission settings are checked. How `cave` passes the MCP server and the Bash denial to Claude Code depends on Claude Code's flags and settings, which are assumptions to verify in phase 5.
+Agents in v1: `claude` (Claude Code). The README also lists Codex; it is added once its MCP and permission settings are checked.
+
+On the Mac, `cave` starts `claude` in the project folder with `--mcp-config`, naming `cave mcp` as the `cave` server (`cave mcp --fork <name>` with `--fork`), and `--disallowedTools Bash`, which takes the Bash tool away from it. Both were checked with Claude Code 2.1 on a Mac. In `--fork` runs there is no snapshot first, since forks cannot be snapshotted yet, and `cave` says so.
+
+`--in-vm` installs Claude Code with `curl -fsSL https://claude.ai/install.sh | bash` inside the VM if it is not there, then runs it on a pseudo-terminal like `cave shell`, so it needs a terminal.
 
 Exit code: the agent's.
 
@@ -567,7 +571,7 @@ The design gives agents an MCP server that resolves the VM from the working dire
 cave mcp
 ```
 
-Runs the MCP server on stdin and stdout for the project in the current directory. People do not run it by hand; `cave agent` and the configs `cave init` writes do. It is left out of `cave --help`'s main list.
+Runs the MCP server on stdin and stdout for the project in the current directory. `--fork <name>` makes the tools act on that fork when a call names none. People do not run it by hand; `cave agent` and the configs `cave init` writes do. It is left out of `cave --help`'s main list.
 
 The server is written by hand ([decision 0013](decisions/0013-mcp-server-by-hand.md)): JSON-RPC 2.0, one message per line, answering `initialize`, `ping`, `tools/list` and `tools/call` one request at a time. It finds the project at each call, the way `cave` does, so it works once `cave init` has run even if it started earlier. Its tools:
 

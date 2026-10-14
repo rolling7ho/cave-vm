@@ -2,6 +2,7 @@
 
 #![deny(unsafe_code)]
 
+mod agent;
 mod client;
 mod commands;
 mod copy;
@@ -97,6 +98,19 @@ enum Cmd {
         #[arg(long)]
         fork: Option<String>,
     },
+    /// Start a coding agent against this project's VM.
+    Agent {
+        /// The agent: claude.
+        name: String,
+        /// Run the agent inside the VM instead of on the Mac.
+        #[arg(long)]
+        in_vm: bool,
+        #[arg(long)]
+        fork: Option<String>,
+        /// Arguments for the agent, after `--`.
+        #[arg(last = true, value_name = "ARGS")]
+        args: Vec<String>,
+    },
     /// Copy files in and out; a path starting with `:` is in the VM.
     Cp {
         #[arg(value_name = "PATH", required = true)]
@@ -140,7 +154,11 @@ enum Cmd {
     },
     /// Run the MCP server on stdio, for agents.
     #[command(hide = true)]
-    Mcp,
+    Mcp {
+        /// Act on this fork unless a call names another.
+        #[arg(long)]
+        fork: Option<String>,
+    },
     /// List the base images.
     Images {
         /// One JSON document, for scripts.
@@ -183,6 +201,15 @@ fn main() -> ExitCode {
             });
             commands::run(net, ports, fork)
         }
+        Cmd::Agent {
+            name,
+            in_vm,
+            fork,
+            args,
+        } => match agent::run(&name, in_vm, fork, args) {
+            Ok(code) => return ExitCode::from(code),
+            Err(e) => Err(e),
+        },
         Cmd::Cp { paths } => copy::run(paths),
         Cmd::Exec { fork, argv } => match exec::run(fork, argv) {
             Ok(code) => return ExitCode::from(code),
@@ -193,8 +220,8 @@ fn main() -> ExitCode {
         Cmd::Gc { yes, json } => gc::run(yes, json),
         Cmd::Images { json } => commands::images(json),
         Cmd::Inspect { fork, log, json } => inspect::run(fork, log, json),
-        Cmd::Mcp => project::current_dir().and_then(|dir| {
-            let tools = cave_vm_mcp::Tools::new(dir);
+        Cmd::Mcp { fork } => project::current_dir().and_then(|dir| {
+            let tools = cave_vm_mcp::Tools::new(dir).on_fork(fork);
             cave_vm_mcp::serve(std::io::stdin().lock(), std::io::stdout().lock(), &tools)
                 .map_err(Into::into)
         }),

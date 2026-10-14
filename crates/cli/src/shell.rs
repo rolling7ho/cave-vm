@@ -13,7 +13,7 @@ use std::thread;
 use std::time::Duration;
 
 use cave_vm_proto::agent::PtyOpen;
-use cave_vm_proto::daemon::{Reply, Request};
+use cave_vm_proto::daemon::{Reply, Request, VmId};
 
 use crate::client::Connection;
 use crate::commands::{ensure_running, vm_id};
@@ -90,14 +90,28 @@ pub fn run(fork: Option<String>) -> Result<u8> {
     let project = init::project_or_set_up().map_err(failed)?;
     let vm = vm_id(&project, fork);
     ensure_running(&vm, None, Vec::new(), false).map_err(failed)?;
+    session(vm, None)
+}
 
+/// Runs `argv`, or the guest user's login shell, on a pseudo-terminal in
+/// running VM `vm`, connected to this terminal. Returns its exit code.
+pub fn session(vm: VmId, argv: Option<Vec<String>>) -> Result<u8> {
+    let failed = |e: CliError| CliError {
+        code: EXIT_CAVE_FAILED_RUNNING,
+        ..e
+    };
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err(failed(
+            CliError::new("this needs a terminal").fix("Run it in Terminal"),
+        ));
+    }
     let (cols, rows) = window_size().unwrap_or(FALLBACK_SIZE);
     let mut connection = Connection::open().map_err(failed)?;
     connection
         .send(&Request::Shell {
             vm,
             pty: PtyOpen {
-                argv: None,
+                argv,
                 cwd: None,
                 env: Default::default(),
                 term: std::env::var("TERM").ok(),
