@@ -2,7 +2,7 @@
 
 **A fast, disposable Linux VM for every project, built for coding agents on macOS.**
 
-> **Status: pre-alpha, design stage.** The design is written and the repo is being set up. Nothing described below works yet. Commands and numbers in this README are the design targets, not features you can install today.
+> **Status: pre-release.** Every command below works on an Apple Silicon Mac with macOS 26 when built from source, as [CONTRIBUTING.md](CONTRIBUTING.md) describes. Nothing is published yet: `brew install cave-vm` and the first-run download work once v1 is released.
 
 cave-vm (Coding Agent Virtual Environment, command: `cave`) is an open-source microVM runtime for Macs with Apple Silicon (M-series) chips. It gives each project directory its own Linux VM that starts quickly, can be snapshotted, rolled back and forked, and shows you exactly what it can reach.
 
@@ -26,7 +26,7 @@ cd my-project && cave agent claude
 
 The first run downloads the kernel and a Debian image, signs the binary for Hypervisor.framework, and checks your setup. If something is wrong, the error says how to fix it, and `cave doctor` re-runs the checks.
 
-Planned commands:
+Commands:
 
 | Command | What it does |
 | --- | --- |
@@ -37,10 +37,10 @@ Planned commands:
 | `cave fork` | Create a new VM from a snapshot, copy-on-write |
 | `cave inspect` | Show the VM's policy, resources and audit log |
 | `cave sync` / `cave pull` | Keep a Mac copy of the code in step with the VM, and bring Mac edits back (synced mode) |
-| `cave agent <codex, claude, etc.>` | Start a coding agent against this project's VM |
+| `cave agent claude` | Start Claude Code against this project's VM, with host Bash denied |
 | `cave doctor` | Check entitlements, macOS version, disk space and image state |
 
-The full command reference, with every flag and error, is in [docs/cli.md](docs/cli.md), and `cave.toml` is described in [docs/config.md](docs/config.md). An SDK (Rust first, then Python and TypeScript) exposes the same operations.
+The full command reference, with every flag and error, is in [docs/cli.md](docs/cli.md), and `cave.toml` is described in [docs/config.md](docs/config.md). SDKs for Rust ([crates/sdk](crates/sdk)), Python ([sdks/python](sdks/python)) and TypeScript ([sdks/typescript](sdks/typescript)) expose the same operations, and `cave mcp` serves them to agents as MCP tools.
 
 ## Safety defaults
 
@@ -65,12 +65,14 @@ The full design is in [docs/design.md](docs/design.md).
 
 ## Roadmap
 
+Phases 1 to 5 are done, each closed by a gate measured on a real Mac ([docs/bench/gate4.md](docs/bench/gate4.md) has the snapshot and fork numbers). Phase 6 is under way; [ROADMAP.md](ROADMAP.md) has the details.
+
 1. **Spec:** README quickstart and CLI surface written before any code.
 2. **Spike:** boot a Linux kernel to a shell through Hypervisor.framework, and confirm the signing and snapshot assumptions.
 3. **Core VM:** block, network and vsock devices, the guest agent, and the basic CLI.
 4. **Snapshot and fork:** the headline feature.
 5. **Agent layer:** `cave init`, the agent skill, the MCP server, the safety policy and audit log.
-6. **Density and polish:** memory ballooning, `cave doctor`, first-run setup, the SDK, and the Homebrew formula.
+6. **Density and polish:** memory ballooning, `cave doctor`, first-run setup, the SDKs, the Ubuntu image, and the Homebrew formula.
 
 ## Contributing
 
