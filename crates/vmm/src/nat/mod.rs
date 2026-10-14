@@ -22,11 +22,13 @@
 //! error instead of waiting for data that will never come. A guest that
 //! sends on a connection the stack does not know gets a reset anyway.
 
+mod connects;
 mod host;
 mod policy;
 mod tcp;
 mod udp;
 
+pub use connects::Connects;
 pub use host::{Connector, HostStream, TcpConnector};
 pub use policy::{Mode, Policy, Verdict};
 pub use tcp::FlowKey;

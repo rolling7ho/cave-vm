@@ -246,6 +246,7 @@ The link uses the same framing, handshake and errors. Unlike the other links it 
 | `ping` | none | `pong` |
 | `snapshot` | `dir`: the absolute path of a folder, created if missing | `ok` once the VM is saved into `dir` (`state`, `memory` and `disk.img`, `docs/snapshots.md`) and running again, or an `error`. The VMM first asks the agent to flush the guest's file systems (`snapshot_prepare`), then pauses every vCPU, saves, and resumes |
 | `stop` | none | `ok`, after which the VMM stops the VM and exits |
+| `take_connects` | none | `connects`: `entries`, the guest's connection attempts since the last `take_connects` as audit entries (`connect` events, oldest first), and `dropped`, left out when zero, the attempts not kept because 10,000 were already waiting. The daemon asks every second while the VM runs, and before `stop`, and appends the entries to the VM's audit log |
 
 The daemon then speaks the agent protocol, from the handshake on, over each connection it gets from `agent_connect`.
 
