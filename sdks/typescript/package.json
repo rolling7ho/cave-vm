@@ -1,0 +1,22 @@
+{
+  "name": "cave-vm",
+  "version": "0.1.0",
+  "description": "TypeScript and JavaScript client for cave-vm, disposable Linux VMs for coding agents on macOS",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": ["index.js", "index.d.ts"],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

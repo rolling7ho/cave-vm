@@ -1100,3 +1100,26 @@ fn python_sdk_drives_a_real_vm() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement, a built image and Node 20 or later"]
+fn typescript_sdk_drives_a_real_vm() {
+    let rig = Rig::new();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    let sdk = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sdks/typescript");
+    let out = Command::new("node")
+        .arg(sdk.join("examples/smoke.mjs"))
+        .current_dir(rig.project())
+        .env("HOME", rig.root.join("home"))
+        .env("CAVE_HOME", rig.root.join("data"))
+        .env("CAVE_DAEMON", rig.bin.join("cave-daemon"))
+        .env("CAVE_IMAGE_DIR", Rig::image_dir())
+        .output()
+        .expect("node is on PATH");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && stdout.contains("typescript sdk ok"),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
