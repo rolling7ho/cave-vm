@@ -597,7 +597,7 @@ sshd runs in the VM and is reached over vsock, so an editor that expects SSH, su
 
 - An SSH key in the data directory, `ssh/id_ed25519`, made once with `ssh-keygen`.
 - A host entry for the project, `ssh/hosts/<folder>.cave.conf`, named after the project folder in lowercase, with `-2`, `-3` and so on when another project has the name. It connects as the `cave` user through `cave ssh-proxy <project>`. It does not check the VM's host key, since the connection never leaves the Mac.
-- An `Include` line at the top of `~/.ssh/config` for those entries, added once. The rest of the file is kept.
+- An `Include` line at the top of `~/.ssh/config` for those entries, added once ([D34](../ROADMAP.md#decisions)). The rest of the file is kept.
 
 `cave ssh-proxy` is the entry's `ProxyCommand`. People do not run it by hand, and it is left out of `cave --help`. It starts the VM if needed, adds the public key to the `cave` user's `authorized_keys` the first time, waits up to 30 seconds for sshd after a first boot, then carries the connection. Forks have no host entry yet.
 
