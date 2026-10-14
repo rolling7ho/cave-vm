@@ -22,7 +22,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::queue::{DescriptorChain, Queue};
 use super::{ActivateError, Activation, Interrupt, VirtioDevice, device_type, interrupt};
@@ -36,6 +36,10 @@ pub const EVENT_QUEUE: u16 = 2;
 
 /// `virtio_vsock_event` id: every connection was reset, as after a restore.
 const EVENT_TRANSPORT_RESET: u32 = 0;
+
+/// Longest packets for the guest wait for it to handle a transport reset.
+/// A connection that reached the guest first would be reset with the rest.
+const RESET_WAIT: Duration = Duration::from_millis(250);
 
 /// The host's context ID.
 pub const HOST_CID: u64 = 2;
@@ -187,6 +191,9 @@ struct State {
     generation: u64,
     /// Packets wait in the backlog while a snapshot is taken.
     paused: bool,
+    /// When a transport reset went to the guest, until the guest handles
+    /// it. Packets wait in the backlog meanwhile, up to [`RESET_WAIT`].
+    reset_sent: Option<Instant>,
 }
 
 /// Opens the host side of a guest connection to a host port.
@@ -239,7 +246,7 @@ impl Shared {
 
 /// Moves packets from the backlog into free receive buffers.
 fn fill(state: &mut State) {
-    if state.paused {
+    if state.paused || state.reset_sent.is_some_and(|t| t.elapsed() < RESET_WAIT) {
         return;
     }
     let Some(active) = &mut state.rx else {
@@ -325,6 +332,7 @@ impl Vsock {
                 next_host_port: FIRST_HOST_PORT,
                 generation: 0,
                 paused: false,
+                reset_sent: None,
             }),
             changed: Condvar::new(),
         });
@@ -387,6 +395,7 @@ impl Vsock {
             return;
         }
         self.reset_pending = false;
+        self.shared.lock().reset_sent = Some(Instant::now());
         if active.queue.needs_interrupt(&active.memory).unwrap_or(true) {
             active.interrupt.raise(interrupt::USED_BUFFER);
         }
@@ -781,7 +790,18 @@ impl VirtioDevice for Vsock {
         match index {
             RX_QUEUE => fill(&mut self.shared.lock()),
             TX_QUEUE => self.transmit(),
-            EVENT_QUEUE => self.send_events(),
+            EVENT_QUEUE => {
+                // The driver posts the event buffer back once it has
+                // handled the event in it, so a notify after the reset
+                // went out means the guest has reset its connections.
+                if !self.reset_pending {
+                    let mut state = self.shared.lock();
+                    if state.reset_sent.take().is_some() {
+                        fill(&mut state);
+                    }
+                }
+                self.send_events();
+            }
             _ => {}
         }
     }
@@ -793,6 +813,7 @@ impl VirtioDevice for Vsock {
         let mut state = self.shared.lock();
         state.rx = None;
         state.backlog.clear();
+        state.reset_sent = None;
         state.generation += 1;
         for (_, conn) in state.conns.drain() {
             let _ = conn.stream.shutdown(Shutdown::Both);

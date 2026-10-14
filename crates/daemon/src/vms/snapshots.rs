@@ -20,7 +20,7 @@ use cave_vm_proto::vmm::{FromVmm, ToVmm};
 use cave_vm_proto::{ErrorCode, ErrorMessage};
 use cave_vm_vmm::{disk, host};
 
-use super::{Running, Slot, Vm, Vms, bind_all, display_name, error, now_unix, serve_all};
+use super::{Running, Slot, Spawned, Vm, Vms, bind_all, display_name, error, now_unix, serve_all};
 use crate::image::ImageRef;
 use crate::project::STATE_DIR;
 use crate::snapshot::{self, Manifest, SUSPEND_DIR};
@@ -222,6 +222,9 @@ impl Vms {
     pub fn restore(&self, id: &VmId, name: Option<&str>) -> Result<Restored, ErrorMessage> {
         let state = state_dir(id)?;
         let (name, manifest) = pick(&state, name)?;
+        // The next VMM process starts while the current state is saved and
+        // the VM stopped.
+        let spawned = self.spawn_for(id, &manifest);
         // The undo point, unless automatic snapshots are off. A VM that
         // never booted has nothing to save.
         let settings = self.source.auto_snapshots(id)?;
@@ -235,7 +238,7 @@ impl Vms {
         let spare: Vec<&str> = std::iter::once(name.as_str())
             .chain(saved.as_deref())
             .collect();
-        let restored = self.restore_from(id, &state, &name, &manifest);
+        let restored = self.restore_from(id, &state, &name, &manifest, spawned);
         prune(&state, settings.keep, &spare);
         restored.map(|fallback| Restored {
             name: name.clone(),
@@ -252,6 +255,7 @@ impl Vms {
         state: &Path,
         name: &str,
         manifest: &Manifest,
+        spawned: Option<Spawned>,
     ) -> Result<Option<String>, ErrorMessage> {
         let dir = snapshot::dir(state, name);
         let ports = self.ports(id)?;
@@ -276,7 +280,7 @@ impl Vms {
             snapshot: dir.join(snapshot::DISK_FILE),
             vm: disk::path(state),
         };
-        let result = self.boot_from(&vm, &dir, manifest, &ports, Some(&disks));
+        let result = self.boot_from(&vm, &dir, manifest, &ports, Some(&disks), spawned);
         let slot = vm.slot.lock().expect("vm lock");
         match result {
             Ok((mut running, fallback)) => {
@@ -289,6 +293,14 @@ impl Vms {
                 Err(e)
             }
         }
+    }
+
+    /// Starts a VMM process to restore `manifest`'s snapshot in, if one
+    /// can be started; the restore starts its own otherwise.
+    fn spawn_for(&self, id: &VmId, manifest: &Manifest) -> Option<Spawned> {
+        let ports = self.ports(id).ok()?;
+        let prepared = self.source.prepare(id, Some(manifest.net), &ports).ok()?;
+        self.spawn(&*self.vm(id).ok()?, &prepared.config).ok()
     }
 
     /// The ports a running VM forwards, to forward again after a restore.
@@ -312,6 +324,7 @@ impl Vms {
         manifest: &Manifest,
         ports: &[cave_vm_proto::daemon::PortMap],
         disks: Option<&Disks>,
+        mut spawned: Option<Spawned>,
     ) -> Result<(Running, Option<String>), ErrorMessage> {
         if let Some(disks) = disks {
             replace(&disks.snapshot, &disks.vm)?;
@@ -329,7 +342,7 @@ impl Vms {
                         prepared
                     },
                 )?;
-                match self.launch(vm, restoring) {
+                match self.launch_in(vm, spawned.take(), restoring) {
                     Ok(running) => return Ok((running, None)),
                     Err(e) => {
                         // The guest may have run and written the disk.
@@ -343,7 +356,7 @@ impl Vms {
             Err(why) => why,
         };
         let prepared = self.source.prepare(&vm.id, None, ports)?;
-        Ok((self.launch(vm, prepared)?, Some(why)))
+        Ok((self.launch_in(vm, spawned, prepared)?, Some(why)))
     }
 
     /// Suspends a running VM (D20): saves it, memory and all, where its
@@ -392,7 +405,7 @@ impl Vms {
                 .and_then(|prepared| self.launch(vm, prepared)),
             _ => {
                 manifest.net = net.unwrap_or(manifest.net);
-                self.boot_from(vm, &dir, &manifest, ports, None)
+                self.boot_from(vm, &dir, &manifest, ports, None, None)
                     .map(|(running, _)| running)
             }
         }?;
@@ -472,7 +485,7 @@ impl Vms {
             ));
         }
         vm.set(slot, Slot::Busy);
-        let result = self.boot_from(&vm, dir, &manifest, &[], None);
+        let result = self.boot_from(&vm, dir, &manifest, &[], None, None);
         if manifest.has_memory {
             let _ = fs::remove_file(dir.join(snapshot::MEMORY_FILE));
             let _ = fs::remove_file(dir.join(snapshot::STATE_FILE));
@@ -765,7 +778,7 @@ fn replace(src: &Path, dst: &Path) -> Result<(), ErrorMessage> {
 /// once they are. Without it a fork's memory sometimes lacked pages and
 /// the guest hung.
 fn clone_flushed(src: &Path, dst: &Path) -> std::io::Result<()> {
-    fs::File::open(src)?.sync_all()?;
+    host::flush(&fs::File::open(src)?)?;
     host::clonefile(src, dst)
 }
 

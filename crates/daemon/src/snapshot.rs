@@ -21,6 +21,7 @@ use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use cave_vm_proto::daemon::NetMode;
 use serde_json::{Value, json};
@@ -414,8 +415,18 @@ pub fn beyond_retention(state_dir: &Path, keep: u32) -> Vec<String> {
         .collect()
 }
 
-/// This Mac's macOS build, such as `26A434`.
+/// This Mac's macOS build, such as `26A434`. Looked up once: an update
+/// restarts the Mac, and the daemon with it.
 pub fn host_os_build() -> io::Result<String> {
+    static BUILD: OnceLock<String> = OnceLock::new();
+    if let Some(build) = BUILD.get() {
+        return Ok(build.clone());
+    }
+    let build = read_host_os_build()?;
+    Ok(BUILD.get_or_init(|| build).clone())
+}
+
+fn read_host_os_build() -> io::Result<String> {
     let out = Command::new("/usr/sbin/sysctl")
         .args(["-n", "kern.osversion"])
         .stdin(Stdio::null())

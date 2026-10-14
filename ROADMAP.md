@@ -140,7 +140,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | P4.9 | `cave gc`: show disk usage and reclaim it. Shared APFS clone blocks are reported honestly rather than double-counted [A9]. | Tests on cloned temp files. |
 | P4.10 | `cave export`: move a project or snapshot out as files. | E2E round trip. |
 | P4.11 | Benchmark harness for boot, restore and fork time and idle memory, run on the self-hosted Mac. | Results compared against the P2.11 targets. |
-| P4.12 | Meet the gate 4 targets (D29): snapshots write only the pages changed since the last one (P4.12a), then restore and fork time, and booted and fork memory. | `scripts/bench/gate4.py` meets every target. |
+| P4.12 | Meet the gate 4 targets (D29): snapshots write only the pages changed since the last one (P4.12a), faster restore and fork (P4.12b), then booted memory. | `scripts/bench/gate4.py` meets every target. |
 
 **Exit gate 4 (the headline demo).** On a real Mac: start a project VM with a running process, snapshot it, break the VM, restore it with the process intact, and fork it into several copies, each in well under a second. The exact restore and fork targets are the ones approved in P2.11. A snapshot written before a `cave` upgrade still loads, or falls back to a disk boot.
 

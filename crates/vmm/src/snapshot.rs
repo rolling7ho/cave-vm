@@ -290,7 +290,7 @@ fn save_paused<B: Backend, W: Write>(
     }
     // The block device writes straight to the file; flush it so the clone
     // has everything the guest wrote.
-    File::open(disk)?.sync_all()?;
+    host::flush(&File::open(disk)?)?;
     let clone = dir.join(DISK_FILE);
     match fs::remove_file(&clone) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e.into()),

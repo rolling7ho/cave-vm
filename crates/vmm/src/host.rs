@@ -60,6 +60,18 @@ fn clone_result(r: libc::c_int) -> io::Result<()> {
     }
 }
 
+/// Writes `file`'s changed pages to its volume and waits for them, so an
+/// APFS clone of it holds them. Unlike `File::sync_all` (`F_FULLFSYNC`), it
+/// does not empty the drive's cache: a clone needs the data on the volume,
+/// not on stable storage.
+pub fn flush(file: &File) -> io::Result<()> {
+    // SAFETY: `file` is an open descriptor for the duration of the call.
+    if unsafe { libc::fsync(file.as_raw_fd()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Bytes available to an unprivileged user on the volume holding `path`.
 pub fn available_space(path: &Path) -> io::Result<u64> {
     let path = c_path(path)?;
