@@ -135,8 +135,11 @@ pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
     if ignore_state_dir(&dir)? {
         println!("Added .cave/ to .gitignore");
     }
-    skill::write_claude_skill(&dir)?;
-    println!("Wrote .claude/skills/cave");
+    skill::write_all(&dir)?;
+    println!("Wrote the cave section of AGENTS.md and .claude/skills/cave");
+    println!(
+        "Set up Claude Code to use cave mcp, with host Bash denied (.mcp.json, .claude/settings.json)"
+    );
     println!("Next: cave shell, or cave agent claude");
     Ok(())
 }
@@ -158,7 +161,7 @@ pub fn project_or_set_up() -> Result<std::path::PathBuf> {
     write_project(&dir, Storage::Sealed, "base")?;
     fs::create_dir_all(dir.join(STATE_DIR))?;
     ignore_state_dir(&dir)?;
-    skill::write_claude_skill(&dir)?;
+    skill::write_all(&dir)?;
     eprintln!(
         "Set up this folder as a cave project with the defaults (sealed, debian); see cave.toml"
     );

@@ -133,7 +133,13 @@ Sets up the current directory as a project. It writes:
 
 - `cave.toml` with the design's minimal keys (see [config.md](config.md)).
 - `.cave/`, and adds `.cave/` to `.gitignore`, creating the file if needed.
-- The agent skill files: a cave section in `AGENTS.md` (existing content is kept; the section sits between marker comments so it can be updated), a `.claude/skills/` entry, and, for agents that support it, a permissions config that denies host Bash. The skill's text is [`skill/cave/SKILL.md`](../skill/cave/SKILL.md) in this repository, the same text as the bootstrap skill on the website (design, "Bootstrap skill").
+- The agent skill files: a cave section in `AGENTS.md` (existing content is kept; the section sits between marker comments so it can be updated), a `.claude/skills/` entry, and, for agents that support it, a permissions config that denies host Bash. The skill's text is [`skill/cave/SKILL.md`](../skill/cave/SKILL.md) in this repository, the same text as the bootstrap skill on the website (design, "Bootstrap skill"). For Claude Code that means:
+  - `.claude/skills/cave/SKILL.md`: the skill.
+  - `AGENTS.md`: the skill without its frontmatter, between `<!-- cave:start -->` and `<!-- cave:end -->`.
+  - `.mcp.json`: registers `cave mcp` as the `cave` server.
+  - `.claude/settings.json`: adds `Bash` to `permissions.deny` and `cave` to `enabledMcpjsonServers`, so Claude Code reaches the VM through MCP and has no shell on the Mac.
+
+  Other settings in those files are kept. A file that already has these entries is not rewritten. A file that is not valid JSON is an error that says to fix it, and is left alone.
 
 It does not boot the VM. The files already in the folder, everything except `.cave/`, are copied into the VM once when it first boots. In sealed mode the Mac files are left untouched but are no longer updated, and cave says so ([D13](../ROADMAP.md#decisions)).
 
@@ -159,6 +165,7 @@ Output:
 Created cave.toml (sealed, debian, 2 CPUs, 2 GB)
 Added .cave/ to .gitignore
 Wrote the cave section of AGENTS.md and .claude/skills/cave
+Set up Claude Code to use cave mcp, with host Bash denied (.mcp.json, .claude/settings.json)
 Next: cave shell, or cave agent claude
 ```
 
