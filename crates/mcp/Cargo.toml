@@ -7,3 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+[dependencies]
+cave-vm-sdk = { path = "../sdk" }
+serde_json = "1.0.151"
+
+[dev-dependencies]
+cave-vm-proto = { path = "../proto" }

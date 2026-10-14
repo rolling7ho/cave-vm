@@ -555,6 +555,20 @@ cave mcp
 
 Runs the MCP server on stdin and stdout for the project in the current directory. People do not run it by hand; `cave agent` and the configs `cave init` writes do. It is left out of `cave --help`'s main list.
 
+The server is written by hand ([decision 0013](decisions/0013-mcp-server-by-hand.md)): JSON-RPC 2.0, one message per line, answering `initialize`, `ping`, `tools/list` and `tools/call` one request at a time. It finds the project at each call, the way `cave` does, so it works once `cave init` has run even if it started earlier. Its tools:
+
+| Tool | Arguments | Does |
+| --- | --- | --- |
+| `exec` | `command`, optional `cwd` and `fork` | Runs `bash -c <command>` in the VM, starting it if needed, and returns the exit code, stdout and stderr. Each stream keeps its first and last 50 KB when longer |
+| `read_file` | `path`, optional `fork` | Returns a UTF-8 text file up to 1 MiB; relative paths are under `/workspace` |
+| `write_file` | `path`, `content`, optional `fork` | Writes a text file, creating missing folders |
+| `snapshot` | `name`, optional `fork` | As `cave snapshot <name>` |
+| `restore` | `name`, optional `fork` | As `cave restore <name>`, including the automatic snapshot that undoes it |
+| `fork` | optional `from` | As `cave fork [--from <snapshot>]`; returns the fork's name to pass as `fork` |
+| `destroy` | `fork` | Removes a fork. The project's own VM cannot be removed through MCP, since in a sealed project it can hold the only copy of the code; that is `cave rm` |
+
+A tool that fails returns the error and its fix as text, marked `isError`, so the agent can act on it.
+
 ---
 
 ## Guest layout
