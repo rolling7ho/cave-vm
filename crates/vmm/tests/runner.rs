@@ -206,6 +206,51 @@ fn unknown_trap_is_an_error_with_the_pc() {
 }
 
 #[test]
+fn tracked_guest_writes_mark_pages_and_retry() {
+    let mock = MockBackend::new();
+    let ram = 0x4000_0000;
+    let page = 16 * 1024;
+    // A pair store (no syndrome) and a described store to protected RAM.
+    let pair = exception(0x24, (1 << 6) | 0x0f, ram + 3 * page + 8);
+    mock.script(
+        0,
+        [
+            Step::exit(pair),
+            Step::exit(store32(ram + 5, 1)),
+            Step::exit(hvc()).with_reg(x(0), 0x8400_0008),
+        ],
+    );
+    let memory = GuestMemory::new(vec![Region::anonymous(ram, 8 * page).unwrap()]).unwrap();
+    let mut vcpu = start(&mock);
+    let machine = Machine::new(Vec::new(), None, 1).track_writes(memory.clone());
+    assert_eq!(
+        runner::run(&mock, &mut vcpu, &machine).unwrap(),
+        Stop::PowerOff
+    );
+
+    assert_eq!(memory.dirty().take(), [ram, ram + 3 * page]);
+    let allowed: Vec<_> = mock
+        .events()
+        .into_iter()
+        .filter(|e| matches!(e, Event::AllowWrites { .. }))
+        .collect();
+    assert_eq!(
+        allowed,
+        [
+            Event::AllowWrites {
+                gpa: ram + 3 * page,
+                size: page
+            },
+            Event::AllowWrites {
+                gpa: ram,
+                size: page
+            },
+        ]
+    );
+    assert_eq!(vcpu.reg(Reg::PC).unwrap(), PC, "both writes run again");
+}
+
+#[test]
 fn a_kick_without_the_stop_flag_keeps_running() {
     let mock = MockBackend::new();
     mock.script(

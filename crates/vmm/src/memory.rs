@@ -11,10 +11,16 @@
 //! The guest writes this memory whenever a vCPU runs, so the host never
 //! holds Rust references into it: every access copies through raw pointers,
 //! as if the memory were shared with another process.
+//!
+//! [`DirtyPages`] records which pages were written since the last snapshot,
+//! so the next one writes only those (decision 0005). Host writes mark
+//! pages as they happen; the guest's are caught by write-protecting its
+//! memory in the hypervisor (see `runner`).
 
 #![allow(unsafe_code)]
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Host page size on Apple Silicon. Guest regions start and end on it,
 /// because Hypervisor.framework maps whole host pages (ROADMAP.md A3).
@@ -124,6 +130,83 @@ pub fn locate(regions: &[(u64, u64)], gpa: u64, len: usize) -> Result<(usize, us
         .ok_or(out_of_range)
 }
 
+/// The pages of guest RAM written since the last [`DirtyPages::take`], one
+/// bit per [`PAGE_SIZE`] page. Safe to mark from any thread.
+#[derive(Debug)]
+pub struct DirtyPages {
+    /// `(guest address, size)` of each region, in address order.
+    layout: Vec<(u64, u64)>,
+    /// The index of each region's first page among all pages.
+    first_page: Vec<u64>,
+    bits: Vec<AtomicU64>,
+}
+
+impl DirtyPages {
+    /// No pages written, for regions laid out as `layout`, which must be in
+    /// address order and pass [`check_layout`].
+    pub fn new(layout: &[(u64, u64)]) -> DirtyPages {
+        let mut first_page = Vec::with_capacity(layout.len());
+        let mut pages = 0;
+        for &(_, size) in layout {
+            first_page.push(pages);
+            pages += size / PAGE_SIZE;
+        }
+        DirtyPages {
+            layout: layout.to_vec(),
+            first_page,
+            bits: (0..pages.div_ceil(64)).map(|_| AtomicU64::new(0)).collect(),
+        }
+    }
+
+    /// The index of the page holding `gpa` among all pages, if it is RAM.
+    fn page(&self, gpa: u64) -> Option<u64> {
+        let (i, offset) = locate(&self.layout, gpa, 1).ok()?;
+        Some(self.first_page[i] + offset as u64 / PAGE_SIZE)
+    }
+
+    /// Whether `gpa` is in guest RAM.
+    pub fn contains(&self, gpa: u64) -> bool {
+        self.page(gpa).is_some()
+    }
+
+    /// Marks every page `[gpa, gpa + len)` touches. Addresses outside RAM
+    /// are ignored.
+    pub fn mark(&self, gpa: u64, len: usize) {
+        let last = gpa.saturating_add(len.max(1) as u64 - 1);
+        let mut at = gpa - gpa % PAGE_SIZE;
+        while at <= last {
+            if let Some(page) = self.page(at) {
+                self.bits[(page / 64) as usize].fetch_or(1 << (page % 64), Ordering::Relaxed);
+            }
+            match at.checked_add(PAGE_SIZE) {
+                Some(next) => at = next,
+                None => break,
+            }
+        }
+    }
+
+    /// The guest addresses of the pages marked so far, in order, clearing
+    /// them. A page marked while this runs is either returned or left for
+    /// the next call.
+    pub fn take(&self) -> Vec<u64> {
+        let mut pages = Vec::new();
+        let mut region = 0;
+        for (word, bits) in self.bits.iter().enumerate() {
+            let mut bits = bits.swap(0, Ordering::Relaxed);
+            while bits != 0 {
+                let page = word as u64 * 64 + u64::from(bits.trailing_zeros());
+                bits &= bits - 1;
+                while region + 1 < self.first_page.len() && self.first_page[region + 1] <= page {
+                    region += 1;
+                }
+                let offset = (page - self.first_page[region]) * PAGE_SIZE;
+                pages.push(self.layout[region].0 + offset);
+            }
+        }
+        pages
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub use host::{FileMode, GuestMemory, Region};
 
@@ -138,7 +221,7 @@ mod host {
     use std::ptr::{self, NonNull};
     use std::sync::Arc;
 
-    use super::{Error, Result, check_layout, locate};
+    use super::{DirtyPages, Error, Result, check_layout, locate};
 
     // From <sys/mman.h> on macOS.
     const PROT_READ: c_int = 0x01;
@@ -257,16 +340,25 @@ mod host {
     #[derive(Debug, Clone)]
     pub struct GuestMemory {
         regions: Arc<Vec<Region>>,
+        dirty: Arc<DirtyPages>,
     }
 
     impl GuestMemory {
         /// Combines regions, rejecting overlaps.
         pub fn new(mut regions: Vec<Region>) -> Result<GuestMemory> {
             regions.sort_unstable_by_key(|r| r.gpa);
-            check_layout(&Self::layout_of(&regions))?;
+            let layout = Self::layout_of(&regions);
+            check_layout(&layout)?;
             Ok(GuestMemory {
                 regions: Arc::new(regions),
+                dirty: Arc::new(DirtyPages::new(&layout)),
             })
+        }
+
+        /// The pages written since the last snapshot. [`GuestMemory::write`]
+        /// marks them; the guest's own writes are marked by the run loop.
+        pub fn dirty(&self) -> &DirtyPages {
+            &self.dirty
         }
 
         /// The regions, in guest address order.
@@ -295,12 +387,14 @@ mod host {
             Ok(())
         }
 
-        /// Copies `data` into guest memory at `gpa`.
+        /// Copies `data` into guest memory at `gpa`, and marks the pages
+        /// it touches dirty.
         pub fn write(&self, gpa: u64, data: &[u8]) -> Result<()> {
             let dst = self.host_ptr(gpa, data.len())?;
             // SAFETY: `dst` is valid for `data.len()` bytes (checked by
             // `host_ptr`), and guest memory never overlaps a host buffer.
             unsafe { ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len()) };
+            self.dirty.mark(gpa, data.len());
             Ok(())
         }
 
@@ -421,6 +515,22 @@ mod tests {
         assert!(locate(&regions, u64::MAX, 2).is_err(), "wraps around");
     }
 
+    #[test]
+    fn dirty_pages_are_listed_once_in_order_and_cleared() {
+        let dirty = DirtyPages::new(&[(0, 4 * P), (100 * P, 70 * P)]);
+        assert!(dirty.take().is_empty());
+        dirty.mark(100 * P + 69 * P + 5, 1);
+        dirty.mark(P - 1, 2);
+        dirty.mark(2 * P + 10, 0);
+        dirty.mark(2 * P, 1);
+        dirty.mark(50 * P, 8);
+        assert_eq!(dirty.take(), [0, P, 2 * P, 169 * P]);
+        assert!(dirty.take().is_empty());
+        assert!(dirty.contains(3 * P + 1) && !dirty.contains(4 * P));
+        dirty.mark(u64::MAX - 1, 10);
+        assert!(dirty.take().is_empty(), "outside RAM, near the top");
+    }
+
     #[cfg(target_os = "macos")]
     mod host {
         use super::*;
@@ -461,6 +571,7 @@ mod tests {
             let mut buf = [0u8; 5];
             mem.read(4 * P + 100, &mut buf).unwrap();
             assert_eq!(&buf, b"hello");
+            assert_eq!(mem.dirty().take(), [4 * P], "writes mark their pages");
             assert!(mem.write(P - 2, b"abcd").is_err(), "past the first region");
         }
 

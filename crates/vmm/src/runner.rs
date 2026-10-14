@@ -18,6 +18,11 @@
 //! [`Machine::pause`] stops every vCPU between exits, so no MMIO access is
 //! half done, and has each save its own state on its own thread, for a
 //! snapshot of a running VM. [`Machine::resume`] lets them go on.
+//!
+//! With [`Machine::track_writes`], guest RAM is write-protected in the
+//! hypervisor: the first guest write to each page exits as a data abort,
+//! which marks the page dirty, lets the guest write it, and retries the
+//! instruction. A snapshot then writes only the dirty pages.
 
 use std::fmt;
 use std::io::Write;
@@ -31,6 +36,7 @@ use crate::boot;
 use crate::devices::pl011::Pl011;
 use crate::devices::virtio::mmio::{MmioTransport, TransportState};
 use crate::layout;
+use crate::memory::{GuestMemory, PAGE_SIZE};
 use crate::psci;
 use crate::snapshot::{self, VcpuState};
 
@@ -230,6 +236,8 @@ pub struct Machine<W: Write> {
     pause_requested: AtomicBool,
     pause: Mutex<PauseTable>,
     pause_changed: Condvar,
+    /// Guest RAM, when its writes are tracked.
+    tracked: Option<GuestMemory>,
 }
 
 impl<W: Write> Machine<W> {
@@ -256,7 +264,17 @@ impl<W: Write> Machine<W> {
             pause_requested: AtomicBool::new(false),
             pause: Mutex::new(PauseTable::default()),
             pause_changed: Condvar::new(),
+            tracked: None,
         }
+    }
+
+    /// Records the guest's writes to `memory` in its
+    /// [`dirty`](GuestMemory::dirty) pages. The caller makes `memory`
+    /// read-only to the guest with
+    /// [`Backend::protect_memory`] before any vCPU runs.
+    pub fn track_writes(mut self, memory: GuestMemory) -> Machine<W> {
+        self.tracked = Some(memory);
+        self
     }
 
     /// Set this, then kick any vCPU, to stop every run loop with
@@ -680,6 +698,16 @@ fn handle_trap<B: Backend, V: BackendVcpu, W: Write>(
     trap: Trap,
     ipa: u64,
 ) -> Result<Option<Stop>> {
+    if let (Trap::DataAbort { ipa, .. }, Some(memory)) = (&trap, &machine.tracked)
+        && memory.dirty().contains(*ipa)
+    {
+        // A write to protected RAM: the instruction runs again once the
+        // page is writable.
+        let page = ipa - ipa % PAGE_SIZE;
+        memory.dirty().mark(page, 1);
+        backend.allow_writes(page, PAGE_SIZE)?;
+        return Ok(None);
+    }
     match trap {
         // HVC returns past the instruction already.
         Trap::Hvc { .. } => return psci_call(vcpu, index, machine),
