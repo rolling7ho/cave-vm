@@ -33,6 +33,21 @@ pub fn clonefile(src: &Path, dst: &Path) -> io::Result<()> {
     // SAFETY: both pointers are to NUL-terminated strings that live until
     // the call returns, and clonefile only reads them.
     let r = unsafe { libc::clonefile(src.as_ptr(), dst.as_ptr(), CLONE_NOFOLLOW) };
+    clone_result(r)
+}
+
+/// Like [`clonefile`], from a file already open. The clone is of the file
+/// the handle refers to, even if its path has since been deleted or
+/// replaced.
+pub fn clone_open_file(src: &File, dst: &Path) -> io::Result<()> {
+    let dst = c_path(dst)?;
+    // SAFETY: `src` is an open descriptor for the duration of the call, and
+    // `dst` is a NUL-terminated string that outlives it and is only read.
+    let r = unsafe { libc::fclonefileat(src.as_raw_fd(), libc::AT_FDCWD, dst.as_ptr(), 0) };
+    clone_result(r)
+}
+
+fn clone_result(r: libc::c_int) -> io::Result<()> {
     if r == 0 {
         return Ok(());
     }
@@ -508,6 +523,21 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
         let missing = clonefile(&dir.join("nope"), &dir.join("x")).unwrap_err();
         assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_open_file_clones_even_after_its_path_is_replaced() {
+        let dir = temp("clone-open");
+        let src = dir.join("src");
+        fs::write(&src, b"first").unwrap();
+        let open = File::open(&src).unwrap();
+        fs::remove_file(&src).unwrap();
+        fs::write(&src, b"second").unwrap();
+        clone_open_file(&open, &dir.join("dst")).unwrap();
+        assert_eq!(fs::read(dir.join("dst")).unwrap(), b"first");
+        let err = clone_open_file(&open, &dir.join("dst")).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
         fs::remove_dir_all(&dir).unwrap();
     }
 

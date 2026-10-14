@@ -18,6 +18,14 @@ pub enum Event {
         gpa: u64,
         size: usize,
     },
+    ProtectMemory {
+        gpa: u64,
+        size: usize,
+    },
+    AllowWrites {
+        gpa: u64,
+        size: u64,
+    },
     CreateVcpu {
         vcpu: u32,
     },
@@ -148,6 +156,21 @@ impl Backend for MockBackend {
                 size: region.size(),
             });
         }
+        Ok(())
+    }
+
+    fn protect_memory(&self, memory: &GuestMemory) -> Result<()> {
+        for region in memory.regions() {
+            self.record(Event::ProtectMemory {
+                gpa: region.gpa(),
+                size: region.size(),
+            });
+        }
+        Ok(())
+    }
+
+    fn allow_writes(&self, gpa: u64, size: u64) -> Result<()> {
+        self.record(Event::AllowWrites { gpa, size });
         Ok(())
     }
 

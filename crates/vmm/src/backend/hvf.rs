@@ -1,7 +1,7 @@
 //! The Hypervisor.framework backend: an adapter over `cave-vm-hvf`'s safe
 //! API.
 
-use cave_vm_hvf::{GicConfig, GicParams, RedistReg, Vcpu, Vm};
+use cave_vm_hvf::{GicConfig, GicParams, MemFlags, RedistReg, Vcpu, Vm};
 
 use super::{Backend, BackendVcpu, Error, Exit, IccReg, IrqChip, Kick, Reg, Result, SysReg};
 use crate::layout;
@@ -33,6 +33,18 @@ impl<'vm> Backend for HvfBackend<'vm> {
     fn map_memory(&mut self, memory: &GuestMemory) -> Result<()> {
         self.mappings.push(memory.map_into(self.vm)?);
         Ok(())
+    }
+
+    fn protect_memory(&self, memory: &GuestMemory) -> Result<()> {
+        let read_only = MemFlags::READ.union(MemFlags::EXEC);
+        for region in memory.regions() {
+            self.vm.protect(region.gpa(), region.size(), read_only)?;
+        }
+        Ok(())
+    }
+
+    fn allow_writes(&self, gpa: u64, size: u64) -> Result<()> {
+        Ok(self.vm.protect(gpa, size as usize, MemFlags::RWX)?)
     }
 
     fn create_vcpu(&self, _index: u32) -> Result<HvfVcpu<'vm>> {

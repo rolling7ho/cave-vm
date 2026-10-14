@@ -83,6 +83,48 @@ fn memory_round_trips_through_a_sparse_file() {
 }
 
 #[test]
+fn a_snapshot_of_changed_pages_builds_on_its_base() {
+    let dir = std::env::temp_dir().join(format!("cave-snapshot-changed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (first, second) = (dir.join("first"), dir.join("second"));
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let size = 0x10_0000;
+    let page = 16 * 1024;
+    let state = State {
+        memory_size: size,
+        irqchip: Vec::new(),
+        uart: Pl011State::default(),
+        devices: Vec::new(),
+        guest_flows: Vec::new(),
+        vcpus: Vec::new(),
+    };
+    let memory = GuestMemory::new(vec![Region::anonymous(RAM_BASE, size).unwrap()]).unwrap();
+    memory.write(RAM_BASE + 0x10, b"one").unwrap();
+    // Marked but still zero: stays a hole over a zero base.
+    memory.dirty().mark(RAM_BASE + 5 * page, 1);
+    let pages = memory.dirty().take();
+    snapshot::save_changed(&first, &state, &memory, &snapshot::Base::Zero, &pages).unwrap();
+
+    // The base stays usable after its snapshot is deleted.
+    let base = snapshot::Base::of_snapshot(&first).unwrap();
+    std::fs::remove_dir_all(&first).unwrap();
+    memory.write(RAM_BASE + 2 * page, b"two").unwrap();
+    let pages = memory.dirty().take();
+    assert_eq!(pages, [RAM_BASE + 2 * page]);
+    snapshot::save_changed(&second, &state, &memory, &base, &pages).unwrap();
+
+    assert_eq!(snapshot::load_state(&second).unwrap(), state);
+    let restored = snapshot::load_memory(&second, size).unwrap();
+    let mut buf = [0u8; 3];
+    restored.read(RAM_BASE + 0x10, &mut buf).unwrap();
+    assert_eq!(&buf, b"one", "from the base");
+    restored.read(RAM_BASE + 2 * page, &mut buf).unwrap();
+    assert_eq!(&buf, b"two", "written since");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn a_running_machine_is_snapshotted_with_its_disk_and_runs_on() {
     use cave_vm_vmm::backend::mock::{Event, Step};
     use cave_vm_vmm::runner::{self, Machine, Stop};
@@ -118,7 +160,7 @@ fn a_running_machine_is_snapshotted_with_its_disk_and_runs_on() {
         while runs() == 0 {
             std::thread::yield_now();
         }
-        snapshot::take(&snap, &machine, &mock, &memory, &disk, None).unwrap();
+        snapshot::take(&snap, &machine, &mock, &memory, &disk, None, None).unwrap();
         // It runs on after the snapshot.
         while runs() < 2 {
             std::thread::yield_now();
@@ -146,7 +188,7 @@ fn a_running_machine_is_snapshotted_with_its_disk_and_runs_on() {
     memory.write(RAM_BASE + 0x100, b"again").unwrap();
     let paused = Machine::new(Vec::new(), None, 1);
     paused.request_stop();
-    assert!(snapshot::take(&snap, &paused, &mock, &memory, &disk, None).is_err());
+    assert!(snapshot::take(&snap, &paused, &mock, &memory, &disk, None, None).is_err());
     let state = snapshot::load_state(&snap).unwrap();
     snapshot::save(&snap, &state, &memory).unwrap();
     restored.read(RAM_BASE + 0x100, &mut buf).unwrap();

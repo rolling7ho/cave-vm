@@ -7,6 +7,11 @@
 //! file (all-zero pages are holes). Restore maps `memory` copy-on-write, so
 //! it costs no copy and the file stays unchanged.
 //!
+//! A VM whose writes are tracked (see `runner`) keeps its [`Base`]: the
+//! memory file it matched when tracking began. [`take`] then clones that
+//! file and writes only the pages dirtied since, and the new snapshot
+//! becomes the base for the next (decision 0005).
+//!
 //! The `state` format is a spike format: versioned so a mismatch is caught,
 //! but not yet the stable format phase 4 needs.
 
@@ -14,7 +19,9 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
+use std::os::unix::fs::FileExt;
 use std::path::Path;
+use std::sync::Mutex;
 
 use crate::backend::{self, Backend, BackendVcpu, IccReg, RedistReg, Reg, SysReg};
 use crate::devices::pl011::Pl011State;
@@ -190,11 +197,31 @@ pub fn restore_vcpu<V: BackendVcpu>(
     Ok(())
 }
 
+/// What a VM's memory held when [`GuestMemory::dirty`] was last cleared:
+/// every page not marked since is as it was then.
+#[derive(Debug)]
+pub enum Base {
+    /// All zeroes: the VM booted with its writes tracked from the start.
+    Zero,
+    /// A snapshot's `memory` file, held open so it stays the same file
+    /// even if its snapshot is deleted or replaced.
+    File(File),
+}
+
+impl Base {
+    /// The `memory` file of the snapshot in `dir`.
+    pub fn of_snapshot(dir: &Path) -> Result<Base> {
+        Ok(Base::File(File::open(dir.join(MEMORY_FILE))?))
+    }
+}
+
 /// Snapshots a running VM: pauses it, writes `state` and `memory` into
 /// `dir` (created if missing) with an APFS clone of `disk` as
 /// [`DISK_FILE`], and lets it run on, whether or not that worked. The disk
 /// is cloned while the guest is paused, so it matches memory. `flows` is
 /// the network stack's list of guest connections, if the VM has one.
+/// With a `base`, the VM's writes are tracked: only the pages written
+/// since go into the file, and the snapshot becomes the new base.
 pub fn take<B: Backend, W: Write>(
     dir: &Path,
     machine: &Machine<W>,
@@ -202,15 +229,26 @@ pub fn take<B: Backend, W: Write>(
     memory: &GuestMemory,
     disk: &Path,
     flows: Option<&OpenFlows>,
+    base: Option<&Mutex<Base>>,
 ) -> Result<()> {
     fs::create_dir_all(dir)?;
     let vcpus = machine.pause(backend).map_err(Error::Pause)?;
     let guest_flows = flows.map(OpenFlows::get).unwrap_or_default();
-    let saved = save_paused(dir, machine, backend, memory, disk, vcpus, guest_flows);
+    let saved = save_paused(
+        dir,
+        machine,
+        backend,
+        memory,
+        disk,
+        vcpus,
+        guest_flows,
+        base,
+    );
     machine.resume();
     saved
 }
 
+#[allow(clippy::too_many_arguments)]
 fn save_paused<B: Backend, W: Write>(
     dir: &Path,
     machine: &Machine<W>,
@@ -219,6 +257,7 @@ fn save_paused<B: Backend, W: Write>(
     disk: &Path,
     vcpus: Vec<VcpuState>,
     guest_flows: Vec<FlowKey>,
+    base: Option<&Mutex<Base>>,
 ) -> Result<()> {
     let devices = machine.devices();
     let state = State {
@@ -230,7 +269,25 @@ fn save_paused<B: Backend, W: Write>(
         vcpus,
     };
     drop(devices);
-    save(dir, &state, memory)?;
+    match base {
+        Some(base) => {
+            let mut base = base.lock().expect("base lock");
+            // The guest is paused, so it writes nothing until it runs
+            // again, and then each page it writes is marked anew.
+            backend.protect_memory(memory)?;
+            let pages = memory.dirty().take();
+            match save_changed(dir, &state, memory, &base, &pages) {
+                Ok(()) => *base = Base::of_snapshot(dir)?,
+                Err(e) => {
+                    for &page in &pages {
+                        memory.dirty().mark(page, 1);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        None => save(dir, &state, memory)?,
+    }
     // The block device writes straight to the file; flush it so the clone
     // has everything the guest wrote.
     File::open(disk)?.sync_all()?;
@@ -252,6 +309,48 @@ pub fn save(dir: &Path, state: &State, memory: &GuestMemory) -> Result<()> {
     File::create(partial(STATE_FILE))?.write_all(&encode(state))?;
     write_memory(&partial(MEMORY_FILE), state.memory_size, memory)?;
     fs::rename(partial(MEMORY_FILE), dir.join(MEMORY_FILE))?;
+    fs::rename(partial(STATE_FILE), dir.join(STATE_FILE))?;
+    Ok(())
+}
+
+/// Like [`save`], but writes only `pages` (guest addresses) of memory over
+/// a clone of `base`, which must hold every other page.
+pub fn save_changed(
+    dir: &Path,
+    state: &State,
+    memory: &GuestMemory,
+    base: &Base,
+    pages: &[u64],
+) -> Result<()> {
+    let partial = |name: &str| dir.join(format!(".{name}.partial"));
+    File::create(partial(STATE_FILE))?.write_all(&encode(state))?;
+    let path = partial(MEMORY_FILE);
+    match fs::remove_file(&path) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e.into()),
+        _ => {}
+    }
+    let file = match base {
+        Base::Zero => {
+            let file = File::create(&path)?;
+            file.set_len(state.memory_size)?;
+            file
+        }
+        Base::File(base) => {
+            host::clone_open_file(base, &path)?;
+            fs::OpenOptions::new().write(true).open(&path)?
+        }
+    };
+    let mut page = vec![0u8; PAGE_SIZE as usize];
+    for &gpa in pages {
+        memory.read(gpa, &mut page)?;
+        // Over zeroes, a zero page can stay a hole.
+        if matches!(base, Base::Zero) && page.iter().all(|&b| b == 0) {
+            continue;
+        }
+        file.write_all_at(&page, gpa - layout::RAM_BASE)?;
+    }
+    drop(file);
+    fs::rename(path, dir.join(MEMORY_FILE))?;
     fs::rename(partial(STATE_FILE), dir.join(STATE_FILE))?;
     Ok(())
 }

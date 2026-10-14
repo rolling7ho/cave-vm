@@ -25,4 +25,24 @@ Apple M4 Pro, 24 GiB, macOS 27.0.1 (26A434), release build, warm cache, 7 runs (
 - **Booted memory.** The spike booted a busybox initramfs. Debian with systemd, the agent and Docker's prerequisites touches about 275 MB of guest RAM, and every touched page counts. Free page reporting or a balloon would hand freed pages back. Otherwise the target needs a new baseline for a Debian guest.
 - **Fork memory.** 35 MB against 32 MB. A fork's guest RAM is the snapshot file mapped copy-on-write, so this is what the restored guest has written since.
 
-Decision 0005 says the targets change only through a new decision record. The choice is in ROADMAP, "Needs Ivan's decision".
+Decision 0005 says the targets change only through a new decision record. Ivan chose to fix the misses and keep the targets ([decision 0011](../decisions/0011-gate-4-misses.md), D29).
+
+## After dirty-page tracking, 2026-10-14
+
+Same Mac and build settings, 5 runs. Snapshots now write only the pages changed since the last one (P4.12a).
+
+| Measure | Median | Min | Max | Target | Result |
+|---|---|---|---|---|---|
+| Boot until a command runs | 415 ms | 377 ms | 444 ms | none | |
+| `cave snapshot` of a running VM | 32 ms | 24 ms | 141 ms | under 500 ms | met |
+| `cave restore` until `cave exec` runs a command | 247 ms | 148 ms | 253 ms | under 100 ms | missed |
+| The same with `[snapshots] auto = false` | 198 ms | 195 ms | 202 ms | | |
+| `cave fork --from` until the fork runs a command | 154 ms | 144 ms | 194 ms | under 150 ms | missed |
+| Ten forks of one snapshot, all ran a command | 481 ms | 476 ms | 487 ms | under 1 s | met |
+| Idle memory, booted VM | 285 MB | | | under 128 MB | missed |
+| Idle memory, fork | 27 MB | | | under 32 MB | met |
+
+The undo point no longer dominates a restore: what is left is stopping the old VMM, starting the new one and the agent handshake. Booted memory is unchanged, as expected; it needs freed guest pages handed back.
+
+Keeping guest RAM in a shared file was tried first and dropped: about one restore in 40 hung (decision 0011). A separate, older hang also shows up under load. When the guest rewrites 200 MB just before each snapshot, about one fork in 60 never reaches its agent and falls back to a disk boot after 50 seconds. This happens on main too (2 of 120), so it is not caused by the tracking.
+

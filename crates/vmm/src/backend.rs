@@ -71,6 +71,15 @@ pub trait Backend {
     /// Makes guest memory visible to the guest at its guest addresses.
     fn map_memory(&mut self, memory: &GuestMemory) -> Result<()>;
 
+    /// Makes mapped guest memory read-only to the guest, so its next write
+    /// to each page exits as a data abort and can be recorded in
+    /// [`GuestMemory::dirty`].
+    fn protect_memory(&self, memory: &GuestMemory) -> Result<()>;
+
+    /// Lets the guest write `[gpa, gpa + size)` again after
+    /// [`protect_memory`](Self::protect_memory).
+    fn allow_writes(&self, gpa: u64, size: u64) -> Result<()>;
+
     /// Creates vCPU number `index`, on the calling thread.
     fn create_vcpu(&self, index: u32) -> Result<Self::Vcpu<'_>>;
 

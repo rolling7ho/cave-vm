@@ -30,7 +30,7 @@ mod vmm {
     use std::path::Path;
     use std::process::ExitCode;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Barrier, OnceLock};
+    use std::sync::{Arc, Barrier, Mutex, OnceLock};
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -135,6 +135,8 @@ mod vmm {
         memory: &'a GuestMemory,
         disk: &'a Path,
         flows: Option<OpenFlows>,
+        /// Set when the guest's writes are tracked.
+        base: Option<Mutex<snapshot::Base>>,
     }
 
     impl<B: Backend> RunningVm for Booted<'_, B> {
@@ -159,6 +161,7 @@ mod vmm {
                 self.memory,
                 self.disk,
                 self.flows.as_ref(),
+                self.base.as_ref(),
             )
             .map_err(|e| {
                 ErrorMessage::new(ErrorCode::Io, format!("cannot snapshot the VM: {e}"))
@@ -240,6 +243,21 @@ mod vmm {
                 (prepared.memory, Some(prepared.layout))
             }
         };
+        // Tracking the guest's writes lets a snapshot write only the pages
+        // that changed; without it, a snapshot writes all of memory.
+        let base = match &config.restore {
+            Some(dir) => snapshot::Base::of_snapshot(Path::new(dir))
+                .map_err(|e| note(format!("snapshots will write all of memory: {e}")))
+                .ok(),
+            None => Some(snapshot::Base::Zero),
+        };
+        let base = base.and_then(|base| match backend.protect_memory(&memory) {
+            Ok(()) => Some(Mutex::new(base)),
+            Err(e) => {
+                note(format!("snapshots will write all of memory: {e}"));
+                None
+            }
+        });
         let backend = backend;
         let start = match (&layout, &saved) {
             (Some(layout), _) => Start::Boot(layout),
@@ -247,6 +265,9 @@ mod vmm {
             (None, None) => unreachable!("a VM either boots or restores"),
         };
         let mut machine = Machine::new(io::stdout(), None, config.cpus);
+        if base.is_some() {
+            machine = machine.track_writes(memory.clone());
+        }
         machine.add_virtio(MmioTransport::new(Box::new(block), memory.clone()));
         machine.add_virtio(MmioTransport::new(Box::new(vsock), memory.clone()));
         let mut gateway = network(config.net);
@@ -277,6 +298,7 @@ mod vmm {
             memory: &memory,
             disk: Path::new(&config.disk),
             flows: gateway.as_ref().map(|(stack, _)| stack.open_flows()),
+            base,
         };
 
         // When the guest stops by itself, closing our side of the link ends
