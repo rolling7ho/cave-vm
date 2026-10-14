@@ -345,6 +345,101 @@ fn a_fork_runs_commands_in_itself() {
     assert_eq!(requests[2].vm().cloned(), Some(fake.vm(Some("fork-1"))));
 }
 
+/// SHA-256 of `hello`.
+const HELLO_SHA256: &str = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+
+#[test]
+fn read_file_collects_the_data_and_checks_its_digest() {
+    let fake = Fake::new(|request, _| match request {
+        Request::Start { .. } => vec![Reply::Policy(policy())],
+        Request::FileRead { path, .. } => {
+            let sha256 = if path.ends_with("bad") {
+                "0".repeat(64)
+            } else {
+                HELLO_SHA256.into()
+            };
+            vec![
+                Reply::FileInfo {
+                    size: 5,
+                    mode: 0o644,
+                },
+                Reply::FileData {
+                    data: b"hel".to_vec().into(),
+                },
+                Reply::FileData {
+                    data: b"lo".to_vec().into(),
+                },
+                Reply::FileEnd { sha256 },
+            ]
+        }
+        _ => Vec::new(),
+    });
+    let sb = fake.sandbox();
+    assert_eq!(sb.read_file("src/a.txt").unwrap(), b"hello");
+    assert_eq!(sb.read_file("/etc/hostname").unwrap(), b"hello");
+    let e = sb.read_file("bad").unwrap_err();
+    assert!(e.message.contains("does not match"), "{e}");
+
+    let paths: Vec<String> = fake
+        .requests()
+        .into_iter()
+        .filter_map(|r| match r {
+            Request::FileRead { path, .. } => Some(path),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        paths,
+        ["/workspace/src/a.txt", "/etc/hostname", "/workspace/bad"]
+    );
+}
+
+#[test]
+fn write_file_sends_the_data_in_chunks_with_its_digest() {
+    let fake = Fake::new(|request, history| match request {
+        Request::Start { .. } => vec![Reply::Policy(policy())],
+        Request::FileEnd { .. } => {
+            let size = history
+                .iter()
+                .map(|r| match r {
+                    Request::FileData { data } => data.0.len() as u64,
+                    _ => 0,
+                })
+                .sum();
+            vec![Reply::FileWritten { size }]
+        }
+        _ => Vec::new(),
+    });
+    let sb = fake.sandbox();
+    assert_eq!(sb.write_file("./notes/a.txt", b"hello").unwrap(), 5);
+    let requests = fake.requests();
+    assert_eq!(
+        requests[1],
+        Request::FileWrite {
+            vm: fake.vm(None),
+            path: "/workspace/notes/a.txt".into(),
+            mode: None,
+            create_dirs: true,
+        }
+    );
+    assert_eq!(
+        requests[3],
+        Request::FileEnd {
+            sha256: HELLO_SHA256.into()
+        }
+    );
+
+    // Larger than one message, so it goes in several.
+    let big = vec![7u8; 600_000];
+    assert_eq!(sb.write_file("big", &big).unwrap(), 600_000);
+    let chunks = fake
+        .requests()
+        .iter()
+        .filter(|r| matches!(r, Request::FileData { .. }))
+        .count();
+    assert_eq!(chunks, 1 + 3);
+}
+
 #[test]
 fn daemon_errors_keep_their_code_message_and_fix() {
     let fake = Fake::new(|_, _| {
