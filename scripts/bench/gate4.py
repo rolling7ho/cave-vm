@@ -11,7 +11,10 @@ in a scratch data directory, with the default 2 CPU / 2 GiB VM. Nothing
 reaches the network. cave-vmm is signed ad hoc with the hypervisor
 entitlement, as scripts/hypervisor-runner.sh does. Every time is wall
 clock around the `cave` commands; memory is `phys_footprint` from the
-footprint tool, as in decision 0005. Standard library only.
+footprint tool, as in decision 0005, once the VM is idle: IDLE_WAIT after
+its last command, which covers the agent dropping the boot-time file
+cache and the guest reporting the freed pages (decision 0012). Standard
+library only.
 """
 
 import argparse
@@ -27,13 +30,16 @@ import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Decision 0005: (measure, target, unit).
+# How long after its last command a VM counts as idle for its memory.
+IDLE_WAIT = 8
+
+# Decision 0005, with booted memory from decision 0012.
 TARGETS = {
     "snapshot": 500,
     "restore": 100,
     "fork": 150,
     "ten_forks": 1000,
-    "booted_mb": 128,
+    "booted_mb": 200,
     "fork_mb": 32,
 }
 
@@ -157,7 +163,7 @@ def main():
         results["boot"] = boots
         # A running process, as an agent's session would have.
         rig.cave("exec", "--", "sh", "-c", "setsid sleep 100000 >/dev/null 2>&1 &")
-        time.sleep(2)
+        time.sleep(IDLE_WAIT)
         (main_pid,) = rig.vmm_pids()
         results["booted_mb"] = [footprint_mb(main_pid)]
 
@@ -183,7 +189,7 @@ def main():
             forks.append(rig.timed(
                 ("fork", f"f{i}", "--from", "s0"), ("exec", "--fork", f"f{i}", "--", "true")))
             if i == 0:
-                time.sleep(2)
+                time.sleep(IDLE_WAIT)
                 (fork_pid,) = rig.vmm_pids() - running
                 results["fork_mb"] = [footprint_mb(fork_pid)]
             rig.cave("rm", "--yes", f"f{i}")

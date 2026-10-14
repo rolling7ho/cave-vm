@@ -21,6 +21,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    cave_vm_agent::memory::drop_boot_cache_later();
     let config = Config {
         user: cave_vm_agent::user::guest_user(),
         ..Config::default()

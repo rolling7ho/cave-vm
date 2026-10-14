@@ -140,7 +140,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | P4.9 | `cave gc`: show disk usage and reclaim it. Shared APFS clone blocks are reported honestly rather than double-counted [A9]. | Tests on cloned temp files. |
 | P4.10 | `cave export`: move a project or snapshot out as files. | E2E round trip. |
 | P4.11 | Benchmark harness for boot, restore and fork time and idle memory, run on the self-hosted Mac. | Results compared against the P2.11 targets. |
-| P4.12 | Meet the gate 4 targets (D29): snapshots write only the pages changed since the last one (P4.12a), faster restore and fork (P4.12b), free page reporting (P4.12c), then booted memory. | `scripts/bench/gate4.py` meets every target. |
+| P4.12 | Meet the gate 4 targets (D29): snapshots write only the pages changed since the last one (P4.12a), faster restore and fork (P4.12b), free page reporting (P4.12c), then booted memory under the 200 MB of D30 (P4.12d). | `scripts/bench/gate4.py` meets every target. |
 
 **Exit gate 4 (the headline demo).** On a real Mac: start a project VM with a running process, snapshot it, break the VM, restore it with the process intact, and fork it into several copies, each in well under a second. The exact restore and fork targets are the ones approved in P2.11. A snapshot written before a `cave` upgrade still loads, or falls back to a disk boot.
 
@@ -232,7 +232,7 @@ When a task hits something the design and the decisions below do not cover, add 
 
 ## Decisions
 
-Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md), D23 in [decision 0006](docs/decisions/0006-phase-3-dependencies.md), D24 and D25 in [decision 0007](docs/decisions/0007-unsafe-host-calls-and-pr-flow.md), D26 in [decision 0008](docs/decisions/0008-vsock-without-socket-files.md), D27 in [decision 0009](docs/decisions/0009-toml-edit.md), D28 in [decision 0010](docs/decisions/0010-image-manifest.md), and D29 in [decision 0011](docs/decisions/0011-gate-4-misses.md).
+Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md), D23 in [decision 0006](docs/decisions/0006-phase-3-dependencies.md), D24 and D25 in [decision 0007](docs/decisions/0007-unsafe-host-calls-and-pr-flow.md), D26 in [decision 0008](docs/decisions/0008-vsock-without-socket-files.md), D27 in [decision 0009](docs/decisions/0009-toml-edit.md), D28 in [decision 0010](docs/decisions/0010-image-manifest.md), D29 in [decision 0011](docs/decisions/0011-gate-4-misses.md), and D30 in [decision 0012](docs/decisions/0012-booted-memory-target.md).
 
 | ID | Question | Decision |
 | --- | --- | --- |
@@ -265,3 +265,4 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D27 | Which crate reads `cave.toml` and writes the image pin into it (D22). | Add `toml_edit`, which keeps the user's comments and layout when the pin is written. |
 | D28 | Where base images and the kernel come from, and how `image = "base"` becomes a digest. | An `images.json` manifest on each GitHub release lists every published image version with its disk and kernel; the pin is the disk digest, and `CAVE_IMAGE_DIR` points at a local build instead. |
 | D29 | Gate 4 missed five of six targets (Q1). | Fix them; the targets in decision 0005 stay. Gate 4 stays open until the benchmark meets all of them (P4.12). |
+| D30 | Booted memory missed its 128 MB target after the other gate 4 fixes: the Debian guest holds about 285 MB after boot. | The booted target is under 200 MB for the Debian guest, met by dropping the boot-time file cache once; every other target stands (decision 0012). |
