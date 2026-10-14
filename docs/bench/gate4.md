@@ -46,3 +46,29 @@ The undo point no longer dominates a restore: what is left is stopping the old V
 
 Keeping guest RAM in a shared file was tried first and dropped: about one restore in 40 hung (decision 0011). A separate, older hang also shows up under load. When the guest rewrites 200 MB just before each snapshot, about one fork in 60 never reaches its agent and falls back to a disk boot after 50 seconds. This happens on main too (2 of 120), so it is not caused by the tracking.
 
+## After faster restore and fork, 2026-10-14
+
+Same Mac and build settings, 5 runs (P4.12b).
+
+| Measure | Median | Min | Max | Target | Result |
+|---|---|---|---|---|---|
+| Boot until a command runs | 466 ms | 450 ms | 477 ms | none | |
+| `cave snapshot` of a running VM | 38 ms | 26 ms | 97 ms | under 500 ms | met |
+| `cave restore` until `cave exec` runs a command | 81 ms | 68 ms | 83 ms | under 100 ms | met |
+| The same with `[snapshots] auto = false` | 47 ms | 47 ms | 48 ms | | |
+| `cave fork --from` until the fork runs a command | 130 ms | 122 ms | 133 ms | under 150 ms | met |
+| Ten forks of one snapshot, all ran a command | 476 ms | 450 ms | 502 ms | under 1 s | met |
+| Idle memory, booted VM | 282 MB | | | under 128 MB | missed |
+| Idle memory, fork | 27 MB | | | under 32 MB | met |
+
+Where the restore time went:
+
+- The daemon polled for the old VMM's exit every 20 ms. It now polls every millisecond.
+- Starting a VMM process takes about 17 ms (sandbox-exec, exec, the dynamic loader). The next one now starts while the undo point is saved.
+- About 100 ms went to a lost first agent connection. The guest drops connections when it handles the transport reset, and the first connection often arrived just before that. The vsock device now holds packets until the guest has handled the reset.
+
+What remains is the undo point (3,000 to 5,000 changed pages at about 5 µs each), the guest flushing its file systems before it, and the agent handshake. Writing the pages from several threads was no faster.
+
+A fork maps a clone of the snapshot's memory, a new file whose pages are not yet in the Mac's file cache, so the guest's first reads go to the drive. Mapping the snapshot's own memory file instead brought a fork to about 50 ms, but each fork then counted about 80 MB of that file's cached pages in its own memory (130 MB per fork), even after flushing the file and dropping it from the cache. The clone stays.
+
+Only booted memory is still missed. The guest uses about 130 MB after boot but has touched about 280 MB, and freed guest pages are not handed back. That needs free page reporting or a balloon device (P6.1, pulled forward by D29).

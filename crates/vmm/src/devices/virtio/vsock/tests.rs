@@ -459,6 +459,57 @@ fn a_restore_sends_a_transport_reset_when_an_event_buffer_is_posted() {
 }
 
 #[test]
+fn after_a_restore_packets_wait_until_the_guest_handles_the_reset() {
+    let mem = guest_memory();
+    let mut rxq = DriverQueue::at(&mem, 64, 0);
+    let txq = DriverQueue::at(&mem, 64, 1);
+    let mut evq = DriverQueue::at(&mem, 8, 2);
+    let mut dev = Vsock::new(GUEST_CID);
+    dev.activate(Activation {
+        memory: mem.clone(),
+        queues: vec![rxq.device_queue(), txq.device_queue(), evq.device_queue()],
+        features: 0,
+        interrupt: Interrupt::new(),
+    })
+    .unwrap();
+    evq.add(&mem, &[], &[4]);
+    rxq.add(&mem, &[], &[4096]);
+    dev.restored();
+    assert_eq!(evq.used(&mem).len(), 1, "the reset went out");
+
+    // A connection made before the guest handled the reset waits.
+    let _host = dev.connector().connect(AGENT_PORT).unwrap();
+    dev.queue_notify(RX_QUEUE);
+    assert!(rxq.used(&mem).is_empty());
+    // The guest posts the event buffer back: the request goes out.
+    evq.add(&mem, &[], &[4]);
+    dev.queue_notify(EVENT_QUEUE);
+    assert_eq!(rxq.used(&mem).len(), 1);
+}
+
+#[test]
+fn packets_wait_for_a_reset_only_so_long() {
+    let mem = guest_memory();
+    let mut rxq = DriverQueue::at(&mem, 64, 0);
+    let txq = DriverQueue::at(&mem, 64, 1);
+    let mut evq = DriverQueue::at(&mem, 8, 2);
+    let mut dev = Vsock::new(GUEST_CID);
+    dev.activate(Activation {
+        memory: mem.clone(),
+        queues: vec![rxq.device_queue(), txq.device_queue(), evq.device_queue()],
+        features: 0,
+        interrupt: Interrupt::new(),
+    })
+    .unwrap();
+    evq.add(&mem, &[], &[4]);
+    rxq.add(&mem, &[], &[4096]);
+    dev.restored();
+    std::thread::sleep(RESET_WAIT);
+    let _host = dev.connector().connect(AGENT_PORT).unwrap();
+    assert_eq!(rxq.used(&mem).len(), 1);
+}
+
+#[test]
 fn packets_wait_while_paused() {
     let mut r = rig();
     r.dev.pause();

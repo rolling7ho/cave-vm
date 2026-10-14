@@ -39,11 +39,28 @@ use crate::project::STATE_DIR;
 /// crash.
 const PID_FILE: &str = "vmm.pid";
 
+/// A VMM process started but not yet booted. Dropping it stops the
+/// process.
+struct Spawned(Option<Launched>);
+
+impl Drop for Spawned {
+    fn drop(&mut self) {
+        if let Some(mut launched) = self.0.take() {
+            let _ = launched.child.kill();
+            let _ = launched.child.wait();
+        }
+    }
+}
+
 /// How long a VMM gets to exit after `stop` before it is killed.
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How often the watcher checks whether a VMM has exited.
 const WATCH_INTERVAL: Duration = Duration::from_millis(20);
+
+/// How often [`Vms::stop`] checks whether the VMM has exited yet. A VMM
+/// exits within a few milliseconds of `stop`, and a restore waits on it.
+const STOP_POLL: Duration = Duration::from_millis(1);
 
 mod snapshots;
 
@@ -318,13 +335,44 @@ impl Vms {
     }
 
     fn launch(&self, vm: &Arc<Vm>, prepared: Prepared) -> Result<Running, ErrorMessage> {
-        let Launched { child, control } =
-            self.launcher
-                .launch(&vm.dir, &prepared.config)
-                .map_err(|e| {
-                    error(ErrorCode::Internal, format!("cannot start the VMM: {e}"))
-                        .with_fix("Run `cave doctor` to check the installation.")
-                })?;
+        let spawned = self.spawn(vm, &prepared.config)?;
+        self.launch_spawned(vm, spawned, prepared)
+    }
+
+    /// Starts a VMM process for `vm`, to be booted later with
+    /// [`Vms::launch_spawned`]. Starting one takes a while, so a restore
+    /// starts the next VMM before it stops the old one.
+    fn spawn(&self, vm: &Vm, config: &VmmConfig) -> Result<Spawned, ErrorMessage> {
+        self.launcher
+            .launch(&vm.dir, config)
+            .map(|launched| Spawned(Some(launched)))
+            .map_err(|e| {
+                error(ErrorCode::Internal, format!("cannot start the VMM: {e}"))
+                    .with_fix("Run `cave doctor` to check the installation.")
+            })
+    }
+
+    /// Boots `prepared` in `spawned`, or in a new VMM process.
+    fn launch_in(
+        &self,
+        vm: &Arc<Vm>,
+        spawned: Option<Spawned>,
+        prepared: Prepared,
+    ) -> Result<Running, ErrorMessage> {
+        match spawned {
+            Some(spawned) => self.launch_spawned(vm, spawned, prepared),
+            None => self.launch(vm, prepared),
+        }
+    }
+
+    /// Boots a VMM process from [`Vms::spawn`] with `prepared`.
+    fn launch_spawned(
+        &self,
+        vm: &Arc<Vm>,
+        mut spawned: Spawned,
+        prepared: Prepared,
+    ) -> Result<Running, ErrorMessage> {
+        let Launched { child, control } = spawned.0.take().expect("a spawned VMM");
         let pid = child.id();
         let child = Arc::new(Mutex::new(child));
         let stop_requested = Arc::new(AtomicBool::new(false));
@@ -492,7 +540,7 @@ impl Vms {
                 break;
             }
             drop(child);
-            thread::sleep(WATCH_INTERVAL);
+            thread::sleep(STOP_POLL);
         }
         let _ = fs::remove_file(vm.dir.join(PID_FILE));
         let slot = vm.slot.lock().expect("vm lock");
