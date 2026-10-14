@@ -18,6 +18,7 @@ mod mirror;
 mod policy;
 mod project;
 mod remove;
+mod setup;
 mod shell;
 mod skill;
 mod snapshot;

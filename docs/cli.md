@@ -21,7 +21,12 @@ The project directory is the VM's identity. Commands that act on a VM find the p
 
 `cave run`, `cave shell`, `cave exec` and `cave agent` work in a directory that has no `cave.toml`: they run `cave init` with its defaults first and say so in one line. This is what keeps the quickstart at two commands (design principle 1: `cave run` works with no config). It refuses to do this in the home folder itself ([D15](../ROADMAP.md#decisions)).
 
-The first time `cave` runs on a Mac it also does the first-run setup from the design: it checks the host, fetches the kernel and the base image, signs itself ad hoc with the hypervisor entitlement, creates the data directory and runs the `cave doctor` checks. Ad hoc signing without a paid Apple account is an assumption checked in the spike [A5].
+The first time `cave` runs on a Mac it also does the first-run setup from the design:
+
+- Before anything else, it checks the Mac as `cave doctor` does: Apple Silicon, Hypervisor.framework and macOS 26 or later. A failed check stops here with its fix. Less than 5 GB free is a warning.
+- It creates the data directory.
+- It signs `cave-vmm` ad hoc with the hypervisor entitlement (`codesign -s -`, on this Mac, with no Apple account, keys or certificates), and says so. It checks this every time it starts the daemon, so a reinstalled `cave-vmm` is signed again. That ad hoc signing is enough was checked in the spike [A5].
+- The first VM start downloads the kernel and the base image, verified against their digests, and shows the download's progress.
 
 ### Forks
 
@@ -587,7 +592,7 @@ ok    Apple Silicon (M3 Pro)
 ok    Hypervisor.framework is available
 ok    macOS 26.1
 fail  cave is not signed with the hypervisor entitlement
-      fix: brew reinstall cave-vm, which re-signs it on first run
+      fix: Reinstall cave (brew reinstall cave-vm); cave signs cave-vmm when it next starts its daemon
 ok    48 GB free on the volume with your projects
 ok    the cave daemon is running
 ok    debian image sha256:3f2a9c1e verified

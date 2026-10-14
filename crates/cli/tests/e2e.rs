@@ -1161,3 +1161,38 @@ fn ubuntu_image_boots() {
     assert!(rig.cave(&["restore", "s"]).status.success());
     assert_eq!(rig.exec(&["cat", "a.txt"], 0), "hi\n");
 }
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn first_run_signs_cave_vmm_and_shows_the_download() {
+    let rig = Rig::new();
+    // As installed: cave-vmm without the entitlement.
+    let removed = Command::new("/usr/bin/codesign")
+        .args(["--remove-signature"])
+        .arg(rig.bin.join("cave-vmm"))
+        .status()
+        .unwrap();
+    assert!(removed.success());
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    let run = rig.cave(&["run"]);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(run.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("Signed cave-vmm for Hypervisor.framework"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("downloading the debian image"), "{stderr}");
+    assert!(
+        stderr.contains("downloading the kernel for debian"),
+        "{stderr}"
+    );
+    assert_eq!(rig.exec(&["whoami"], 0).trim(), "cave");
+    // cave doctor agrees it is signed now.
+    assert!(rig.cave(&["stop"]).status.success());
+    let doctor = rig.cave(&["doctor"]);
+    let stdout = String::from_utf8_lossy(&doctor.stdout);
+    assert!(
+        stdout.contains("ok    cave is signed with the hypervisor entitlement"),
+        "{stdout}"
+    );
+}

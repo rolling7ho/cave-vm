@@ -1,8 +1,8 @@
 //! The daemon API client. The daemon is started on demand (docs/cli.md,
 //! "The daemon and the data directory").
 
-use std::fs::{self, OpenOptions};
-use std::io;
+use std::fs::OpenOptions;
+use std::io::{self, IsTerminal};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -13,6 +13,7 @@ use cave_vm_proto::daemon::{Reply, Request};
 use cave_vm_proto::{FrameError, Hello, VERSIONS, read_frame, write_frame};
 
 use crate::error::{CliError, Result};
+use crate::setup;
 
 /// How long a freshly started daemon gets to open its socket.
 const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(5);
@@ -105,7 +106,11 @@ impl Connection {
         connection.send(request)?;
         loop {
             match connection.receive()? {
-                Reply::Progress { message, .. } => eprintln!("{message}"),
+                Reply::Progress {
+                    message,
+                    done,
+                    total,
+                } => show_progress(&message, done, total),
                 Reply::Error(e) => return Err(e.into()),
                 reply => return Ok(reply),
             }
@@ -113,9 +118,23 @@ impl Connection {
     }
 }
 
+/// Prints a progress message. A download's steps overwrite one line on a
+/// terminal, and end it when the download is done.
+fn show_progress(message: &str, done: Option<u64>, total: Option<u64>) {
+    match (done, total) {
+        (Some(done), Some(total)) if std::io::stderr().is_terminal() => {
+            eprint!("\r{message}\x1b[K");
+            if done >= total {
+                eprintln!();
+            }
+        }
+        _ => eprintln!("{message}"),
+    }
+}
+
 fn start_daemon(dir: &std::path::Path, socket: &std::path::Path) -> Result<UnixStream> {
-    fs::create_dir_all(dir)?;
     let program = daemon_program()?;
+    setup::before_daemon(dir, &program)?;
     let log = OpenOptions::new()
         .create(true)
         .append(true)

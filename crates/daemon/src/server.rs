@@ -18,6 +18,7 @@ use crate::credentials::{self, Redactor};
 use crate::forward;
 use crate::home::Home;
 use crate::link::daemon_software;
+use crate::progress;
 use crate::relay;
 use crate::vms::Vms;
 
@@ -161,7 +162,17 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
             write_frame(&mut stream, &Reply::Ok).map_err(io::Error::other)?;
             return forward::splice(stream, agent);
         }
-        Request::Start { vm, net, ports } => vms.start(&vm, net, &ports).map(Reply::Policy),
+        Request::Start { vm, net, ports } => {
+            // A first start downloads the image; the client shows progress.
+            let mut sink = stream.try_clone()?;
+            progress::with_sink(
+                move |reply| {
+                    let _ = write_frame(&mut sink, &reply);
+                },
+                || vms.start(&vm, net, &ports),
+            )
+            .map(Reply::Policy)
+        }
         Request::Remove { vm, name: None } => vms.remove(&vm).map(|()| Reply::Ok),
         Request::Remove {
             vm,

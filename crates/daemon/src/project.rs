@@ -18,6 +18,7 @@ use cave_vm_vmm::disk;
 use crate::config;
 use crate::image::manifest::{Entry, Manifest, Origin};
 use crate::image::{BASE_ALIAS_TARGET, Cache, Digest, ImageRef};
+use crate::progress;
 use crate::snapshot;
 use crate::updates::Detector;
 use crate::vms::{AutoSnapshots, Prepared, VmSource};
@@ -101,13 +102,20 @@ impl ProjectSource {
             .resolve(image)
             .map_err(|e| error(ErrorCode::NotFound, e))?;
         let source = self.origin.source(&manifest);
-        let fetch = |digest: &Digest| {
+        // The first run downloads both, which the client shows as progress.
+        let fetch = |digest: &Digest, what: String| {
+            let mut download = progress::Download::new(what);
             self.cache
-                .fetch(digest, &source, &mut |_, _| {})
+                .fetch(digest, &source, &mut |done, total| {
+                    download.update(done, total)
+                })
                 .map_err(|e| error(ErrorCode::Io, e))
         };
-        let disk = fetch(&entry.disk.digest)?;
-        let kernel = fetch(&entry.kernel.digest)?;
+        let disk = fetch(&entry.disk.digest, format!("the {} image", entry.name))?;
+        let kernel = fetch(
+            &entry.kernel.digest,
+            format!("the kernel for {}", entry.name),
+        )?;
         // Best effort: without the record the next start reads the manifest.
         let _ = fs::write(
             self.kernel_record(&entry.disk.digest),
