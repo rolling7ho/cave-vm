@@ -216,7 +216,7 @@ Errors:
 | `the VM did not start: <reason>` | Run `cave doctor`; the reason names the failing piece |
 | `not enough free memory to start a 2 GB VM` | Stop another VM with `cave stop`, or lower `memory` in cave.toml |
 
-Warning, from the design: `memory is getting tight: N VMs are running and M GB is free`.
+Warning, from the design: `memory is getting tight: N VMs are running and M GB is free`. It is printed after a VM boots, by `cave run` and by every command that boots one, when macOS reports memory pressure or when less memory is available than the VM's `memory` cap. There is no cap on the number of VMs, so the VM boots anyway; `cave stop` frees the memory of one you are not using.
 
 ### cave stop
 
