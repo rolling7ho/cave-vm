@@ -247,7 +247,7 @@ fn replies_round_trip() {
                 {"time_unix_ms": 2, "event": "write", "path": "src/app.ts", "size": 1200},
                 {"time_unix_ms": 3, "event": "connect", "host": "192.168.1.10", "port": 445, "allowed": false, "reason": "LAN"}
             ],
-            "audit_total": 412}),
+            "audit_total": 412, "state": "running", "started_unix": 100}),
         Reply::Inspect {
             policy,
             resources: Resources {
@@ -283,6 +283,8 @@ fn replies_round_trip() {
                 },
             ],
             audit_total: 412,
+            state: VmState::Running,
+            started_unix: Some(100),
         },
     );
     check(

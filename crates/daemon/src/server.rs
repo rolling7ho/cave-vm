@@ -157,6 +157,7 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
         }
         Request::Gc { apply } => vms.gc(apply).map(Reply::Usage),
         Request::Images => vms.images().map(|images| Reply::Images { images }),
+        Request::Inspect { vm, log_limit } => vms.inspect(&vm, log_limit),
         Request::Restore { vm, name } => {
             vms.restore(&vm, name.as_deref())
                 .map(|restored| Reply::Restored {

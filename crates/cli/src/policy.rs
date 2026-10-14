@@ -25,7 +25,7 @@ fn line(label: &str, text: &str, marks: &[&str]) -> String {
     line
 }
 
-fn gigabytes(bytes: u64) -> String {
+pub fn gigabytes(bytes: u64) -> String {
     let gb = bytes as f64 / f64::from(1 << 30);
     if gb.fract() == 0.0 {
         format!("{gb:.0} GB")
@@ -46,6 +46,16 @@ fn duration(seconds: u64) -> String {
 /// The policy lines. `headline` is what follows the VM's name, such as
 /// `started in 0.4s`.
 pub fn render(policy: &Policy, headline: &str) -> String {
+    lines(policy, headline, None)
+}
+
+/// The policy lines with the disk in use and its size on the resources
+/// line, as `cave inspect` shows them.
+pub fn render_with_disk(policy: &Policy, headline: &str, used: u64, size: u64) -> String {
+    lines(policy, headline, Some((used, size)))
+}
+
+fn lines(policy: &Policy, headline: &str, disk: Option<(u64, u64)>) -> String {
     let marks = |prefix: &str| -> Vec<&str> {
         policy
             .widened
@@ -91,7 +101,15 @@ pub fn render(policy: &Policy, headline: &str) -> String {
         line("ports", &ports, &marks("-p")),
         line(
             "resources",
-            &format!("{cpus}, {} memory", gigabytes(policy.memory_bytes)),
+            &match disk {
+                None => format!("{cpus}, {} memory", gigabytes(policy.memory_bytes)),
+                Some((used, size)) => format!(
+                    "{cpus}, {} memory, {} of {} disk used",
+                    gigabytes(policy.memory_bytes),
+                    gigabytes(used),
+                    gigabytes(size)
+                ),
+            },
             &[],
         ),
         line("lifetime", &lifetime, &[]),

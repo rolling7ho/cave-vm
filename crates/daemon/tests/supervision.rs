@@ -237,6 +237,13 @@ impl VmSource for Source {
         })
     }
 
+    fn policy(&self, vm: &VmId) -> Result<Policy, ErrorMessage> {
+        let mut policy = self.prepare(vm, None, &[])?.policy;
+        self.prepared.fetch_sub(1, Ordering::SeqCst);
+        policy.image = "base (not running)".into();
+        Ok(policy)
+    }
+
     fn auto_snapshots(&self, _vm: &VmId) -> Result<AutoSnapshots, ErrorMessage> {
         Ok(*self.auto_snapshots.lock().unwrap())
     }
@@ -589,6 +596,66 @@ fn connection_attempts_reach_the_audit_log_while_running_and_on_stop() {
             .collect::<Vec<_>>(),
         [1, 2]
     );
+}
+
+#[test]
+fn inspect_shows_the_policy_resources_state_and_latest_audit_entries() {
+    let r = rig("inspect", NORMAL);
+    let state = PathBuf::from(vm().project).join(".cave");
+    fs::create_dir_all(&state).unwrap();
+    let inspect = |log_limit| {
+        r.request(Request::Inspect {
+            vm: vm(),
+            log_limit,
+        })
+    };
+
+    // Not running: the policy comes from the project, with no audit log yet.
+    let Reply::Inspect {
+        policy,
+        resources,
+        audit,
+        audit_total,
+        state: vm_state,
+        started_unix,
+    } = inspect(None)
+    else {
+        panic!("not an inspect reply");
+    };
+    assert_eq!(policy.image, "base (not running)");
+    assert_eq!((resources.cpus, resources.disk_size), (2, 0));
+    assert_eq!((audit.len(), audit_total), (0, 0));
+    assert_eq!((vm_state, started_unix), (VmState::Stopped, None));
+
+    assert!(matches!(r.start(), Reply::Policy(_)));
+    fs::write(state.join("disk.img"), vec![1u8; 8192]).unwrap();
+    let lines: String = (1..=3)
+        .map(|t| {
+            format!("{{\"time_unix_ms\":{t},\"event\":\"write\",\"path\":\"a\",\"size\":1}}\n")
+        })
+        .collect();
+    fs::write(state.join("audit.log"), lines).unwrap();
+    let Reply::Inspect {
+        policy,
+        resources,
+        audit,
+        audit_total,
+        state: vm_state,
+        started_unix,
+    } = inspect(Some(2))
+    else {
+        panic!("not an inspect reply");
+    };
+    assert_eq!(policy.image, "base");
+    assert_eq!(resources.disk_size, 8192);
+    assert!(resources.disk_used > 0);
+    assert_eq!(audit_total, 3);
+    assert_eq!(
+        audit.iter().map(|e| e.time_unix_ms).collect::<Vec<_>>(),
+        [2, 3]
+    );
+    assert_eq!(vm_state, VmState::Running);
+    assert!(started_unix.is_some());
 }
 
 #[test]
