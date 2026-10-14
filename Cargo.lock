@@ -86,6 +86,7 @@ dependencies = [
 name = "cave-vm-cli"
 version = "0.0.0"
 dependencies = [
+ "cave-vm-mcp",
  "cave-vm-proto",
  "clap",
  "serde_json",
@@ -109,6 +110,11 @@ version = "0.0.0"
 [[package]]
 name = "cave-vm-mcp"
 version = "0.0.0"
+dependencies = [
+ "cave-vm-proto",
+ "cave-vm-sdk",
+ "serde_json",
+]
 
 [[package]]
 name = "cave-vm-proto"

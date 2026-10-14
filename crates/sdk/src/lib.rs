@@ -216,6 +216,16 @@ impl Sandbox {
         &self.project
     }
 
+    /// The project's existing fork `name`. Nothing is checked until it is
+    /// used: a fork that does not exist is an error then.
+    pub fn fork_named(&self, name: &str) -> Sandbox {
+        Sandbox {
+            daemon: self.daemon.clone(),
+            project: self.project.clone(),
+            fork: Some(name.into()),
+        }
+    }
+
     /// The fork's name, or `None` for the project's own VM.
     pub fn fork_name(&self) -> Option<&str> {
         self.fork.as_deref()

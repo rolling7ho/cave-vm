@@ -137,6 +137,9 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Run the MCP server on stdio, for agents.
+    #[command(hide = true)]
+    Mcp,
     /// List the base images.
     Images {
         /// One JSON document, for scripts.
@@ -189,6 +192,11 @@ fn main() -> ExitCode {
         Cmd::Gc { yes, json } => gc::run(yes, json),
         Cmd::Images { json } => commands::images(json),
         Cmd::Inspect { fork, log, json } => inspect::run(fork, log, json),
+        Cmd::Mcp => project::current_dir().and_then(|dir| {
+            let tools = cave_vm_mcp::Tools::new(dir);
+            cave_vm_mcp::serve(std::io::stdin().lock(), std::io::stdout().lock(), &tools)
+                .map_err(Into::into)
+        }),
         Cmd::Restore { name, fork } => snapshot::restore(name, fork),
         Cmd::Rm { name, yes } => remove::run(name, yes),
         Cmd::Shell { fork } => match shell::run(fork) {
