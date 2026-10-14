@@ -3,6 +3,8 @@
 # daemon boots them with CAVE_IMAGE_DIR set to that folder.
 #
 #   image/manifest.sh [dir]     default: target/image, holding debian.img and Image
+#
+# ubuntu.img, from image/ubuntu/build.sh, is listed too when it is there.
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
 dir="$(cd "${1:-$here/../target/image}" && pwd)"
@@ -14,17 +16,17 @@ entry() {
     printf '{ "url": "%s", "sha256": "%s", "size": %s }' \
         "$1" "$(shasum -a 256 "$1" | cut -d' ' -f1)" "$(stat -f %z "$1")"
 }
-cat > images.json <<JSON
-{
-  "version": 1,
-  "images": [
-    {
-      "name": "debian",
-      "description": "Debian 13 (trixie), local build",
-      "disk": $(entry debian.img),
-      "kernel": $(entry Image)
-    }
-  ]
+image() {
+    printf '    {\n      "name": "%s",\n      "description": "%s, local build",\n      "disk": %s,\n      "kernel": %s\n    }' \
+        "$1" "$2" "$(entry "$1.img")" "$(entry Image)"
 }
-JSON
+{
+    printf '{\n  "version": 1,\n  "images": [\n'
+    image debian "Debian 13 (trixie)"
+    if [ -f ubuntu.img ]; then
+        printf ',\n'
+        image ubuntu "Ubuntu 26.04 LTS (resolute)"
+    fi
+    printf '\n  ]\n}\n'
+} > images.json
 echo "Wrote $dir/images.json; boot it with CAVE_IMAGE_DIR=$dir"

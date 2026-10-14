@@ -41,6 +41,8 @@ cargo build --workspace
 cargo test -p cave-vm-cli --test e2e -- --ignored
 ```
 
+The Ubuntu image test, `ubuntu_image_boots`, skips itself unless `image/ubuntu/build.sh` ran before `image/manifest.sh`.
+
 `.cargo/config.toml` makes cargo sign each test binary ad hoc with the `com.apple.security.hypervisor` entitlement (`scripts/hypervisor-runner.sh`) before running it.
 
 ## Making a change
