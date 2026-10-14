@@ -141,7 +141,7 @@ Sets up the current directory as a project. It writes:
 
   Other settings in those files are kept. A file that already has these entries is not rewritten. A file that is not valid JSON is an error that says to fix it, and is left alone.
 
-It does not boot the VM. The files already in the folder, everything except `.cave/`, are copied into the VM once when it first boots. In sealed mode the Mac files are left untouched but are no longer updated, and cave says so ([D13](../ROADMAP.md#decisions)).
+It does not boot the VM. The files already in the folder, everything except `.cave/` and `.env`, are copied into the VM once when it first boots. `.env` stays on the Mac because it holds the credentials ([D33](../ROADMAP.md#decisions)). In sealed mode the Mac files are left untouched but are no longer updated, and cave says so ([D13](../ROADMAP.md#decisions)).
 
 When stdin is a terminal and neither `--sealed` nor `--synced` is given, it asks the design's setup question, with sealed as the default:
 
@@ -593,7 +593,7 @@ A command run through the MCP server's `exec` tool, or the SDK's `Command::crede
 - The audit log records the name, never the value.
 - A snapshot taken afterwards records the names, since the VM's memory may still hold the values, and `cave restore`, `cave fork` and `cave export` of it warn.
 
-`.env` has one `NAME=value` per line, optionally after `export `. Lines starting with `#` are comments. A value in single quotes is taken as written, one in double quotes may use `\n`, `\"` and `\\`, and an unquoted value ends at ` #`. A name that is not in `.env` is an error, and the command does not run:
+`.env` is never copied into the VM ([D33](../ROADMAP.md#decisions)), so the agent cannot read it there. `.env` has one `NAME=value` per line, optionally after `export `. Lines starting with `#` are comments. A value in single quotes is taken as written, one in double quotes may use `\n`, `\"` and `\\`, and an unquoted value ends at ` #`. A name that is not in `.env` is an error, and the command does not run:
 
 ```
 error: no credential named API_KEY in /Users/ivan/my-project/.env
