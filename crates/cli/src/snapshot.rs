@@ -38,6 +38,7 @@ pub fn restore(name: Option<String>, fork: Option<String>) -> Result<()> {
         name,
         reason,
         saved,
+        credentials,
         ..
     } = Connection::call(&Request::Restore {
         vm: vm_id(&project, fork),
@@ -51,6 +52,13 @@ pub fn restore(name: Option<String>, fork: Option<String>) -> Result<()> {
     if let Some(reason) = &reason {
         eprintln!("{}", fallback_warning(&name, reason));
     }
+    if !credentials.is_empty() {
+        let source = format!("snapshot {name}");
+        eprintln!(
+            "{}",
+            credential_warning(&source, &credentials, "the VM's memory")
+        );
+    }
     println!("{}", restored(&name, started.elapsed(), saved.as_deref()));
     Ok(())
 }
@@ -59,7 +67,13 @@ pub fn restore(name: Option<String>, fork: Option<String>) -> Result<()> {
 pub fn fork(name: Option<String>, from: Option<String>) -> Result<()> {
     let project = project::require()?;
     let started = Instant::now();
-    let Reply::Forked { name, from, reason } = Connection::call(&Request::Fork {
+    let from_snapshot = from.is_some();
+    let Reply::Forked {
+        name,
+        from,
+        reason,
+        credentials,
+    } = Connection::call(&Request::Fork {
         vm: vm_id(&project, None),
         name,
         from,
@@ -69,6 +83,18 @@ pub fn fork(name: Option<String>, from: Option<String>) -> Result<()> {
     };
     if let Some(reason) = &reason {
         eprintln!("{}", fallback_warning(&from, reason));
+    }
+    if !credentials.is_empty() {
+        // Without --from the fork is made from a fresh snapshot of the VM.
+        let source = if from_snapshot {
+            format!("snapshot {from}")
+        } else {
+            format!("the snapshot of {from}")
+        };
+        eprintln!(
+            "{}",
+            credential_warning(&source, &credentials, "the fork's memory")
+        );
     }
     println!("{}", forked(&name, &from, started.elapsed()));
     Ok(())
@@ -90,6 +116,26 @@ fn fallback_warning(name: &str, reason: &str) -> String {
     )
 }
 
+/// The warning for a snapshot that recorded injected credentials
+/// (docs/cli.md, "cave fork"): `source` was taken after `names` were
+/// injected, so `holder` may contain them.
+pub(crate) fn credential_warning(source: &str, names: &[String], holder: &str) -> String {
+    let (verb, pronoun) = if names.len() == 1 {
+        ("was", "it")
+    } else {
+        ("were", "them")
+    };
+    let names = match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    format!(
+        "warning: {source} was taken after {names} {verb} injected\n  \
+         {holder} may contain {pronoun}"
+    )
+}
+
 fn restored(name: &str, elapsed: std::time::Duration, saved: Option<&str>) -> String {
     let mut out = format!("Restored {name} ({})", policy::seconds(elapsed));
     if let Some(saved) = saved {
@@ -104,6 +150,28 @@ fn restored(name: &str, elapsed: std::time::Duration, saved: Option<&str>) -> St
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn the_credential_warning_matches_the_docs() {
+        assert_eq!(
+            credential_warning(
+                "snapshot my-project-2026-10-12-debian",
+                &["API_KEY".into()],
+                "the fork's memory"
+            ),
+            "warning: snapshot my-project-2026-10-12-debian was taken after API_KEY was injected\n  \
+             the fork's memory may contain it"
+        );
+        assert_eq!(
+            credential_warning(
+                "snapshot s",
+                &["A".into(), "B".into(), "C".into()],
+                "the exported files"
+            ),
+            "warning: snapshot s was taken after A, B and C were injected\n  \
+             the exported files may contain them"
+        );
+    }
 
     #[test]
     fn the_messages_match_the_docs() {

@@ -191,6 +191,16 @@ fn replies_round_trip() {
             name: "fork-1".into(),
             from: "app".into(),
             reason: None,
+            credentials: Vec::new(),
+        },
+    );
+    check(
+        json!({"type": "forked", "name": "fork-2", "from": "snap", "credentials": ["API_KEY"]}),
+        Reply::Forked {
+            name: "fork-2".into(),
+            from: "snap".into(),
+            reason: None,
+            credentials: vec!["API_KEY".into()],
         },
     );
     check(
@@ -200,15 +210,17 @@ fn replies_round_trip() {
             memory_restored: true,
             reason: None,
             saved: Some("app-2026-10-13-debian".into()),
+            credentials: Vec::new(),
         },
     );
     check(
-        json!({"type": "restored", "name": "before", "memory_restored": false, "reason": "it was taken without memory state"}),
+        json!({"type": "restored", "name": "before", "memory_restored": false, "reason": "it was taken without memory state", "credentials": ["API_KEY"]}),
         Reply::Restored {
             name: "before".into(),
             memory_restored: false,
             reason: Some("it was taken without memory state".into()),
             saved: None,
+            credentials: vec!["API_KEY".into()],
         },
     );
     check(

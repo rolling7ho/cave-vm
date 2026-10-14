@@ -215,8 +215,8 @@ The reply objects mirror the `--json` output of the matching CLI command. Sizes 
 | --- | --- |
 | `policy` | `name`, `image` (the pinned value), `storage`, `net`, `ports`, `cpus`, `memory_bytes`, optional `ttl_seconds`, and `widened`: the flags that widened the defaults, echoed back |
 | `snapshot` | `name`, `size` |
-| `restored` | `name`, `memory_restored`, `reason` (why the memory was not restored, when it was not) and `saved` (the automatic snapshot taken first, which undoes the restore) |
-| `forked` | `name`, `from` (the snapshot, or the VM whose state was forked) and `reason` (why the fork booted from its disk rather than the snapshot's memory, when it did) |
+| `restored` | `name`, `memory_restored`, `reason` (why the memory was not restored, when it was not), `saved` (the automatic snapshot taken first, which undoes the restore) and `credentials` (the names the snapshot recorded, left out when none) |
+| `forked` | `name`, `from` (the snapshot, or the VM whose state was forked), `reason` (why the fork booted from its disk rather than the snapshot's memory, when it did) and `credentials` (the names the snapshot recorded, left out when none) |
 | `list` | `entries`, each with `project`, `name`, `kind` (`vm`, `fork`, `snapshot`), `state` for VMs and forks (`running`, `suspended`, `stopped`), `auto` for automatic snapshots, `size` and `created_unix` |
 | `inspect` | `policy`, `resources` (`cpus`, `memory_bytes`, `disk_used`, `disk_size`), `audit` (the latest entries), `audit_total`, `state` (`running`, `suspended` or `stopped`) and, while it runs, `started_unix`. For a VM that is not running, `policy` is what `start` with no flags would give, read from `cave.toml` without fetching anything. An audit entry has `time_unix_ms` and an `event`: `exec` with `argv`, credential names and `exit_code`; `write` with `path` and `size`; or `connect` with `host`, `port`, `allowed` and an optional `reason` such as `LAN` |
 | `usage` | `images` (`name`, `digest`, `size`, `in_use`), `projects` (`project`, `disk`, `snapshots`, `forks`), `reclaimable` (`what`, `size`), and `reclaimed` when `apply` was set |
@@ -231,7 +231,7 @@ The reply objects mirror the `--json` output of the matching CLI command. Sizes 
 {"type": "exec", "vm": {"project": "/Users/ivan/p"}, "argv": ["./deploy.sh"], "credentials": ["API_KEY"]}
 ```
 
-The daemon resolves each name from the project's `.env` or a similar source, adds the values to `env` on the agent link only, and records the names, not the values, in the audit log and in the metadata of later snapshots (design). While streaming `output` back, it replaces the exact value of each injected credential with the credential's name in brackets, so `API_KEY_1: snednao_#m34nr` is streamed as `API_KEY_1: [API_KEY_1]`, including values split across two chunks [D9]. Redaction is best effort, and a command can still leak a value through files or the network; the docs say so.
+The daemon resolves each name from the project's `.env` (see [the CLI reference](cli.md#credentials)), adds the values to `env` on the agent link only, and records the names, not the values, in the audit log and in the metadata of later snapshots (design). While streaming `output` back, it replaces the exact value of each injected credential with the credential's name in brackets, so `API_KEY_1: snednao_#m34nr` is streamed as `API_KEY_1: [API_KEY_1]`, including values split across two chunks [D9]. Redaction is best effort, and a command can still leak a value through files or the network; the docs say so. A name missing from `.env` is a `not_found` error that names the file, and the command does not run. A snapshot records the names injected since the VM's memory began: since it booted, or those recorded in the snapshot it was restored, resumed or forked from. A snapshot without memory records none.
 
 ## VMM control
 

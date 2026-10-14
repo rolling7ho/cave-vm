@@ -13,11 +13,12 @@ use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::Duration;
 
-use cave_vm_proto::agent::Message;
+use cave_vm_proto::agent::{Message, Stream};
 use cave_vm_proto::daemon::{Reply, Request};
 use cave_vm_proto::handshake::Hello;
-use cave_vm_proto::{ErrorCode, ErrorMessage, VERSIONS, read_frame, write_frame};
+use cave_vm_proto::{Data, ErrorCode, ErrorMessage, VERSIONS, read_frame, write_frame};
 
+use crate::credentials::Redactor;
 use crate::link::daemon_software;
 
 /// How long the agent has to answer `hello` on a new connection.
@@ -111,7 +112,18 @@ pub struct Ended {
 /// `file_write`) on `agent` and relays it
 /// to and from `client` until it ends. Errors before the program starts go
 /// to the client as an `error` reply.
-pub fn run(client: &mut UnixStream, mut agent: UnixStream, request: &Message) -> Ended {
+pub fn run(client: &mut UnixStream, agent: UnixStream, request: &Message) -> Ended {
+    run_redacted(client, agent, request, &Redactor::default())
+}
+
+/// [`run`], with `output` passed through a copy of `redactor` for each
+/// stream, so injected credentials do not reach the client.
+pub fn run_redacted(
+    client: &mut UnixStream,
+    mut agent: UnixStream,
+    request: &Message,
+    redactor: &Redactor,
+) -> Ended {
     if let Err(e) = open(&mut agent, request) {
         let reply = Reply::Error(e);
         let result = write_frame(client, &reply).map_err(io::Error::other);
@@ -152,12 +164,48 @@ pub fn run(client: &mut UnixStream, mut agent: UnixStream, request: &Message) ->
         }
     });
 
+    let mut stdout = redactor.clone();
+    let mut stderr = redactor.clone();
     let ended = loop {
         let message = read_agent(&mut agent);
         let (reply, last) = match message {
+            Ok(Message::Output { stream, data }) => {
+                let redactor = match stream {
+                    Stream::Stdout => &mut stdout,
+                    Stream::Stderr => &mut stderr,
+                };
+                let data = redactor.push(&data.0);
+                if data.is_empty() {
+                    continue;
+                }
+                (
+                    Reply::Output {
+                        stream,
+                        data: Data(data),
+                    },
+                    false,
+                )
+            }
             Ok(message) => to_client(message),
             Err(e) => (Reply::Error(e), true),
         };
+        // Output held back in case it was the start of a value goes out
+        // before the operation ends.
+        if last {
+            for (stream, redactor) in [(Stream::Stdout, &mut stdout), (Stream::Stderr, &mut stderr)]
+            {
+                let data = redactor.finish();
+                if !data.is_empty() {
+                    let _ = write_frame(
+                        client,
+                        &Reply::Output {
+                            stream,
+                            data: Data(data),
+                        },
+                    );
+                }
+            }
+        }
         let result = write_frame(client, &reply).map_err(io::Error::other);
         if last {
             break Ended {

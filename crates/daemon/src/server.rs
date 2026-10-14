@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 
@@ -12,6 +13,7 @@ use cave_vm_proto::daemon::{AuditEvent, Reply, Request, VmId};
 use cave_vm_proto::{ErrorCode, ErrorMessage, VERSIONS, read_frame, write_frame};
 
 use crate::audit;
+use crate::credentials::{self, Redactor};
 use crate::home::Home;
 use crate::link::daemon_software;
 use crate::relay;
@@ -81,36 +83,38 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
     let reply = match request {
         Request::Exec {
             vm,
-            exec,
+            mut exec,
             credentials,
         } => {
-            // Until P5.3 resolves them, refuse rather than run without them.
-            if !credentials.is_empty() {
-                return send_error(
-                    &mut stream,
-                    ErrorMessage::new(
-                        ErrorCode::BadRequest,
-                        "this daemon cannot inject credentials yet",
-                    )
-                    .with_fix("Run the command without credentials"),
-                );
-            }
+            // Values go into the command's environment on the agent link
+            // only, and are redacted from what comes back.
+            let values = match credentials::resolve(Path::new(&vm.project), &credentials) {
+                Ok(values) => values,
+                Err(e) => return send_error(&mut stream, e),
+            };
+            let redactor = Redactor::new(&values);
+            exec.env.extend(values);
             let started = audit::now_ms();
             let argv = exec.argv.clone();
+            let connection = vms.agent_connection_with(&vm, &credentials);
             // Recorded once it reached the VM, even if the client went away
             // before it ended.
-            if let Some(last) = relay(stream, vms, &vm, &Message::Exec(exec))? {
-                let exit_code = match last {
-                    Some(Reply::Exit { code, .. }) => code,
-                    _ => None,
-                };
-                let event = AuditEvent::Exec {
-                    argv,
-                    credentials,
-                    exit_code,
-                };
-                audit::record(&vm, started, event);
-            }
+            let last = match connection {
+                Ok((agent, _in_use)) => {
+                    relay::run_redacted(&mut stream, agent, &Message::Exec(exec), &redactor).last
+                }
+                Err(e) => return send_error(&mut stream, e),
+            };
+            let exit_code = match last {
+                Some(Reply::Exit { code, .. }) => code,
+                _ => None,
+            };
+            let event = AuditEvent::Exec {
+                argv,
+                credentials,
+                exit_code,
+            };
+            audit::record(&vm, started, event);
             return Ok(());
         }
         Request::FileRead { vm, path } => {
@@ -153,6 +157,7 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                     name: forked.name,
                     from: forked.from,
                     reason: forked.fallback,
+                    credentials: forked.credentials,
                 })
         }
         Request::Gc { apply } => vms.gc(apply).map(Reply::Usage),
@@ -165,6 +170,7 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                     memory_restored: restored.fallback.is_none(),
                     reason: restored.fallback,
                     saved: restored.saved,
+                    credentials: restored.credentials,
                 })
         }
         Request::Snapshot { vm, name } => vms

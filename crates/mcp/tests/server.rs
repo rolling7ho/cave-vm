@@ -259,6 +259,50 @@ fn exec_runs_the_command_with_bash_and_reports_how_it_ended() {
 }
 
 #[test]
+fn exec_names_credentials_and_never_handles_their_values() {
+    let fake = Fake::new(|request, _| match request {
+        Request::Start { .. } => vec![Reply::Policy(policy())],
+        // The daemon has already redacted the value.
+        Request::Exec { .. } => vec![
+            Reply::Output {
+                stream: Stream::Stdout,
+                data: b"API_KEY: [API_KEY]\n".to_vec().into(),
+            },
+            Reply::Exit {
+                code: Some(0),
+                signal: None,
+            },
+        ],
+        _ => Vec::new(),
+    });
+    let result = fake.call(
+        "exec",
+        json!({"command": "./deploy.sh", "credentials": ["API_KEY", "DB"]}),
+    );
+    assert_eq!(
+        text(&result),
+        (
+            "exit code 0\n--- stdout ---\nAPI_KEY: [API_KEY]\n".into(),
+            false
+        )
+    );
+    let requests = fake.requests();
+    let Request::Exec {
+        exec, credentials, ..
+    } = &requests[1]
+    else {
+        panic!("{requests:?}");
+    };
+    assert_eq!(credentials, &["API_KEY", "DB"]);
+    assert!(exec.env.is_empty(), "values are the daemon's to add");
+
+    assert_eq!(
+        text(&fake.call("exec", json!({"command": "true", "credentials": "API_KEY"}))),
+        ("\"credentials\" must be a list of strings".into(), true)
+    );
+}
+
+#[test]
 fn missing_or_wrong_arguments_are_tool_errors() {
     let fake = Fake::new(|_, _| Vec::new());
     assert_eq!(
@@ -345,11 +389,13 @@ fn snapshot_restore_fork_and_destroy() {
             memory_restored: false,
             reason: Some("format 1 is not supported".into()),
             saved: Some("app-2026-10-14-debian".into()),
+            credentials: Vec::new(),
         }],
         Request::Fork { from, .. } => vec![Reply::Forked {
             name: "fork-1".into(),
             from: from.clone().unwrap_or_else(|| "app".into()),
             reason: None,
+            credentials: vec!["API_KEY".into()],
         }],
         Request::Remove { .. } => vec![Reply::Ok],
         _ => Vec::new(),
@@ -368,6 +414,11 @@ fn snapshot_restore_fork_and_destroy() {
     let (forked, _) = text(&fake.call("fork", json!({"from": "before"})));
     assert!(forked.starts_with("Forked fork-1 from before."), "{forked}");
     assert!(forked.contains("fork: \"fork-1\""));
+    assert!(
+        forked.contains("taken after API_KEY had been injected"),
+        "{forked}"
+    );
+    assert!(!restored.contains("injected"), "{restored}");
     assert_eq!(
         text(&fake.call("destroy", json!({"fork": "fork-1"}))),
         ("Removed fork fork-1.".into(), false)

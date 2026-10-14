@@ -248,3 +248,52 @@ fn file_reads_and_writes_end_with_their_last_message() {
     ended.result.unwrap();
     assert_eq!(ended.last, Some(Reply::FileWritten { size: 3 }));
 }
+
+#[test]
+fn injected_values_are_redacted_even_across_chunks() {
+    let (mut client, mut daemon_side) = UnixStream::pair().unwrap();
+    let (daemon_agent, agent) = UnixStream::pair().unwrap();
+    let agent = fake_agent(agent, |agent| {
+        read_msg(agent).unwrap();
+        for (stream, text) in [
+            (Stream::Stdout, "API_KEY_1: sned"),
+            (Stream::Stderr, "err sne"),
+            (Stream::Stdout, "nao_#m34nr\nbye "),
+            (Stream::Stderr, "d"),
+            (Stream::Stdout, "snednao"),
+        ] {
+            let data = text.as_bytes().to_vec().into();
+            write_frame(agent, &Message::Output { stream, data }).unwrap();
+        }
+        let exit = Message::Exit {
+            code: Some(0),
+            signal: None,
+        };
+        write_frame(agent, &exit).unwrap();
+    });
+    let redactor = Redactor::new(&[("API_KEY_1".into(), "snednao_#m34nr".into())]);
+    let daemon = thread::spawn(move || {
+        run_redacted(&mut daemon_side, daemon_agent, &exec(&["env"]), &redactor)
+    });
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    loop {
+        match read_reply(&mut client).unwrap() {
+            Reply::Output { stream, data } => match stream {
+                Stream::Stdout => stdout.extend(data.0),
+                Stream::Stderr => stderr.extend(data.0),
+            },
+            Reply::Exit { code, .. } => {
+                assert_eq!(code, Some(0));
+                break;
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    assert_eq!(
+        String::from_utf8(stdout).unwrap(),
+        "API_KEY_1: [API_KEY_1]\nbye snednao"
+    );
+    assert_eq!(String::from_utf8(stderr).unwrap(), "err sned");
+    agent.join().unwrap();
+    assert!(daemon.join().unwrap().result.is_ok());
+}

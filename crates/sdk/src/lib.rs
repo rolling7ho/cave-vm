@@ -57,6 +57,7 @@ pub struct Sandbox {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Command {
     argv: Vec<String>,
+    credentials: Vec<String>,
     cwd: Option<String>,
     env: BTreeMap<String, String>,
     stdin: Option<Vec<u8>>,
@@ -81,6 +82,16 @@ impl Command {
         S: Into<String>,
     {
         self.argv.extend(args.into_iter().map(Into::into));
+        self
+    }
+
+    /// Gives the command the credential `name`, such as `API_KEY`, as an
+    /// environment variable. The daemon reads its value from the project's
+    /// `.env`; the value is never returned, and output that prints it
+    /// shows `[API_KEY]` instead, best effort. The command can still leak
+    /// it through files or the network.
+    pub fn credential(mut self, name: impl Into<String>) -> Command {
+        self.credentials.push(name.into());
         self
     }
 
@@ -141,6 +152,9 @@ pub struct Restored {
     /// The automatic snapshot of the state before the restore, which
     /// undoes it.
     pub saved: Option<String>,
+    /// Credentials injected before the snapshot was taken, by name. The
+    /// VM's memory may still hold them.
+    pub credentials: Vec<String>,
 }
 
 /// The result of a fork.
@@ -154,6 +168,9 @@ pub struct Forked {
     /// Why the fork's memory was not restored, so it booted from the disk
     /// and its processes were not kept, if it was not.
     pub reason: Option<String>,
+    /// Credentials injected before the snapshot it was made from was
+    /// taken, by name. The fork's memory may hold them.
+    pub credentials: Vec<String>,
 }
 
 /// `path` in the VM: as given when absolute, otherwise under
@@ -282,7 +299,7 @@ impl Sandbox {
                 env: command.env.clone(),
                 stdin: command.stdin.is_some(),
             },
-            credentials: Vec::new(),
+            credentials: command.credentials.clone(),
         })?;
         if let Some(stdin) = command.stdin.clone() {
             // Stdin goes up on its own thread, so output the command prints
@@ -395,11 +412,13 @@ impl Sandbox {
                 memory_restored,
                 reason,
                 saved,
+                credentials,
             } => Ok(Restored {
                 name,
                 memory_restored,
                 reason,
                 saved,
+                credentials,
             }),
             other => Err(Error::unexpected("restore", other)),
         }
@@ -421,7 +440,12 @@ impl Sandbox {
             name: None,
             from,
         })? {
-            Reply::Forked { name, from, reason } => Ok(Forked {
+            Reply::Forked {
+                name,
+                from,
+                reason,
+                credentials,
+            } => Ok(Forked {
                 sandbox: Sandbox {
                     daemon: self.daemon.clone(),
                     project: self.project.clone(),
@@ -429,6 +453,7 @@ impl Sandbox {
                 },
                 from,
                 reason,
+                credentials,
             }),
             other => Err(Error::unexpected("fork", other)),
         }
