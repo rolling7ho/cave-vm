@@ -15,6 +15,7 @@ mod policy;
 mod project;
 mod remove;
 mod shell;
+mod skill;
 mod snapshot;
 
 use std::process::ExitCode;

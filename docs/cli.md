@@ -133,7 +133,7 @@ Sets up the current directory as a project. It writes:
 
 - `cave.toml` with the design's minimal keys (see [config.md](config.md)).
 - `.cave/`, and adds `.cave/` to `.gitignore`, creating the file if needed.
-- The agent skill files: a cave section in `AGENTS.md` (existing content is kept; the section sits between marker comments so it can be updated), a `.claude/skills/` entry, and, for agents that support it, a permissions config that denies host Bash.
+- The agent skill files: a cave section in `AGENTS.md` (existing content is kept; the section sits between marker comments so it can be updated), a `.claude/skills/` entry, and, for agents that support it, a permissions config that denies host Bash. The skill's text is [`skill/cave/SKILL.md`](../skill/cave/SKILL.md) in this repository, the same text as the bootstrap skill on the website (design, "Bootstrap skill").
 
 It does not boot the VM. The files already in the folder, everything except `.cave/`, are copied into the VM once when it first boots. In sealed mode the Mac files are left untouched but are no longer updated, and cave says so ([D13](../ROADMAP.md#decisions)).
 
