@@ -181,6 +181,9 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                     credentials: forked.credentials,
                 })
         }
+        Request::Doctor => Ok(Reply::Checks {
+            checks: vms.doctor(),
+        }),
         Request::Gc { apply } => vms.gc(apply).map(Reply::Usage),
         Request::Images => vms.images().map(|images| Reply::Images { images }),
         Request::Inspect { vm, log_limit } => vms.inspect(&vm, log_limit),

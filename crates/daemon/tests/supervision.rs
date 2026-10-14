@@ -491,10 +491,15 @@ fn startup_cleanup_kills_a_vmm_left_by_an_earlier_daemon() {
 #[test]
 fn unsupported_and_malformed_requests_are_errors() {
     let r = rig("unsup", NORMAL);
-    match r.request(Request::Doctor) {
+    // `cave init` writes its files itself, so the daemon has no init.
+    match r.request(Request::Init {
+        project: vm().project,
+        storage: Storage::Sealed,
+        image: "base".into(),
+    }) {
         Reply::Error(e) => {
             assert_eq!(e.code, ErrorCode::BadRequest);
-            assert!(e.message.contains("doctor"), "{}", e.message);
+            assert!(e.message.contains("init"), "{}", e.message);
         }
         other => panic!("{other:?}"),
     }
@@ -1476,6 +1481,19 @@ fn snapshots_record_the_credentials_injected_since_the_memory_began() {
         manifest(&project, "rebooted")["credentials"],
         serde_json::json!([])
     );
+}
+
+#[test]
+fn doctor_reports_the_image_cache() {
+    let r = rig("doctor", NORMAL);
+    match r.request(Request::Doctor) {
+        Reply::Checks { checks } => {
+            assert_eq!(checks.len(), 1);
+            assert!(checks[0].ok, "{checks:?}");
+            assert!(checks[0].name.starts_with("no images downloaded yet"));
+        }
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

@@ -6,6 +6,7 @@
 pub mod audit;
 pub mod config;
 pub mod credentials;
+pub mod doctor;
 pub mod forward;
 pub mod gc;
 pub mod home;
