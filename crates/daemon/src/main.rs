@@ -13,6 +13,7 @@ use cave_vm_daemon::image::manifest::Origin;
 use cave_vm_daemon::launch::ProcessLauncher;
 use cave_vm_daemon::project::ProjectSource;
 use cave_vm_daemon::server;
+use cave_vm_daemon::updates::{self, Detector};
 use cave_vm_daemon::vms::Vms;
 
 /// How often the daemon looks for VMs to suspend for being unused.
@@ -40,9 +41,15 @@ fn run() -> std::io::Result<()> {
     std::fs::create_dir_all(&images)?;
     let cache = Cache::new(&images);
     cache.remove_partials()?;
+    let origin = Origin::from_env();
+    let lookup = origin.clone();
     let source = ProjectSource {
         cache,
-        origin: Origin::from_env(),
+        origin,
+        updates: Some(Detector::new(
+            home.root().join(updates::FILE),
+            Box::new(move || lookup.manifest()),
+        )),
     };
     let mut launcher = ProcessLauncher::new(vmm);
     launcher.sandbox = Some(images);

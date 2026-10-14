@@ -82,6 +82,43 @@ pub fn image_checks(cache: &Path) -> Vec<Check> {
         .collect()
 }
 
+/// One line for each cached image the update detector has seen a newer
+/// version of, from its record in `updates`. Nothing is looked up here.
+pub fn update_checks(cache: &Path, updates: &Path) -> Vec<Check> {
+    let newest = crate::updates::newest(updates);
+    let Ok(files) = cached(cache) else {
+        return Vec::new();
+    };
+    let mut seen = BTreeMap::new();
+    for hex in files.keys() {
+        let record = cache.join(format!("sha256-{hex}.{NAME_RECORD}"));
+        let Ok(name) = fs::read_to_string(record) else {
+            continue;
+        };
+        let name = name.trim().to_string();
+        // Nothing to say once the newest version is cached too.
+        if let Some(latest) = newest.get(&name)
+            && !latest
+                .strip_prefix("sha256:")
+                .is_some_and(|h| files.contains_key(h))
+        {
+            seen.entry(name).or_insert_with(|| latest.clone());
+        }
+    }
+    seen.into_iter()
+        .map(|(name, latest)| {
+            let short = latest.get(..15).unwrap_or(&latest);
+            Check {
+                name: format!(
+                    "a newer {name} image exists, {short}; cave never updates by itself, see docs/config.md, [updates]"
+                ),
+                ok: true,
+                fix: None,
+            }
+        })
+        .collect()
+}
+
 /// The cached files, `sha256-<hex>.img`, by digest.
 fn cached(cache: &Path) -> io::Result<BTreeMap<String, std::path::PathBuf>> {
     let mut files = BTreeMap::new();
@@ -166,6 +203,39 @@ mod tests {
         assert!(broken.fix.unwrap().contains(&damaged.display().to_string()));
         // Report only.
         assert!(damaged.is_file());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_newer_image_the_detector_saw_is_reported_until_it_is_cached() {
+        let dir = std::env::temp_dir().join(format!("cave-doctor-updates-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let record = dir.join("updates.json");
+        let (old, new) = (hex(b"old"), hex(b"new"));
+        fs::write(dir.join(format!("sha256-{old}.img")), b"old").unwrap();
+        fs::write(dir.join(format!("sha256-{old}.name")), "debian\n").unwrap();
+        // No record yet: nothing to say.
+        assert!(update_checks(&dir, &record).is_empty());
+
+        let doc =
+            serde_json::json!({ "checked": 1, "newest": { "debian": format!("sha256:{new}") } });
+        fs::write(&record, doc.to_string()).unwrap();
+        let checks = update_checks(&dir, &record);
+        assert_eq!(checks.len(), 1, "{checks:?}");
+        assert!(checks[0].ok);
+        assert!(
+            checks[0].name.starts_with(&format!(
+                "a newer debian image exists, sha256:{}",
+                &new[..8]
+            )),
+            "{}",
+            checks[0].name
+        );
+
+        fs::write(dir.join(format!("sha256-{new}.img")), b"new").unwrap();
+        fs::write(dir.join(format!("sha256-{new}.name")), "debian\n").unwrap();
+        assert!(update_checks(&dir, &record).is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 }

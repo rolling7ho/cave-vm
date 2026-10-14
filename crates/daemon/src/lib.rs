@@ -18,4 +18,5 @@ pub mod relay;
 pub mod server;
 pub mod snapshot;
 pub mod sync;
+pub mod updates;
 pub mod vms;

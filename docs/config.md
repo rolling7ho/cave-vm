@@ -88,6 +88,10 @@ Changing `mode` from sealed to synced creates the mirror on the next `cave sync`
 | --- | --- | --- | --- |
 | `check` | boolean | `true` | Let the update detector look up whether a newer base image exists. The lookup carries no identifying data and never updates anything (design). `false` means cave makes no network request of its own for this project |
 
+When a VM starts in a project with `check = true`, the daemon reads the image manifest (the same `images.json` the first run reads) in the background, at most once a day, and records the newest version of each image in `updates.json` in its data folder. A failed lookup is tried again a day later. `cave doctor` then says when a downloaded image has a newer version, and `cave images` marks it.
+
+cave never moves a project to a newer image by itself. To move one, remove the `@sha256:...` part of `image` in its `cave.toml` and run `cave rm`, which deletes the VM and its disk; the next `cave run` builds a new VM from the newest image and pins it.
+
 ## Value formats
 
 
