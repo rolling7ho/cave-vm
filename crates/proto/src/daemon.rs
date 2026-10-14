@@ -254,6 +254,10 @@ pub enum Reply {
         audit: Vec<AuditEntry>,
         /// Entries in the whole log, of which `audit` holds the latest.
         audit_total: u64,
+        state: VmState,
+        /// When the VM was started, while it runs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        started_unix: Option<u64>,
     },
     Usage(Usage),
     Images {

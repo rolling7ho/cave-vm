@@ -24,7 +24,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cave_vm_proto::daemon::{
-    EntryKind, ImageInfo, ListEntry, NetMode, Policy, PortMap, VmId, VmState,
+    EntryKind, ImageInfo, ListEntry, NetMode, Policy, PortMap, Reply, Resources, VmId, VmState,
 };
 use cave_vm_proto::vmm::{FromVmm, ToVmm, VmmConfig};
 use cave_vm_proto::{ErrorCode, ErrorMessage};
@@ -175,6 +175,16 @@ pub trait VmSource: Send + Sync {
         ports: &[PortMap],
     ) -> Result<Prepared, ErrorMessage>;
 
+    /// What `vm` would get if it were started now with no flags, for
+    /// `inspect` of a VM that is not running. Fetches nothing.
+    fn policy(&self, vm: &VmId) -> Result<Policy, ErrorMessage> {
+        let _ = vm;
+        Err(error(
+            ErrorCode::Internal,
+            "this daemon cannot read a project's policy",
+        ))
+    }
+
     /// The `[snapshots]` settings of `vm`'s project.
     fn auto_snapshots(&self, vm: &VmId) -> Result<AutoSnapshots, ErrorMessage> {
         let _ = vm;
@@ -189,6 +199,8 @@ pub trait VmSource: Send + Sync {
     }
 }
 
+// One per VM, so the size of the running variant does not matter.
+#[allow(clippy::large_enum_variant)]
 enum Slot {
     Stopped,
     /// Another request is starting or stopping it; wait for the change.
@@ -205,6 +217,7 @@ struct Running {
     forwards: Vec<Forward>,
     idle_suspend: Option<Duration>,
     activity: Arc<Activity>,
+    started_unix: u64,
 }
 
 struct Vm {
@@ -415,6 +428,7 @@ impl Vms {
             forwards: Vec::new(),
             idle_suspend: prepared.idle_suspend,
             activity: Arc::new(Activity::new(Arc::clone(&self.clock))),
+            started_unix: now_unix(),
         })
     }
 
@@ -637,6 +651,50 @@ impl Vms {
         result
     }
 
+    /// The policy, resources, state and latest `log_limit` audit entries
+    /// of a VM (all of them when `log_limit` is `None`), for `inspect`.
+    pub fn inspect(&self, id: &VmId, log_limit: Option<u32>) -> Result<Reply, ErrorMessage> {
+        let vm = self.vm(id)?;
+        let running = match &*vm.slot.lock().expect("vm lock") {
+            Slot::Running(running) => Some((running.policy.clone(), running.started_unix)),
+            Slot::Stopped | Slot::Busy => None,
+        };
+        let (policy, state, started_unix) = match running {
+            Some((policy, started)) => (policy, VmState::Running, Some(started)),
+            None => {
+                let state = if snapshots::is_suspended(id) {
+                    VmState::Suspended
+                } else {
+                    VmState::Stopped
+                };
+                (self.source.policy(id)?, state, None)
+            }
+        };
+        let (disk_used, disk_size) = disk_usage(&vm_state_dir(id));
+        let (audit, audit_total) = match audit::path(id) {
+            Some(path) => audit::read(&path, log_limit).map_err(|e| {
+                error(
+                    ErrorCode::Io,
+                    format!("cannot read the audit log {}: {e}", path.display()),
+                )
+            })?,
+            None => (Vec::new(), 0),
+        };
+        Ok(Reply::Inspect {
+            resources: Resources {
+                cpus: policy.cpus,
+                memory_bytes: policy.memory_bytes,
+                disk_used,
+                disk_size,
+            },
+            policy,
+            audit,
+            audit_total,
+            state,
+            started_unix,
+        })
+    }
+
     /// The VMs of one project, or of every project the daemon has seen.
     pub fn list(&self, project: Option<&str>) -> Vec<ListEntry> {
         let vms: Vec<Arc<Vm>> = self
@@ -838,6 +896,22 @@ fn remove_state(state: &Path) -> Result<(), ErrorMessage> {
         Ok(meta) if meta.is_dir() => fs::remove_dir_all(state).map_err(failed),
         Ok(_) => fs::remove_file(state).map_err(failed),
     }
+}
+
+/// The folder holding a VM's disk: `.cave/`, or the fork's folder.
+fn vm_state_dir(id: &VmId) -> PathBuf {
+    let state = Path::new(&id.project).join(STATE_DIR);
+    match &id.fork {
+        Some(name) => crate::snapshot::fork_dir(&state, name),
+        None => state,
+    }
+}
+
+/// Bytes the VM's disk takes, and its size, in `dir`; zero for both
+/// before its first boot.
+fn disk_usage(dir: &Path) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(cave_vm_vmm::disk::path(dir)).map_or((0, 0), |m| (m.blocks() * 512, m.len()))
 }
 
 /// Takes the connection attempts `link`'s VMM kept and appends them to the

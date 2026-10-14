@@ -408,7 +408,16 @@ fn snapshot_and_restore() {
     );
     assert!(stderr.contains("booted normally"), "{stderr}");
     assert_eq!(rig.exec(&["cat", "marker"], 0), "before\n");
-    rig.exec(&["sh", "-c", &format!("! kill -0 {pid} 2>/dev/null")], 0);
+    // A fresh boot can give another process the same PID, so check that
+    // it is not the sleep.
+    rig.exec(
+        &[
+            "sh",
+            "-c",
+            &format!("! grep -qs 100000 /proc/{pid}/cmdline"),
+        ],
+        0,
+    );
 
     // cave rm removes one snapshot.
     assert!(rig.cave(&["rm", "--yes", "before"]).status.success());
@@ -547,7 +556,16 @@ fn stop_suspends_and_the_next_command_resumes() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    rig.exec(&["sh", "-c", &format!("! kill -0 {pid} 2>/dev/null")], 0);
+    // A fresh boot can give another process the same PID, so check that
+    // it is not the sleep.
+    rig.exec(
+        &[
+            "sh",
+            "-c",
+            &format!("! grep -qs 100000 /proc/{pid}/cmdline"),
+        ],
+        0,
+    );
 
     // An unused VM suspends itself after `idle_suspend`.
     let toml = rig.project().join("cave.toml");

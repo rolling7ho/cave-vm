@@ -10,6 +10,7 @@ mod exec;
 mod export;
 mod gc;
 mod init;
+mod inspect;
 mod policy;
 mod project;
 mod remove;
@@ -125,6 +126,17 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Show the policy, resources and audit log.
+    Inspect {
+        #[arg(long)]
+        fork: Option<String>,
+        /// The whole audit log, not only the last 20 entries.
+        #[arg(long)]
+        log: bool,
+        /// One JSON document, for scripts.
+        #[arg(long)]
+        json: bool,
+    },
     /// List the base images.
     Images {
         /// One JSON document, for scripts.
@@ -176,6 +188,7 @@ fn main() -> ExitCode {
         Cmd::Fork { name, from } => snapshot::fork(name, from),
         Cmd::Gc { yes, json } => gc::run(yes, json),
         Cmd::Images { json } => commands::images(json),
+        Cmd::Inspect { fork, log, json } => inspect::run(fork, log, json),
         Cmd::Restore { name, fork } => snapshot::restore(name, fork),
         Cmd::Rm { name, yes } => remove::run(name, yes),
         Cmd::Shell { fork } => match shell::run(fork) {

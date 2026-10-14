@@ -207,6 +207,40 @@ fn image_rows(
         .collect()
 }
 
+/// The startup policy of `vm` with `settings`, its image as `image`, and
+/// the flags `net` and `ports`.
+fn policy(
+    vm: &VmId,
+    settings: &config::Config,
+    image: String,
+    net: Option<NetMode>,
+    ports: &[PortMap],
+) -> Policy {
+    let net = net.unwrap_or(settings.net);
+    let mut widened = Vec::new();
+    if net == NetMode::Lan {
+        widened.push("--net lan".to_string());
+    }
+    widened.extend(ports.iter().map(|&p| crate::forward::flag(p)));
+    let project = Path::new(&vm.project);
+    let name = vm.fork.clone().unwrap_or_else(|| {
+        project
+            .file_name()
+            .map_or_else(|| vm.project.clone(), |n| n.to_string_lossy().into_owned())
+    });
+    Policy {
+        name,
+        image,
+        storage: settings.storage,
+        net,
+        ports: ports.to_vec(),
+        cpus: settings.cpus,
+        memory_bytes: settings.memory_bytes,
+        ttl_seconds: settings.ttl.map(|t| t.as_secs()),
+        widened,
+    }
+}
+
 impl VmSource for ProjectSource {
     fn prepare(
         &self,
@@ -247,39 +281,25 @@ impl VmSource for ProjectSource {
         };
         let disk = project_disk(&base, &disk_dir, settings.disk_bytes)?;
 
-        let net_mode = net.unwrap_or(settings.net);
-        let mut widened = Vec::new();
-        if net_mode == NetMode::Lan {
-            widened.push("--net lan".to_string());
-        }
-        widened.extend(ports.iter().map(|&p| crate::forward::flag(p)));
-        let name = vm.fork.clone().unwrap_or_else(|| {
-            project
-                .file_name()
-                .map_or_else(|| vm.project.clone(), |n| n.to_string_lossy().into_owned())
-        });
+        let policy = policy(vm, &settings, pinned.to_string(), net, ports);
         Ok(Prepared {
             config: VmmConfig {
                 kernel: absolute(&kernel),
                 disk: absolute(&disk),
                 memory_bytes: settings.memory_bytes,
                 cpus: settings.cpus,
-                net: net_mode,
+                net: policy.net,
                 restore: None,
             },
-            policy: Policy {
-                name,
-                image: pinned.to_string(),
-                storage: settings.storage,
-                net: net_mode,
-                ports: ports.to_vec(),
-                cpus: settings.cpus,
-                memory_bytes: settings.memory_bytes,
-                ttl_seconds: settings.ttl.map(|t| t.as_secs()),
-                widened,
-            },
+            policy,
             idle_suspend: settings.idle_suspend,
         })
+    }
+
+    fn policy(&self, vm: &VmId) -> Result<Policy, ErrorMessage> {
+        let settings = config::load(Path::new(&vm.project)).map_err(config_error)?;
+        let image = settings.image.clone();
+        Ok(policy(vm, &settings, image, None, &[]))
     }
 
     fn auto_snapshots(&self, vm: &VmId) -> Result<AutoSnapshots, ErrorMessage> {
