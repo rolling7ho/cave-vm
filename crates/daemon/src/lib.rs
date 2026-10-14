@@ -3,6 +3,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod audit;
 pub mod config;
 pub mod forward;
 pub mod gc;

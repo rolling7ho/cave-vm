@@ -68,8 +68,7 @@ fn input_goes_up_and_output_and_exit_come_back() {
         )
         .unwrap();
     });
-    let daemon =
-        thread::spawn(move || run(&mut daemon_side, daemon_agent, &exec(&["cat"])).unwrap());
+    let daemon = thread::spawn(move || run(&mut daemon_side, daemon_agent, &exec(&["cat"])));
 
     write_frame(
         &mut client,
@@ -103,7 +102,15 @@ fn input_goes_up_and_output_and_exit_come_back() {
         })
     );
     agent.join().unwrap();
-    daemon.join().unwrap();
+    let ended = daemon.join().unwrap();
+    ended.result.unwrap();
+    assert_eq!(
+        ended.last,
+        Some(Reply::Exit {
+            code: Some(3),
+            signal: None
+        })
+    );
 }
 
 #[test]
@@ -118,8 +125,11 @@ fn a_client_that_goes_away_closes_the_agent_connection() {
     let daemon = thread::spawn(move || run(&mut daemon_side, daemon_agent, &exec(&["sleep"])));
     drop(client);
     agent.join().unwrap();
-    // Writing the reply to the gone client fails; the relay still ends.
-    let _ = daemon.join().unwrap();
+    // Writing the reply to the gone client fails; the relay still ends,
+    // with the agent's hang-up as its last reply.
+    let ended = daemon.join().unwrap();
+    assert!(ended.result.is_err());
+    assert!(matches!(ended.last, Some(Reply::Error(_))), "{ended:?}");
 }
 
 #[test]
@@ -137,7 +147,7 @@ fn an_agent_that_closes_mid_command_is_an_error_with_a_fix() {
     assert!(e.message.contains("guest agent"), "{e:?}");
     assert!(e.fix.is_some());
     drop(client);
-    daemon.join().unwrap().unwrap();
+    daemon.join().unwrap().result.unwrap();
 }
 
 #[test]
@@ -193,7 +203,7 @@ fn file_reads_and_writes_end_with_their_last_message() {
         })
     );
     agent.join().unwrap();
-    daemon.join().unwrap().unwrap();
+    daemon.join().unwrap().result.unwrap();
 
     // A write relays the data up and ends at `file_written`.
     let (mut client, mut daemon_side) = UnixStream::pair().unwrap();
@@ -234,5 +244,7 @@ fn file_reads_and_writes_end_with_their_last_message() {
         Some(Reply::FileWritten { size: 3 })
     );
     agent.join().unwrap();
-    daemon.join().unwrap().unwrap();
+    let ended = daemon.join().unwrap();
+    ended.result.unwrap();
+    assert_eq!(ended.last, Some(Reply::FileWritten { size: 3 }));
 }
