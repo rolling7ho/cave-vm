@@ -228,6 +228,31 @@ fn replies_round_trip() {
         },
     );
     check(
+        json!({"type": "synced", "written": ["src/app.ts"], "pending": ["README.md"]}),
+        Reply::Synced {
+            written: vec!["src/app.ts".into()],
+            deleted: Vec::new(),
+            conflicts: Vec::new(),
+            pending: vec!["README.md".into()],
+        },
+    );
+    check(
+        json!({"type": "pulled", "snapshot": "app-2026-10-14-debian", "applied": ["src/app.ts"], "deleted": ["old.ts"]}),
+        Reply::Pulled {
+            snapshot: Some("app-2026-10-14-debian".into()),
+            applied: vec!["src/app.ts".into()],
+            deleted: vec!["old.ts".into()],
+        },
+    );
+    check(
+        json!({"type": "pulled"}),
+        Reply::Pulled {
+            snapshot: None,
+            applied: Vec::new(),
+            deleted: Vec::new(),
+        },
+    );
+    check(
         json!({"type": "list", "entries": [
             {"project": "/p", "name": "my-project", "kind": "vm", "state": "running", "size": 3100, "created_unix": 1791800000},
             {"project": "/p", "name": "snap-2", "kind": "snapshot", "auto": true, "size": 600, "created_unix": 1791800100}

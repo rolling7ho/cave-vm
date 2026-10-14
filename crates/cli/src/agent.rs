@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use cave_vm_proto::daemon::{Reply, Request, VmId};
+use cave_vm_proto::daemon::{Reply, Request, Storage, VmId};
 use serde_json::json;
 
 use crate::client::Connection;
@@ -18,6 +18,7 @@ use crate::commands::{ensure_running, vm_id};
 use crate::error::{CliError, Result};
 use crate::exec::{self, EXIT_CAVE_FAILED_RUNNING};
 use crate::init;
+use crate::mirror;
 use crate::shell;
 
 /// The agents `cave agent` knows.
@@ -55,7 +56,7 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
     };
     let project = init::project_or_set_up().map_err(failed)?;
     let vm = vm_id(&project, fork.clone());
-    ensure_running(&vm, None, Vec::new(), true).map_err(failed)?;
+    let policy = ensure_running(&vm, None, Vec::new(), true).map_err(failed)?;
     let snapshot = snapshot_before(&vm).map_err(failed)?;
 
     let code = match on_mac {
@@ -84,9 +85,19 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
                         .fix("Check the VM's network with `cave inspect`; the installer needs it"),
                 ));
             }
-            shell::session(vm, Some(in_vm_argv(&args)))?
+            shell::session(vm.clone(), Some(in_vm_argv(&args)))?
         }
     };
+    // The design syncs the mirror after agent runs. A failed sync does
+    // not change how the run ended, so it is only reported.
+    if policy.storage == Storage::Synced && fork.is_none() {
+        match mirror::sync_vm(&vm) {
+            Ok(reply) => mirror::sync_lines(&reply)
+                .iter()
+                .for_each(|line| eprintln!("{line}")),
+            Err(e) => eprintln!("{e}"),
+        }
+    }
     if let Some(snapshot) = snapshot {
         eprintln!("{}", undo_lines(&snapshot));
     }

@@ -5,7 +5,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use cave_vm_proto::daemon::{
-    EntryKind, ImageInfo, ListEntry, NetMode, PortMap, Reply, Request, VmId, VmState,
+    EntryKind, ImageInfo, ListEntry, NetMode, Policy, PortMap, Reply, Request, VmId, VmState,
 };
 
 use crate::client::Connection;
@@ -66,12 +66,13 @@ fn is_running(vm: &VmId) -> Result<bool> {
 
 /// Starts the VM if needed. Prints the policy when it boots it, and when
 /// `always_print` is set (`cave run`) also if it was already running.
+/// Returns the policy.
 pub fn ensure_running(
     vm: &VmId,
     net: Option<NetMode>,
     ports: Vec<PortMap>,
     always_print: bool,
-) -> Result<()> {
+) -> Result<Policy> {
     let was_running = is_running(vm)?;
     let started = Instant::now();
     let Reply::Policy(policy) = Connection::call(&Request::Start {
@@ -92,13 +93,13 @@ pub fn ensure_running(
         let headline = format!("started in {}", policy::seconds(started.elapsed()));
         eprintln!("{}", policy::render(&policy, &headline));
     }
-    Ok(())
+    Ok(policy)
 }
 
 /// `cave run`.
 pub fn run(net: Option<NetMode>, ports: Vec<PortMap>, fork: Option<String>) -> Result<()> {
     let project = init::project_or_set_up()?;
-    ensure_running(&vm_id(&project, fork), net, ports, true)
+    ensure_running(&vm_id(&project, fork), net, ports, true).map(drop)
 }
 
 /// `cave stop`.

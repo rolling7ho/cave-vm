@@ -1,12 +1,13 @@
 //! The daemon API socket: one connection per operation (docs/protocol.md).
 
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use cave_vm_proto::agent::Message;
 use cave_vm_proto::daemon::{AuditEvent, Reply, Request, VmId};
@@ -22,6 +23,10 @@ use crate::vms::Vms;
 
 /// The port sshd listens on in the VM, for remote editing.
 const SSH_PORT: u16 = 22;
+
+/// How often a `sync` waiting for its VM checks that the client is still
+/// there.
+const WAIT_POLL: Duration = Duration::from_millis(500);
 
 /// Binds the daemon socket, readable and writable by this user only. A
 /// socket left by a daemon that is gone is replaced; a live one is an error.
@@ -179,6 +184,11 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
         Request::Gc { apply } => vms.gc(apply).map(Reply::Usage),
         Request::Images => vms.images().map(|images| Reply::Images { images }),
         Request::Inspect { vm, log_limit } => vms.inspect(&vm, log_limit),
+        Request::Pull { vm } => vms.pull(&vm).map(|pulled| Reply::Pulled {
+            snapshot: pulled.snapshot,
+            applied: pulled.applied,
+            deleted: pulled.deleted,
+        }),
         Request::Restore { vm, name } => {
             vms.restore(&vm, name.as_deref())
                 .map(|restored| Reply::Restored {
@@ -189,10 +199,39 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                     credentials: restored.credentials,
                 })
         }
-        Request::Snapshot { vm, name } => vms
-            .snapshot(&vm, name.as_deref())
-            .map(|(name, size)| Reply::Snapshot { name, size }),
+        Request::Snapshot { vm, name } => {
+            let reply = vms
+                .snapshot(&vm, name.as_deref())
+                .map(|(name, size)| Reply::Snapshot { name, size });
+            let taken = reply.is_ok();
+            write_frame(&mut stream, &reply.unwrap_or_else(Reply::Error))
+                .map_err(io::Error::other)?;
+            // The design syncs the mirror on snapshot, after the client
+            // has its answer.
+            if taken
+                && vms.check_mirror(&vm).is_ok()
+                && let Err(e) = vms.sync(&vm)
+            {
+                eprintln!("cave-daemon: cannot sync the Mac mirror: {}", e.message);
+            }
+            return Ok(());
+        }
         Request::Stop { vm } => vms.suspend(&vm).map(|_| Reply::Ok),
+        Request::Sync { vm } => {
+            // A sealed project would otherwise wait for nothing.
+            let ready = vms
+                .check_mirror(&vm)
+                .and_then(|()| wait_running(&mut stream, vms, &vm));
+            if let Err(e) = ready {
+                return send_error(&mut stream, e);
+            }
+            vms.sync(&vm).map(|synced| Reply::Synced {
+                written: synced.written,
+                deleted: synced.deleted,
+                conflicts: synced.conflicts,
+                pending: synced.pending,
+            })
+        }
         Request::List { project } => Ok(Reply::List {
             entries: vms.list(project.as_deref()),
         }),
@@ -223,6 +262,39 @@ fn relay(
         Ok((agent, _in_use)) => Ok(Some(relay::run(&mut stream, agent, request).last)),
         Err(e) => send_error(&mut stream, e).map(|()| None),
     }
+}
+
+/// Waits until `vm` is running, saying so to the client first if it is
+/// not (docs/cli.md, `cave sync`). Gives up if the client goes away.
+fn wait_running(stream: &mut UnixStream, vms: &Vms, vm: &VmId) -> Result<(), ErrorMessage> {
+    let mut said = false;
+    while !vms.wait_running(vm, WAIT_POLL)? {
+        if !said {
+            let progress = Reply::Progress {
+                message: "waiting for the VM".into(),
+                done: None,
+                total: None,
+            };
+            write_frame(stream, &progress)
+                .map_err(|e| ErrorMessage::new(ErrorCode::Io, e.to_string()))?;
+            said = true;
+        }
+        if client_gone(stream) {
+            return Err(ErrorMessage::new(ErrorCode::Io, "the client went away"));
+        }
+    }
+    Ok(())
+}
+
+/// Whether the client closed its side of `stream`. The client sends
+/// nothing more after its request, so any byte read is dropped.
+fn client_gone(mut stream: &UnixStream) -> bool {
+    let mut byte = [0u8];
+    if stream.set_nonblocking(true).is_err() {
+        return true;
+    }
+    let gone = matches!(stream.read(&mut byte), Ok(0));
+    stream.set_nonblocking(false).is_err() || gone
 }
 
 /// The `type` of a request, such as `exec`.

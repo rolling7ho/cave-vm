@@ -260,6 +260,35 @@ pub enum Reply {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         credentials: Vec<String>,
     },
+    /// The reply to `sync`. Paths are relative to the project.
+    Synced {
+        /// Files copied from the VM to the Mac mirror.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        written: Vec<String>,
+        /// Files deleted from the mirror because they were deleted in the
+        /// VM.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        deleted: Vec<String>,
+        /// Files changed on both sides, left alone.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        conflicts: Vec<String>,
+        /// Files changed only on the Mac, waiting for `pull`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pending: Vec<String>,
+    },
+    /// The reply to `pull`. Paths are relative to the project.
+    Pulled {
+        /// The snapshot taken before anything was applied; none when there
+        /// was nothing to apply.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<String>,
+        /// Files copied from the Mac into the VM.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        applied: Vec<String>,
+        /// Files deleted in the VM because they were deleted on the Mac.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        deleted: Vec<String>,
+    },
     List {
         entries: Vec<ListEntry>,
     },

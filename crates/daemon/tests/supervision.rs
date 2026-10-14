@@ -1477,3 +1477,21 @@ fn snapshots_record_the_credentials_injected_since_the_memory_began() {
         serde_json::json!([])
     );
 }
+
+#[test]
+fn sync_and_pull_need_a_synced_project_and_not_a_fork() {
+    let r = rig("mirror", NORMAL);
+    // Refused at once, even though the VM is not running.
+    for request in [Request::Sync { vm: vm() }, Request::Pull { vm: vm() }] {
+        let e = error_of(r.request(request));
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        assert_eq!(e.message, "this project is sealed, so it has no Mac mirror");
+        assert!(e.fix.unwrap().contains("mode = \"synced\""));
+    }
+    let fork = VmId {
+        fork: Some("f".into()),
+        ..vm()
+    };
+    let e = error_of(r.request(Request::Sync { vm: fork }));
+    assert_eq!(e.message, "forks have no Mac mirror");
+}

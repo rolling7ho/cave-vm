@@ -12,6 +12,7 @@ mod export;
 mod gc;
 mod init;
 mod inspect;
+mod mirror;
 mod policy;
 mod project;
 mod remove;
@@ -174,6 +175,10 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Bring Mac edits into the VM (synced mode).
+    Pull,
+    /// Update the Mac mirror from the VM (synced mode).
+    Sync,
     /// Interactive shell in the VM.
     Shell {
         #[arg(long)]
@@ -234,6 +239,7 @@ fn main() -> ExitCode {
             cave_vm_mcp::serve(std::io::stdin().lock(), std::io::stdout().lock(), &tools)
                 .map_err(Into::into)
         }),
+        Cmd::Pull => mirror::pull(),
         Cmd::Restore { name, fork } => snapshot::restore(name, fork),
         Cmd::Rm { name, yes } => remove::run(name, yes),
         Cmd::Shell { fork } => match shell::run(fork) {
@@ -243,6 +249,7 @@ fn main() -> ExitCode {
         Cmd::Snapshot { name, fork } => snapshot::snapshot(name, fork),
         Cmd::SshProxy { project, fork } => ssh::proxy(&project, fork),
         Cmd::Stop { fork } => commands::stop(fork),
+        Cmd::Sync => mirror::sync(),
         Cmd::Ls { all, json } => commands::ls(all, json),
     };
     match result {

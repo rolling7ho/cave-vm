@@ -201,7 +201,8 @@ Requests that take time (`start`, `snapshot`, `restore`, `fork`, image fetches d
 | `list` | `project` (optional; all known projects if absent) | `list` with VMs, forks and snapshots |
 | `remove` | `vm`, `name` (optional) | `ok` |
 | `inspect` | `vm`, `log_limit` | `policy`, `resources` and `audit` entries |
-| `sync` / `pull` | `vm` | `ok`, or for `pull` an `error` with code `conflict` and a `files` list |
+| `sync` | `vm` (a synced project's own VM) | `synced`. If the VM is not running, a `progress` with `waiting for the VM` comes first and the reply waits until it runs. A sealed project or a fork is refused at once with `bad_request` |
+| `pull` | `vm` (a synced project's own, running VM) | `pulled`, or an `error` with code `conflict` and a `files` list, in which case nothing was applied |
 | `gc` | `apply` (boolean) | `usage`, and what was reclaimed when `apply` is true |
 | `images` | none | `images` |
 | `doctor` | none | `checks`, each with `name`, `ok` and `fix` |
@@ -218,6 +219,8 @@ The reply objects mirror the `--json` output of the matching CLI command. Sizes 
 | `snapshot` | `name`, `size` |
 | `restored` | `name`, `memory_restored`, `reason` (why the memory was not restored, when it was not), `saved` (the automatic snapshot taken first, which undoes the restore) and `credentials` (the names the snapshot recorded, left out when none) |
 | `forked` | `name`, `from` (the snapshot, or the VM whose state was forked), `reason` (why the fork booted from its disk rather than the snapshot's memory, when it did) and `credentials` (the names the snapshot recorded, left out when none) |
+| `synced` | `written` (files copied from the VM to the Mac), `deleted` (files deleted on the Mac to match the VM), `conflicts` (files changed on both sides, left alone) and `pending` (files changed only on the Mac, waiting for `pull`), each a list of paths relative to the project and left out when empty |
+| `pulled` | `snapshot` (taken before anything was applied; left out when there was nothing to apply), `applied` (files copied from the Mac into the VM) and `deleted` (files deleted in the VM to match the Mac) |
 | `list` | `entries`, each with `project`, `name`, `kind` (`vm`, `fork`, `snapshot`), `state` for VMs and forks (`running`, `suspended`, `stopped`), `auto` for automatic snapshots, `size` and `created_unix` |
 | `inspect` | `policy`, `resources` (`cpus`, `memory_bytes`, `disk_used`, `disk_size`), `audit` (the latest entries), `audit_total`, `state` (`running`, `suspended` or `stopped`) and, while it runs, `started_unix`. For a VM that is not running, `policy` is what `start` with no flags would give, read from `cave.toml` without fetching anything. An audit entry has `time_unix_ms` and an `event`: `exec` with `argv`, credential names and `exit_code`; `write` with `path` and `size`; or `connect` with `host`, `port`, `allowed` and an optional `reason` such as `LAN` |
 | `usage` | `images` (`name`, `digest`, `size`, `in_use`), `projects` (`project`, `disk`, `snapshots`, `forks`), `reclaimable` (`what`, `size`), and `reclaimed` when `apply` was set |
