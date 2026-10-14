@@ -310,6 +310,36 @@ fn pause_saves_every_vcpu_and_resume_lets_them_run_on() {
 }
 
 #[test]
+fn a_pause_waits_until_no_vcpu_is_in_an_interrupt_handler() {
+    use cave_vm_vmm::backend::IccReg;
+
+    let mock = MockBackend::new();
+    // Paused first inside a handler, then again once it has finished.
+    mock.script(
+        0,
+        [
+            Step::until_kicked().with_icc_reg(IccReg::AP1R0_EL1, 1 << 24),
+            Step::until_kicked().with_icc_reg(IccReg::AP1R0_EL1, 0),
+            Step::until_kicked(),
+        ],
+    );
+    let machine = Machine::new(Vec::new(), None, 1);
+    std::thread::scope(|s| {
+        let boot = s.spawn(|| {
+            let mut vcpu = mock.create_vcpu(0).unwrap();
+            runner::run(&mock, &mut vcpu, &machine)
+        });
+        wait_until(|| runs(&mock, 0) == 1);
+        let states = machine.pause(&mock).unwrap();
+        assert!(!states[0].in_interrupt());
+        assert_eq!(runs(&mock, 0), 2, "ran on once to leave the handler");
+        machine.resume();
+        machine.request_stop();
+        assert_eq!(boot.join().unwrap().unwrap(), Stop::Canceled);
+    });
+}
+
+#[test]
 fn a_stop_ends_a_pause() {
     let mock = MockBackend::new();
     mock.script(0, [Step::until_kicked()]);

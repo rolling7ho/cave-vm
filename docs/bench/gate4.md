@@ -44,7 +44,7 @@ Same Mac and build settings, 5 runs. Snapshots now write only the pages changed 
 
 The undo point no longer dominates a restore: what is left is stopping the old VMM, starting the new one and the agent handshake. Booted memory is unchanged, as expected; it needs freed guest pages handed back.
 
-Keeping guest RAM in a shared file was tried first and dropped: about one restore in 40 hung (decision 0011). A separate, older hang also shows up under load. When the guest rewrites 200 MB just before each snapshot, about one fork in 60 never reaches its agent and falls back to a disk boot after 50 seconds. This happens on main too (2 of 120), so it is not caused by the tracking.
+Keeping guest RAM in a shared file was tried first and dropped: about one restore in 40 hung (decision 0011). A separate, older hang also shows up under load. When the guest rewrites 200 MB just before each snapshot, about one fork in 60 never reaches its agent and falls back to a disk boot after 50 seconds. This happens on main too (2 of 120), so it is not caused by the tracking. It is fixed: a snapshot taken while a vCPU was inside an interrupt handler restored a vCPU that took no interrupt again, and snapshots now wait until no vCPU is in one.
 
 ## After faster restore and fork, 2026-10-14
 

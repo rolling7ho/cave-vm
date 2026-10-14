@@ -29,6 +29,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::backend::{self, Backend, BackendVcpu, DataAccess, Exit, Kick, Reg, SysReg, Trap};
@@ -48,6 +49,9 @@ const MAX_WFI_SLEEP: Duration = Duration::from_millis(10);
 const POWER_POLL: Duration = Duration::from_millis(20);
 /// Longest [`Machine::pause`] waits for every vCPU to stop and save.
 const PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the vCPUs run on before a pause that found one inside an
+/// interrupt handler tries again.
+const INTERRUPT_RETRY: Duration = Duration::from_micros(200);
 
 // CNTV_CTL_EL0 bits.
 const CNTV_ENABLE: u64 = 1 << 0;
@@ -340,9 +344,28 @@ impl<W: Write> Machine<W> {
     /// VM stays paused, with its memory, interrupt controller and devices
     /// unchanging, until [`Machine::resume`]. Call it from a thread that
     /// runs no vCPU, while every vCPU thread is in its run loop.
+    ///
+    /// A vCPU paused inside an interrupt handler could not be restored
+    /// ([`VcpuState::in_interrupt`]), so the vCPUs run on briefly and are
+    /// paused again until none is.
     pub fn pause<B: Backend>(&self, backend: &B) -> Result<Vec<VcpuState>> {
-        let cpus = self.cpus();
         let deadline = Instant::now() + PAUSE_TIMEOUT;
+        loop {
+            let states = self.pause_once(backend, deadline)?;
+            if !states.iter().any(VcpuState::in_interrupt) {
+                self.devices().pause_virtio();
+                return Ok(states);
+            }
+            self.resume_vcpus();
+            if Instant::now() >= deadline {
+                return Err(Error::Pause("a vCPU stayed in an interrupt handler".into()));
+            }
+            thread::sleep(INTERRUPT_RETRY);
+        }
+    }
+
+    fn pause_once<B: Backend>(&self, backend: &B, deadline: Instant) -> Result<Vec<VcpuState>> {
+        let cpus = self.cpus();
         {
             let mut table = self.pause_table();
             if self.stopping().is_some() {
@@ -363,7 +386,6 @@ impl<W: Write> Machine<W> {
                 for (state, power) in states.iter_mut().zip(self.power()) {
                     state.power = power;
                 }
-                self.devices().pause_virtio();
                 Ok(states)
             }
             Err(e) => {
