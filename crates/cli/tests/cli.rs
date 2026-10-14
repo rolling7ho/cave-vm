@@ -242,7 +242,8 @@ fn init_writes_the_config_and_ignores_the_state_folder() {
         stdout(&out),
         "Created cave.toml (sealed, debian, 2 CPUs, 2 GB)\n\
          Added .cave/ to .gitignore\n\
-         Wrote .claude/skills/cave\n\
+         Wrote the cave section of AGENTS.md and .claude/skills/cave\n\
+         Set up Claude Code to use cave mcp, with host Bash denied (.mcp.json, .claude/settings.json)\n\
          Next: cave shell, or cave agent claude\n"
     );
     let skill = fs::read_to_string(s.project().join(".claude/skills/cave/SKILL.md")).unwrap();
