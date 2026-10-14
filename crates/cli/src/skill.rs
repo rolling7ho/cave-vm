@@ -196,6 +196,9 @@ mod tests {
             "Do not read or write files on the Mac outside the VM",
             "Take a snapshot before a risky change",
             "The project folder identifies the VM",
+            "`uname -m` must print `arm64`",
+            "26 or later",
+            "`brew install cave-vm`",
             "`cave doctor`",
             "`cave init`",
             "`cave exec -- uname -a`",
@@ -205,6 +208,17 @@ mod tests {
         ] {
             assert!(body.contains(point), "{point}");
         }
+    }
+
+    #[test]
+    fn the_bootstrap_page_copies_exactly_the_skill() {
+        let page = include_str!("../../../docs/bootstrap.md");
+        let block = page
+            .split_once("````markdown\n")
+            .and_then(|(_, rest)| rest.split_once("````"))
+            .expect("the copy block")
+            .0;
+        assert_eq!(block, SKILL);
     }
 
     #[test]
