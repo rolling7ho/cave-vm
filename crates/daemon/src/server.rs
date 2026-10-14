@@ -8,9 +8,10 @@ use std::sync::Arc;
 use std::thread;
 
 use cave_vm_proto::agent::Message;
-use cave_vm_proto::daemon::{Reply, Request, VmId};
+use cave_vm_proto::daemon::{AuditEvent, Reply, Request, VmId};
 use cave_vm_proto::{ErrorCode, ErrorMessage, VERSIONS, read_frame, write_frame};
 
+use crate::audit;
 use crate::home::Home;
 use crate::link::daemon_software;
 use crate::relay;
@@ -94,10 +95,26 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                     .with_fix("Run the command without credentials"),
                 );
             }
-            return relay(stream, vms, &vm, &Message::Exec(exec));
+            let started = audit::now_ms();
+            let argv = exec.argv.clone();
+            // Recorded once it reached the VM, even if the client went away
+            // before it ended.
+            if let Some(last) = relay(stream, vms, &vm, &Message::Exec(exec))? {
+                let exit_code = match last {
+                    Some(Reply::Exit { code, .. }) => code,
+                    _ => None,
+                };
+                let event = AuditEvent::Exec {
+                    argv,
+                    credentials,
+                    exit_code,
+                };
+                audit::record(&vm, started, event);
+            }
+            return Ok(());
         }
         Request::FileRead { vm, path } => {
-            return relay(stream, vms, &vm, &Message::FileRead { path });
+            return relay(stream, vms, &vm, &Message::FileRead { path }).map(drop);
         }
         Request::FileWrite {
             vm,
@@ -105,14 +122,20 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
             mode,
             create_dirs,
         } => {
+            let started = audit::now_ms();
             let request = Message::FileWrite {
-                path,
+                path: path.clone(),
                 mode,
                 create_dirs,
             };
-            return relay(stream, vms, &vm, &request);
+            if let Some(Some(Reply::FileWritten { size })) = relay(stream, vms, &vm, &request)? {
+                audit::record(&vm, started, AuditEvent::Write { path, size });
+            }
+            return Ok(());
         }
-        Request::Shell { vm, pty } => return relay(stream, vms, &vm, &Message::PtyOpen(pty)),
+        Request::Shell { vm, pty } => {
+            return relay(stream, vms, &vm, &Message::PtyOpen(pty)).map(drop);
+        }
         Request::Start { vm, net, ports } => vms.start(&vm, net, &ports).map(Reply::Policy),
         Request::Remove { vm, name: None } => vms.remove(&vm).map(|()| Reply::Ok),
         Request::Remove {
@@ -164,11 +187,18 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
     write_frame(&mut stream, &reply).map_err(io::Error::other)
 }
 
-/// Relays an agent operation for a running VM.
-fn relay(mut stream: UnixStream, vms: &Vms, vm: &VmId, request: &Message) -> io::Result<()> {
+/// Relays an agent operation for a running VM. Returns `None` if it never
+/// reached the VM, and otherwise the reply that ended it, if it ended
+/// before the client went away ([`relay::Ended::last`]).
+fn relay(
+    mut stream: UnixStream,
+    vms: &Vms,
+    vm: &VmId,
+    request: &Message,
+) -> io::Result<Option<Option<Reply>>> {
     match vms.agent_connection(vm) {
-        Ok((agent, _in_use)) => relay::run(&mut stream, agent, request),
-        Err(e) => send_error(&mut stream, e),
+        Ok((agent, _in_use)) => Ok(Some(relay::run(&mut stream, agent, request).last)),
+        Err(e) => send_error(&mut stream, e).map(|()| None),
     }
 }
 

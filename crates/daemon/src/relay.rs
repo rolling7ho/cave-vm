@@ -96,18 +96,42 @@ fn to_client(message: Message) -> (Reply, bool) {
     }
 }
 
+/// How a relayed operation ended.
+#[derive(Debug)]
+pub struct Ended {
+    /// The reply that ended it, such as `exit` or `file_written`, whether
+    /// or not the client was still there to get it. `None` when the client
+    /// went away before the operation ended.
+    pub last: Option<Reply>,
+    /// Whether every reply reached the client.
+    pub result: io::Result<()>,
+}
+
 /// Runs `request` (an agent `exec`, `pty_open`, `file_read` or
 /// `file_write`) on `agent` and relays it
 /// to and from `client` until it ends. Errors before the program starts go
 /// to the client as an `error` reply.
-pub fn run(client: &mut UnixStream, mut agent: UnixStream, request: &Message) -> io::Result<()> {
+pub fn run(client: &mut UnixStream, mut agent: UnixStream, request: &Message) -> Ended {
     if let Err(e) = open(&mut agent, request) {
-        return write_frame(client, &Reply::Error(e)).map_err(io::Error::other);
+        let reply = Reply::Error(e);
+        let result = write_frame(client, &reply).map_err(io::Error::other);
+        return Ended {
+            last: Some(reply),
+            result,
+        };
     }
     // Client to agent, on its own thread. It ends when the client closes
     // its side, or when the operation ends and its side is shut below.
-    let mut client_in = client.try_clone()?;
-    let mut agent_out = agent.try_clone()?;
+    let clones = client.try_clone().and_then(|c| Ok((c, agent.try_clone()?)));
+    let (mut client_in, mut agent_out) = match clones {
+        Ok(clones) => clones,
+        Err(e) => {
+            return Ended {
+                last: None,
+                result: Err(e),
+            };
+        }
+    };
     let upstream = thread::spawn(move || {
         loop {
             match read_frame::<_, Request>(&mut client_in) {
@@ -128,23 +152,27 @@ pub fn run(client: &mut UnixStream, mut agent: UnixStream, request: &Message) ->
         }
     });
 
-    let result = loop {
+    let ended = loop {
         let message = read_agent(&mut agent);
         let (reply, last) = match message {
             Ok(message) => to_client(message),
             Err(e) => (Reply::Error(e), true),
         };
-        if let Err(e) = write_frame(client, &reply) {
-            break Err(io::Error::other(e));
-        }
+        let result = write_frame(client, &reply).map_err(io::Error::other);
         if last {
-            break Ok(());
+            break Ended {
+                last: Some(reply),
+                result,
+            };
+        }
+        if result.is_err() {
+            break Ended { last: None, result };
         }
     };
     let _ = agent.shutdown(Shutdown::Both);
     let _ = client.shutdown(Shutdown::Read);
     let _ = upstream.join();
-    result
+    ended
 }
 
 #[cfg(test)]

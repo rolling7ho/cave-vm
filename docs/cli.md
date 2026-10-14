@@ -383,7 +383,7 @@ Leftovers from crashed VMM processes are snapshot, fork and suspension folders w
 cave inspect [--fork <name>] [--log] [--json]
 ```
 
-Shows the policy (the same lines as the startup policy), resources, and the most recent 20 audit-log entries: exec calls, file writes and network connections. `--log` prints the whole log. Credentials appear by name only.
+Shows the policy (the same lines as the startup policy), resources, and the most recent 20 audit-log entries: exec calls, file writes and network connections. `--log` prints the whole log. Credentials appear by name only. The log is `audit.log` in the VM's folder (`.cave/`, or `.cave/forks/<name>/` for a fork), one JSON object per line, and is removed with the VM.
 
 ```
 my-project: running since 09:14 (debian, sha256:3f2a9c1e)
