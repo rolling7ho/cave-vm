@@ -484,3 +484,32 @@ fn outside_a_project_the_tools_say_how_to_set_one_up() {
     assert!(message.starts_with("not a cave project"), "{message}");
     assert!(message.contains("fix: Run `cave init`"), "{message}");
 }
+
+#[test]
+fn tools_set_to_a_fork_act_on_it_unless_a_call_names_another() {
+    let fake = Fake::new(|request, _| match request {
+        Request::Start { .. } => vec![Reply::Policy(policy())],
+        Request::Exec { .. } => vec![Reply::Exit {
+            code: Some(0),
+            signal: None,
+        }],
+        Request::Fork { .. } => vec![Reply::Forked {
+            name: "fork-2".into(),
+            from: "app".into(),
+            reason: None,
+            credentials: Vec::new(),
+        }],
+        _ => Vec::new(),
+    });
+    let tools =
+        Tools::with_daemon(&fake.project, Daemon::at(&fake.root)).on_fork(Some("try".into()));
+    let call = |name: &str, arguments: Value| tools.call(name, &arguments).unwrap().unwrap();
+    call("exec", json!({"command": "true"}));
+    call("exec", json!({"command": "true", "fork": "other"}));
+    call("fork", json!({}));
+    let requests = fake.requests();
+    assert_eq!(requests[1].vm(), Some(&fake.vm(Some("try"))));
+    assert_eq!(requests[3].vm(), Some(&fake.vm(Some("other"))));
+    // Forks are made from the project's own VM.
+    assert_eq!(requests[4].vm(), Some(&fake.vm(None)));
+}

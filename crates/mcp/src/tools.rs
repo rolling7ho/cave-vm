@@ -22,6 +22,8 @@ pub const READ_LIMIT: usize = 1 << 20;
 pub struct Tools {
     project: PathBuf,
     daemon: Option<Daemon>,
+    /// The fork the tools act on when a call names none.
+    fork: Option<String>,
 }
 
 /// A tool's text, or the text of why it failed.
@@ -34,7 +36,14 @@ impl Tools {
         Tools {
             project: project.into(),
             daemon: None,
+            fork: None,
         }
+    }
+
+    /// These tools, acting on fork `name` unless a call names another
+    /// (`cave agent --fork`).
+    pub fn on_fork(self, name: Option<String>) -> Tools {
+        Tools { fork: name, ..self }
     }
 
     /// Tools for the project `project` is in, through `daemon`.
@@ -42,6 +51,7 @@ impl Tools {
         Tools {
             project: project.into(),
             daemon: Some(daemon),
+            fork: None,
         }
     }
 
@@ -159,17 +169,23 @@ impl Tools {
         })
     }
 
-    /// The project's VM, or the fork named by the `fork` argument.
+    /// The project's VM, or the fork named by the `fork` argument or set
+    /// with [`Tools::on_fork`].
     fn sandbox(&self, args: &Args<'_>) -> Result<Sandbox, String> {
-        let sandbox = match &self.daemon {
-            Some(daemon) => Sandbox::open_with(daemon.clone(), &self.project),
-            None => Sandbox::open(&self.project),
-        }
-        .map_err(text)?;
-        match args.optional("fork")? {
+        let sandbox = self.project_vm()?;
+        match args.optional("fork")?.or(self.fork.as_deref()) {
             Some(name) => Ok(sandbox.fork_named(name)),
             None => Ok(sandbox),
         }
+    }
+
+    /// The project's own VM.
+    fn project_vm(&self) -> Result<Sandbox, String> {
+        match &self.daemon {
+            Some(daemon) => Sandbox::open_with(daemon.clone(), &self.project),
+            None => Sandbox::open(&self.project),
+        }
+        .map_err(text)
     }
 
     fn exec(&self, args: &Args<'_>) -> Outcome {
@@ -241,7 +257,8 @@ impl Tools {
     }
 
     fn fork(&self, args: &Args<'_>) -> Outcome {
-        let sandbox = self.sandbox(&Args(&Value::Null))?;
+        // Forks are made from the project's VM, whatever fork is set.
+        let sandbox = self.project_vm()?;
         let forked = match args.optional("from")? {
             Some(snapshot) => sandbox.fork_from(snapshot),
             None => sandbox.fork(),

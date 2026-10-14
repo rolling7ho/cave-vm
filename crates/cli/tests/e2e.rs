@@ -738,3 +738,51 @@ fn credentials_reach_the_command_but_not_the_agent() {
         "{stderr}"
     );
 }
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn agent_on_the_mac_reaches_the_vm_only_through_mcp() {
+    // A real Claude Code run uses the signed-in account, so it runs only
+    // when asked for.
+    if std::env::var_os("CAVE_E2E_CLAUDE").is_none() {
+        eprintln!("skipped: set CAVE_E2E_CLAUDE=1 to run Claude Code");
+        return;
+    }
+    let rig = Rig::new();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    rig.exec(&["sh", "-c", "echo from-the-vm > /workspace/marker"], 0);
+    let path = format!(
+        "{}:{}",
+        rig.bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let out = rig
+        .command(&[
+            "agent",
+            "claude",
+            "--",
+            "-p",
+            "Read the file marker with the cave read_file tool, then run `uname -s` with the cave exec tool. \
+             Reply with exactly two lines: the file's contents, then the command's output.",
+            "--allowedTools",
+            "mcp__cave__read_file,mcp__cave__exec",
+        ])
+        .env("PATH", path)
+        .env("HOME", std::env::var("HOME").unwrap())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}\n{stderr}");
+    assert!(
+        stdout.contains("from-the-vm") && stdout.contains("Linux"),
+        "{stdout}"
+    );
+    assert!(
+        stderr.contains("Undo everything the agent did with: cave restore proj-"),
+        "{stderr}"
+    );
+    // The audit log shows what it did.
+    let log = fs::read_to_string(rig.project().join(".cave/audit.log")).unwrap();
+    assert!(log.contains("uname -s"), "{log}");
+}
