@@ -216,7 +216,7 @@ impl Rule {
             match_segments(&pattern, segments)
         } else {
             // A pattern without a slash matches the name at any depth.
-            segments.last().is_some_and(|name| glob(&pattern[0], name))
+            segments.last().is_some_and(|name| glob(pattern[0], name))
         }
     }
 }
