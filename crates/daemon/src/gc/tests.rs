@@ -64,6 +64,7 @@ fn manifest(dir: &Path, name: &str, created_unix: u64, auto: bool) {
             credentials: Vec::new(),
             has_memory: false,
             auto,
+            undo: auto,
         },
     )
     .unwrap();

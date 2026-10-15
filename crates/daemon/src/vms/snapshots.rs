@@ -57,6 +57,17 @@ pub struct Forked {
     pub credentials: Vec<String>,
 }
 
+/// Why a snapshot is taken, which sets its manifest's `auto` and `undo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Taken {
+    /// Asked for, or not a snapshot the user keeps (a suspension, a fork).
+    Named,
+    /// Before an agent run or a push (D51).
+    Before,
+    /// The state a restore saves first.
+    Undo,
+}
+
 /// What a restore did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Restored {
@@ -78,7 +89,18 @@ impl Vms {
         if let Some(name) = name {
             check_name(name)?;
         }
-        self.take(id, &state, Dest::Snapshot(name), false)
+        self.take(id, &state, Dest::Snapshot(name), Taken::Named)
+    }
+
+    /// Saves the automatic snapshot taken before an agent run or a push,
+    /// then deletes automatic snapshots beyond `[snapshots] keep`, never
+    /// the one just taken (D51).
+    pub fn snapshot_before(&self, id: &VmId) -> Result<(String, u64), ErrorMessage> {
+        let state = state_dir(id)?;
+        let keep = self.source.auto_snapshots(id)?.keep;
+        let taken = self.take(id, &state, Dest::Snapshot(None), Taken::Before)?;
+        prune(&state, keep, &[taken.0.as_str()]);
+        Ok(taken)
     }
 
     fn take(
@@ -86,7 +108,7 @@ impl Vms {
         id: &VmId,
         state: &Path,
         dest: Dest<'_>,
-        auto: bool,
+        taken: Taken,
     ) -> Result<(String, u64), ErrorMessage> {
         let vm = self.vm(id)?;
         let mut slot = vm.idle_slot();
@@ -95,7 +117,7 @@ impl Vms {
             _ => None,
         };
         drop(slot);
-        let result = self.save(&vm, state, dest, auto, running.as_mut());
+        let result = self.save(&vm, state, dest, taken, running.as_mut());
         let slot = vm.slot.lock().expect("vm lock");
         vm.set(slot, running.map_or(Slot::Stopped, Slot::Running));
         result
@@ -107,7 +129,7 @@ impl Vms {
         vm: &Vm,
         state: &Path,
         dest: Dest<'_>,
-        auto: bool,
+        taken: Taken,
         running: Option<&mut Running>,
     ) -> Result<(String, u64), ErrorMessage> {
         // A suspended VM's snapshot is its suspension, memory and all.
@@ -215,7 +237,8 @@ impl Vms {
             net: suspended.as_ref().map_or(policy.net, |(_, m)| m.net),
             credentials,
             has_memory,
-            auto,
+            auto: taken != Taken::Named,
+            undo: taken == Taken::Undo,
         };
         let written = saved.and_then(|()| {
             snapshot::write_manifest(&dir, &manifest)
@@ -240,7 +263,7 @@ impl Vms {
         // never booted has nothing to save.
         let settings = self.source.auto_snapshots(id)?;
         let saved = if settings.auto && disk::path(&state).is_file() {
-            Some(self.take(id, &state, Dest::Snapshot(None), true)?.0)
+            Some(self.take(id, &state, Dest::Snapshot(None), Taken::Undo)?.0)
         } else {
             None
         };
@@ -385,14 +408,15 @@ impl Vms {
         let state = Path::new(&id.project).join(STATE_DIR);
         // A VM that cannot be saved keeps running rather than lose its
         // processes.
-        self.take(id, &state, Dest::Suspend, false).map_err(|e| {
-            let message = format!(
-                "could not suspend {}: {}; it is still running",
-                display_name(id),
-                e.message
-            );
-            ErrorMessage { message, ..e }
-        })?;
+        self.take(id, &state, Dest::Suspend, Taken::Named)
+            .map_err(|e| {
+                let message = format!(
+                    "could not suspend {}: {}; it is still running",
+                    display_name(id),
+                    e.message
+                );
+                ErrorMessage { message, ..e }
+            })?;
         self.stop(id)?;
         Ok(true)
     }
@@ -459,7 +483,7 @@ impl Vms {
                 from
             }
             None => {
-                self.take(id, &state, Dest::Fork(&name), false)?;
+                self.take(id, &state, Dest::Fork(&name), Taken::Named)?;
                 display_name(id)
             }
         };
@@ -635,8 +659,8 @@ fn prune(state: &Path, keep: u32, spare: &[&str]) {
     }
 }
 
-/// The snapshot to restore: `name`, or the newest one, preferring those
-/// taken by name over automatic ones.
+/// The snapshot to restore: `name`, or the newest one, preferring any
+/// other over the undo points restores save.
 fn pick(state: &Path, name: Option<&str>) -> Result<(String, Manifest), ErrorMessage> {
     let manifest = |name: &str| {
         snapshot::read_manifest(&snapshot::dir(state, name)).map_err(|e| {
@@ -664,10 +688,19 @@ fn pick(state: &Path, name: Option<&str>) -> Result<(String, Manifest), ErrorMes
     }
     let newest = names
         .iter()
-        .filter_map(|n| Some((n, snapshot::read_manifest(&snapshot::dir(state, n)).ok()?)))
-        .max_by_key(|(n, m)| (!m.auto, m.created_unix, (*n).clone()));
+        .filter_map(|n| {
+            let dir = snapshot::dir(state, n);
+            let manifest = snapshot::read_manifest(&dir).ok()?;
+            // Written last, to the nanosecond, which orders snapshots
+            // taken in the same second.
+            let written = fs::metadata(dir.join(snapshot::MANIFEST_FILE))
+                .and_then(|m| m.modified())
+                .ok();
+            Some((n, manifest, written))
+        })
+        .max_by_key(|(n, m, written)| (!m.undo, m.created_unix, *written, (*n).clone()));
     match newest {
-        Some((name, manifest)) => Ok((name.clone(), manifest)),
+        Some((name, manifest, _)) => Ok((name.clone(), manifest)),
         None if names.is_empty() => Err(error(
             ErrorCode::NotFound,
             "this project has no snapshots yet",
@@ -766,6 +799,7 @@ fn copy_snapshot(
                 &Manifest {
                     name: name.to_string(),
                     auto: false,
+                    undo: false,
                     ..manifest.clone()
                 },
             )

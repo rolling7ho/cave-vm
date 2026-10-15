@@ -394,6 +394,7 @@ impl Sandbox {
         match self.daemon.call(&Request::Snapshot {
             vm: self.vm(),
             name: Some(name.into()),
+            before: false,
         })? {
             Reply::Snapshot { name, size } => Ok(Snapshot { name, size }),
             other => Err(Error::unexpected("snapshot", other)),

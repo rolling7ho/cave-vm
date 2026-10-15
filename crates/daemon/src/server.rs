@@ -216,10 +216,13 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                     credentials: restored.credentials,
                 })
         }
-        Request::Snapshot { vm, name } => {
-            let reply = vms
-                .snapshot(&vm, name.as_deref())
-                .map(|(name, size)| Reply::Snapshot { name, size });
+        Request::Snapshot { vm, name, before } => {
+            let taken = if before {
+                vms.snapshot_before(&vm)
+            } else {
+                vms.snapshot(&vm, name.as_deref())
+            };
+            let reply = taken.map(|(name, size)| Reply::Snapshot { name, size });
             let taken = reply.is_ok();
             write_frame(&mut stream, &reply.unwrap_or_else(Reply::Error))
                 .map_err(io::Error::other)?;

@@ -323,7 +323,8 @@ fn snapshot_restore_fork_and_destroy_send_the_matching_requests() {
         [
             Request::Snapshot {
                 vm: vm.clone(),
-                name: Some("before".into())
+                name: Some("before".into()),
+                before: false,
             },
             Request::Restore {
                 vm: vm.clone(),

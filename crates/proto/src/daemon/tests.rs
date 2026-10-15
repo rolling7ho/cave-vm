@@ -121,6 +121,7 @@ fn requests_round_trip() {
             Request::Snapshot {
                 vm: p(),
                 name: Some("before".into()),
+                before: false,
             },
         ),
         (

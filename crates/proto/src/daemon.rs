@@ -105,6 +105,10 @@ pub enum Request {
         vm: VmId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        /// The automatic snapshot before an agent run, which counts
+        /// towards `[snapshots] keep` (D51). `name` is then ignored.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        before: bool,
     },
     Restore {
         vm: VmId,

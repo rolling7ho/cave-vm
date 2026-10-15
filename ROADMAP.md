@@ -287,3 +287,4 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D48 | Ivan found the code of conduct not really necessary. | `CODE_OF_CONDUCT.md` is removed, and the design and `CONTRIBUTING.md` no longer name it (decision 0021). |
 | D49 | Ivan asked to stop asking contributors to mark AI assistance. | The PR template and `CONTRIBUTING.md` no longer ask; AI-assisted contributions stay welcome (decision 0022). |
 | D50 | Ivan asked to stop tracking `.claude`. | `.claude/` is in `.gitignore` and untracked; `cave init` still writes it into user projects (decision 0023). |
+| D51 | Ivan chose to prune the snapshots before agent runs and pushes. | They are automatic snapshots that count towards `[snapshots] keep`; a restore with no name passes over only undo points (decision 0024). |

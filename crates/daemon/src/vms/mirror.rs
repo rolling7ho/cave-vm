@@ -166,7 +166,7 @@ impl Vms {
             write_state(&project, &sync::agreed(&last, &mac, &vm))?;
             return Ok(Pulled::default());
         }
-        let (snapshot, _) = self.snapshot(id, None)?;
+        let (snapshot, _) = self.snapshot_before(id)?;
         let mut after = vm.clone();
         let mut written = Vec::new();
         for path in &plan.write {
