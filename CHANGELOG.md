@@ -15,6 +15,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `CODE_OF_CONDUCT.md` (D48, decision 0021).
 
 ### Changed
+- `docs/safety.md` lists the known limits accepted for v1: the Mac's addresses are read once per VM start, `check = false` is per project and read by a simple line reader, and downloads honour `~/.curlrc`.
 - The design and decision 0026 (D53 to D55) move `cave agent` into the VM with permission prompts skipped, `--safe` and `--on-mac` as the ways back, Claude Code and Codex for v1, and an opt-in for plain `claude`. Decision 0002 is replaced. The code follows in later changes.
 - `cave export` runs even on a copy of cave 2 or more releases behind, after asking, so the work can always be copied out (D52).
 - A copy of cave 2 or more stable releases behind asks to update every time it runs in a terminal, says only the 3 newest releases get security fixes, and stops the command on a no. Without a terminal it warns. `SECURITY.md` names the 3 newest stable releases as supported, and release `images.json` lists every stable release (D52, decision 0025).
