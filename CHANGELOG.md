@@ -4,6 +4,8 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-15
+
 ### Removed
 - `cave mirror`, and `cave agent`'s recording of the agent's terminal (D46). It only repeated the agent's own screen; `cave view` stays. `cave agent` deletes a recording an earlier version left in `.cave/agent.term`.
 

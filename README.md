@@ -2,7 +2,7 @@
 
 **A fast, disposable Linux VM for every project, built for coding agents on macOS.**
 
-> **Status: v0.1.1.** It works on Apple Silicon Macs with macOS 26 or later. v1.0 follows the release review.
+> **Status: v0.1.2.** It works on Apple Silicon Macs with macOS 26 or later. v1.0 follows the release review.
 
 cave-vm (Coding Agent Virtual Environment, command: `cave`) is an open-source microVM runtime for Macs with Apple Silicon (M-series) chips. It gives each project directory its own Linux VM that starts quickly, can be snapshotted, rolled back and forked, and shows you exactly what it can reach.
 
