@@ -23,6 +23,7 @@ use crate::commands::{ensure_running, vm_id};
 use crate::error::{CliError, Result};
 use crate::exec::{EXIT_CAVE_FAILED_RUNNING, exit_code};
 use crate::init;
+use crate::links;
 
 /// Bytes of keyboard input per `pty_data` message.
 const INPUT_CHUNK: usize = 16 << 10;
@@ -95,7 +96,7 @@ pub fn run(fork: Option<String>) -> Result<u8> {
     eprintln!(
         "Type exit or press Ctrl-D to leave the shell, or ~. at the start of a line to leave at once. The VM keeps running"
     );
-    session(vm, None)
+    session(vm, None, false)
 }
 
 /// What the keyboard thread does with the bytes it reads: ssh's escape,
@@ -138,8 +139,9 @@ impl Escape {
 /// Runs `argv`, or the guest user's login shell, on a pseudo-terminal in
 /// running VM `vm`, connected to this terminal. Returns its exit code.
 /// The `~.` escape works for the login shell only, so an agent gets every
-/// key it is sent.
-pub fn session(vm: VmId, argv: Option<Vec<String>>) -> Result<u8> {
+/// key it is sent. With `open_links`, sign-in links the VM asks for are
+/// opened on the Mac (D56).
+pub fn session(vm: VmId, argv: Option<Vec<String>>, open_links: bool) -> Result<u8> {
     let escapes = argv.is_none();
     let failed = |e: CliError| CliError {
         code: EXIT_CAVE_FAILED_RUNNING,
@@ -229,11 +231,21 @@ pub fn session(vm: VmId, argv: Option<Vec<String>>) -> Result<u8> {
         }
     });
 
+    let mut relay = open_links.then(links::Relay::default);
+    let mut opened = 0;
     let result = loop {
         match connection.receive() {
             Ok(Reply::PtyData { data }) => {
+                let shown = match relay.as_mut() {
+                    Some(relay) => {
+                        let (shown, found) = relay.feed(&data.0);
+                        opened += found.iter().filter(|link| links::open(link)).count();
+                        shown
+                    }
+                    None => data.0,
+                };
                 let mut out = io::stdout().lock();
-                if out.write_all(&data.0).and_then(|()| out.flush()).is_err() {
+                if out.write_all(&shown).and_then(|()| out.flush()).is_err() {
                     break Ok(EXIT_CAVE_FAILED_RUNNING);
                 }
             }
@@ -246,8 +258,15 @@ pub fn session(vm: VmId, argv: Option<Vec<String>>) -> Result<u8> {
             Err(e) => break Err(failed(e)),
         }
     };
+    if let Some(held) = relay.as_mut().map(links::Relay::finish) {
+        let mut out = io::stdout().lock();
+        let _ = out.write_all(&held).and_then(|()| out.flush());
+    }
     // Back to the normal terminal before anything is printed.
     drop(raw);
+    if opened > 0 {
+        eprintln!("Opened {opened} sign-in link(s) from the VM in your Mac's browser");
+    }
     result
 }
 
