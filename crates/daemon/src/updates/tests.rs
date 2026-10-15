@@ -57,6 +57,21 @@ fn a_lookup_records_the_newest_digest_of_each_image() {
 }
 
 #[test]
+fn a_lookup_records_the_newest_cave() {
+    let with_cave = manifest().replacen('{', r#"{"cave": "0.1.1", "#, 1);
+    let (d, file, _) = detector("cave", Ok(with_cave));
+    d.check_soon(true);
+    d.wait();
+    assert_eq!(read(&file).unwrap()["cave"], "0.1.1");
+
+    // Manifests before 0.1.1 have no cave key.
+    let (d, file, _) = detector("no-cave", Ok(manifest()));
+    d.check_soon(true);
+    d.wait();
+    assert!(read(&file).unwrap().get("cave").is_none());
+}
+
+#[test]
 fn it_looks_up_at_most_once_a_day() {
     let (d, file, calls) = detector("daily", Ok(manifest()));
     d.check_soon(true);

@@ -25,6 +25,7 @@ mod skill;
 mod snapshot;
 mod ssh;
 mod style;
+mod update;
 mod view;
 
 use std::process::ExitCode;
@@ -338,6 +339,10 @@ fn main() -> ExitCode {
         Ok(cli) => cli,
         Err(e) => e.exit(),
     };
+    // Not for commands other programs talk to over stdin and stdout.
+    if !matches!(cli.command, Cmd::Mcp { .. } | Cmd::SshProxy { .. }) {
+        update::start_if_newer();
+    }
     let result = match cli.command {
         Cmd::Init {
             sealed,

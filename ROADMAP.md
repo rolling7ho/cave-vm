@@ -281,3 +281,4 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D42 | Ivan asked for `cave push`. | `cave pull` is renamed `cave push`; `pull` stays as a hidden alias until the next minor release (decision 0017). |
 | D43 | Ivan asked for an emergency stop. | `cave stop --force` asks, then stops every VM with SIGTERM and SIGKILL 5 seconds later, saving nothing (decision 0017). |
 | D44 | Ivan asked for Codex in v1. | `cave agent codex`: Codex on the Mac with `cave mcp` and its shell tools turned off (decision 0017). |
+| D45 | Ivan asked for copies of cave to update themselves. | cave installs a newer release in the background, the way it was installed, when no VM is running; `[updates] check = false` turns it off. Images still never update by themselves (decision 0018). |

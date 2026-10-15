@@ -110,7 +110,7 @@ pub fn update_checks(cache: &Path, updates: &Path) -> Vec<Check> {
             let short = latest.get(..15).unwrap_or(&latest);
             Check {
                 name: format!(
-                    "a newer {name} image exists, {short}; cave never updates by itself, see docs/config.md, [updates]"
+                    "a newer {name} image exists, {short}; cave never updates an image by itself, see docs/config.md, [updates]"
                 ),
                 ok: true,
                 fix: None,

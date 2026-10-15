@@ -2,12 +2,13 @@
 //! starts in a project whose `cave.toml` leaves `[updates] check` on, the
 //! daemon reads the image manifest at most once a day, in the background,
 //! and records the newest digest of each image. `cave doctor` reads the
-//! record and says when a cached image has a newer version. Nothing is ever
-//! updated by itself.
+//! record and says when a cached image has a newer version. No image is
+//! ever updated by itself. The record also keeps the newest cave release,
+//! which `cave` installs by itself (D45).
 //!
 //! The lookup is a plain GET of the manifest (D28) with no query, cookies
-//! or other identifying data, the only network request cave makes on its
-//! own. With `check = false` the detector is not called.
+//! or other identifying data, the only lookup cave makes on its own. With
+//! `check = false` the detector is not called.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -108,7 +109,10 @@ impl Inner {
             .into_iter()
             .map(|e| (e.name.clone(), e.disk.digest.to_string()))
             .collect();
-        let doc = json!({ "checked": now, "newest": newest });
+        let mut doc = json!({ "checked": now, "newest": newest });
+        if let Some(cave) = manifest.cave {
+            doc["cave"] = json!(cave);
+        }
         let tmp = self.file.with_extension("json.tmp");
         if fs::write(&tmp, doc.to_string() + "\n").is_ok() {
             let _ = fs::rename(&tmp, &self.file);

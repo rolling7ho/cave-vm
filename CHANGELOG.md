@@ -18,6 +18,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `cave --help` lists each command with its flags and arguments, such as `run [--net <off|lan>] [-p <PORT>...] [--fork <FORK>]`, with its description on the line below.
 
 ### Added
+- cave updates itself (D45, decision 0018): when the update detector finds a newer release and no VM is running, the next command installs it in the background, with Homebrew or the install script as cave was installed, and says so. `[updates] check = false` turns it off. A daemon of another version is replaced once no VM is running, which also fixes manual upgrades. `scripts/release.sh` names the release in `images.json` for this.
 - `scripts/release.sh <version> [--dry-run]` publishes a release: it tags main, uploads the binary tarball, a pinned `install.sh` and `images.json`, and points the Homebrew formula at the new tag. `--dry-run` builds everything into `target/dist` and publishes nothing.
 
 - `cave mirror [--fork <name>]` shows the terminal of the agent `cave agent` runs, live and read-only; `cave agent` records it to `.cave/agent.term` when it runs in a terminal (D39).
