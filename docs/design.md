@@ -313,7 +313,7 @@ cave-vm/
 2. This doc, exported to `docs/design.md`, is the source of truth. Anything marked decided is not changed by the agent. If the design is missing something or contradicts itself, the agent stops and asks, and each real design change gets a short decision record in `docs/decisions/`.
 3. Feature workflow: read the relevant design section, write a short plan, write tests first where practical, implement one crate at a time, and open a small PR.
 4. Definition of done: `cargo fmt`, `cargo clippy -D warnings` and the tests pass, docs and the changelog are updated, and any new `unsafe` has its safety comment.
-5. Guardrails: no new dependencies without asking, no network access in tests, and no changes to signing, release or CI secrets. A permissions config in `.claude/settings.json` allows cargo commands and denies force-push and destructive deletes.
+5. Guardrails: no new dependencies without asking, no network access in tests, and no changes to signing, release or CI secrets. The repository does not track `.claude/`, so each contributor keeps their own Claude Code settings (D50).
 6. Each roadmap phase becomes a GitHub milestone, with its gate as the closing criterion.
 7. Once `cave` can run a VM, development moves inside a cave VM, which is the strongest test of the product.
 

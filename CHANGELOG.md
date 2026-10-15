@@ -5,6 +5,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 ## [Unreleased]
 
 ### Removed
+- The repository's own `.claude/settings.json`; `.claude/` is now in `.gitignore` (D50, decision 0023).
 - `CODE_OF_CONDUCT.md` (D48, decision 0021).
 
 ### Changed
