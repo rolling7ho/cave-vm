@@ -113,15 +113,15 @@ The skill is the cheapest, highest-leverage piece of the project, but a skill is
 **Guardrail**
 
 - An MCP server exposes `exec`, read file, write file, snapshot, fork, restore and destroy. The agent gets a VM through MCP and no host shell.
-- Where the agent supports it, `cave init` also writes a permissions config that denies host Bash, so the skill is guidance and the config is the guardrail.
-- `cave agent claude` starts the agent on the Mac, already connected to this project's VM through the MCP server, with host Bash denied where the agent supports it.
+- Where the agent supports it, `cave init` also writes a permissions config that denies the agent's own tools that act on the Mac, so the skill is guidance and the config is the guardrail (D55).
+- `cave agent claude` runs the agent inside this project's VM, so its tools reach only the VM, and skips its permission prompts, since the VM is the sandbox (D53).
 - Snapshot before each agent run, `cave restore` after, for cheap rollback.
 
 The docs should state the limit honestly: a confused or prompt-injected agent that still has a host shell can step outside the VM. "Visible safety" must not overclaim.
 
 **Where the agent runs**
 
-Both are supported. The default is the agent on the Mac, using the VM only through the MCP server, so the model API key never enters the VM. `cave agent <name> --in-vm` runs the agent inside the VM instead, which needs network access to reach the model API.
+Both are supported. The default is the agent inside the VM, with its permission prompts skipped, which needs network access to reach the model API (D53, decision 0026). Its sign-in or model API key then lives in the VM, and is frozen into snapshots and forks taken afterwards. `cave agent <name> --on-mac` runs the agent on the Mac instead, using the VM only through the MCP server, so the model API key never enters the VM; there it always asks before acting. `--safe` keeps the prompts in the VM too.
 
 **Bootstrap skill (set up by paste)**
 
@@ -174,7 +174,7 @@ The first run fetches the kernel and base image and does all setup. The CLI is a
 | `cave inspect` | show the policy, resources and audit log |
 | `cave sync` / `cave push` | update the Mac mirror / bring Mac edits in (synced mode) |
 | `cave cp` / `cave export` | move files in and out |
-| `cave agent <name>` | start an agent on the Mac against this VM through MCP; `--in-vm` runs it inside the VM |
+| `cave agent <name>` | start an agent inside this VM without permission prompts; `--safe` keeps them, `--on-mac` runs it on the Mac through MCP |
 | `cave images` | list base images |
 | `cave doctor` | check entitlements, macOS version, disk space and image state |
 
@@ -350,7 +350,7 @@ cave-vm/
 - [x] Sync: the VM is the source, the sync waits if the VM is not running, and `cave push` compares SHA-256 hashes of the Mac copy against the VM.
 - [x] Sync conflicts: per-file rules for changes on one side or both, an automatic snapshot before a push (D42), and dependency and build folders excluded.
 - [x] Guest agent protocol, daemon API, VM lifecycle, disk and defaults: see the decisions tables under Architecture.
-- [x] `cave agent <name>`: the agent runs on the Mac and uses the VM through MCP; `--in-vm` runs it inside the VM instead. See `docs/decisions/0002-cave-agent-runs-on-the-mac.md`.
+- [x] `cave agent <name>`: the agent runs inside the VM with its permission prompts skipped; `--on-mac` runs it on the Mac through MCP instead. Claude Code and Codex ship in v1. See `docs/decisions/0026-agent-runs-in-the-vm-in-full-auto.md`, which replaces decision 0002.
 - [x] Roadmap: six phases, each of the first five closed by a gate, and phase 6 ending at the v1 release. See `docs/decisions/0001-roadmap-phases-and-gates.md`.
 - [x] Roadmap open items (dependencies, guest-memory location, Linux build environment, toolchain pin, interrupt-controller contingency, printed credentials, config key names, hardware CI, README fork wording). See `docs/decisions/0003-roadmap-open-items.md`.
 - [x] CLI and config open items (existing files at first boot, the synced mirror location, setup on first use, project lookup, `cave ls`, forks, `cave export`, `cave stop`, TTL, the digest pin). See `docs/decisions/0004-cli-and-config-open-items.md`.
