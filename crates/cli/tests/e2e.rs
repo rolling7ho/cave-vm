@@ -544,7 +544,7 @@ fn export_copies_the_project_out_of_the_vm_and_a_snapshot() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("already exists"));
 
     // A snapshot, through a fork that is gone afterwards.
-    let out = rig.cave(&["export", "first", "-o", "old"]);
+    let out = rig.cave(&["export", "old", "--from", "first"]);
     assert!(
         out.status.success(),
         "{}",

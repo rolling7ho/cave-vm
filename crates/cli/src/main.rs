@@ -138,11 +138,12 @@ enum Cmd {
     },
     /// Copy the project out of the VM, or a snapshot, into a folder.
     Export {
-        /// A snapshot from `cave ls`; the running VM when left out.
-        snapshot: Option<String>,
-        /// The folder; ./<project>-export-<date> when left out.
-        #[arg(short = 'o', value_name = "DIR")]
-        out: Option<std::path::PathBuf>,
+        /// The folder, created after asking if it does not exist;
+        /// ./<project>-export-<date> when left out.
+        folder: Option<std::path::PathBuf>,
+        /// Export this snapshot, from `cave ls`, instead of the VM.
+        #[arg(long, value_name = "SNAPSHOT")]
+        from: Option<String>,
     },
     /// Show disk usage and reclaim what is safe to delete.
     Gc {
@@ -333,7 +334,7 @@ fn main() -> ExitCode {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
-        Cmd::Export { snapshot, out } => export::run(snapshot, out),
+        Cmd::Export { folder, from } => export::run(folder, from),
         Cmd::Fork { name, from } => snapshot::fork(name, from),
         Cmd::Gc { yes, json } => gc::run(yes, json),
         Cmd::Images { json } => commands::images(json),

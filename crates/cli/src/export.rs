@@ -1,7 +1,9 @@
 //! `cave export`: copies the project directory out of the VM, or out of a
-//! snapshot, into a folder on the Mac (docs/cli.md, "cave export", D19).
+//! snapshot, into a folder on the Mac (docs/cli.md, "cave export", D19,
+//! D38).
 
 use std::fs;
+use std::io::{self, BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -99,16 +101,44 @@ fn check_target(dir: &Path) -> Result<()> {
     let taken = fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some()) || dir.is_file();
     if taken {
         return Err(CliError::new(format!("{} already exists", dir.display()))
-            .fix("Pass another folder with -o, or remove that one"));
+            .fix("Name another folder, as in cave export ../backup, or remove that one"));
     }
     Ok(())
 }
 
-/// `cave export [snapshot] [-o <dir>]`.
-pub fn run(snapshot: Option<String>, out: Option<PathBuf>) -> Result<()> {
+/// Whether to create `dir`, which the user named and which does not
+/// exist: asked in a terminal, with yes as the default; without one it is
+/// created and the caller says so (D38).
+fn may_create(dir: &Path) -> Result<bool> {
+    if !io::stdin().is_terminal() {
+        return Ok(true);
+    }
+    eprint!("{} does not exist. Create it? [Y/n] ", dir.display());
+    let mut answer = String::new();
+    io::stdin().lock().read_line(&mut answer)?;
+    Ok(answer_is_yes(&answer))
+}
+
+/// An empty answer counts as yes.
+fn answer_is_yes(answer: &str) -> bool {
+    matches!(answer.trim(), "" | "y" | "Y" | "yes" | "Yes")
+}
+
+/// `cave export [folder] [--from <snapshot>]`.
+pub fn run(folder: Option<PathBuf>, snapshot: Option<String>) -> Result<()> {
     let project = project::require()?;
-    let target = match out {
-        Some(dir) => dir,
+    let target = match folder {
+        Some(dir) => {
+            if !dir.exists() {
+                if !may_create(&dir)? {
+                    return Err(CliError::new("nothing was exported"));
+                }
+                if !io::stdin().is_terminal() {
+                    eprintln!("Creating {}", dir.display());
+                }
+            }
+            dir
+        }
         None => PathBuf::from(format!("./{}-export-{}", folder_name(&project), today()?)),
     };
     check_target(&target)?;
@@ -169,6 +199,14 @@ mod tests {
         assert_eq!(thousands(1_234_567), "1,234,567");
         assert_eq!(thousands(999), "999");
         assert_eq!(size(3 << 30), "3.0 GB");
+    }
+
+    #[test]
+    fn enter_means_create() {
+        assert!(answer_is_yes("\n"));
+        assert!(answer_is_yes("y\n"));
+        assert!(!answer_is_yes("n\n"));
+        assert!(!answer_is_yes("no\n"));
     }
 
     #[test]

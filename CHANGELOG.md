@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Changed
 
+- `cave export [folder] [--from <snapshot>]` replaces `cave export [snapshot] [-o <dir>]`. A folder that does not exist is created after asking (D38).
 - `cave init` writes the agent instructions to `.cave/AGENTS.md` and puts only a line pointing there in the project's `AGENTS.md`, replacing the whole section older versions wrote. `cave agent codex` passes the text to Codex directly, since it has no shell to open the file (D37).
 - The audit log's newest entries are in `audit-latest.log`. Past 10 MB it is renamed `audit-<date>-<time>.log` and a new one starts, so no file grows without limit; `cave inspect --log` reads them all. An existing `audit.log` becomes `audit-latest.log` on the next write (D36).
 - `cave exec <cmd>` and `cave agent <name> <args>` no longer need `--` before the command or the agent's arguments; everything from there on belongs to them, so cave's flags go first. `--` still works (D35).
