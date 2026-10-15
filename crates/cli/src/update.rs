@@ -1,33 +1,46 @@
-//! cave updating itself (D45, decision 0018). The daemon's update detector
-//! records the newest cave release in `updates.json`; before a command,
-//! [`start_if_newer`] installs it in the background, the way this copy was
-//! installed, when no VM is running. A daemon left from another version
-//! is replaced by [`daemon_is_stale`] and [`stop_daemon`] once no VM runs.
+//! cave updating itself (D45, D47; decisions 0018 and 0020). When cave
+//! runs in a terminal, [`offer_update`] looks up the newest stable release
+//! in the background, and when one is newer than this copy it asks whether
+//! to install it now, the way this copy was installed. A daemon left from
+//! another version is replaced by [`daemon_is_stale`] and [`stop_daemon`]
+//! once no VM runs.
 
-use std::fs::{self, OpenOptions};
+use std::fs;
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use cave_vm_proto::daemon::{Reply, Request, VmState};
 use serde_json::{Value, json};
 
-use crate::client::{Connection, data_dir};
+use crate::client::data_dir;
 use crate::project;
 use crate::style::Paint;
 
-/// The detector's record, in the data folder.
+/// The image update detector's record, in the data folder. It also names
+/// the newest cave it saw.
 const RECORD: &str = "updates.json";
 
-/// When an install was last started, and for which version, so a failing
-/// one is tried again only a day later.
-const TRIED: &str = "update-tried.json";
+/// The latest release's `images.json`, as the last lookup fetched it. Its
+/// `cave` key is the newest stable release.
+const LATEST: &str = "latest.json";
 
-/// The install's output.
-const LOG: &str = "update.log";
+/// Touched when a lookup starts, so they are at most [`LOOKUP_EVERY`] apart.
+const LOOKED: &str = "latest.looked";
 
-/// How long before an install of the same version is tried again.
-const RETRY: u64 = 24 * 60 * 60;
+/// How long a lookup counts as fresh. Short, so a new release is offered
+/// soon, but long enough that a script of cave commands looks up once.
+const LOOKUP_EVERY: u64 = 10 * 60;
+
+/// A declined update, so it is not asked about again until [`ASK_AGAIN`].
+const DECLINED: &str = "update-declined.json";
+
+/// How long after "no" cave asks about the same version again.
+const ASK_AGAIN: u64 = 24 * 60 * 60;
+
+/// The latest stable release's manifest. Pre-releases are never "latest".
+const LATEST_URL: &str =
+    "https://github.com/rolling7ho/cave-vm/releases/latest/download/images.json";
 
 /// The release's install script, which installs the latest release.
 const INSTALL_SCRIPT: &str =
@@ -121,17 +134,21 @@ fn display(version: &str) -> String {
     Version::parse(version).map_or_else(|| version.to_string(), |v| v.display())
 }
 
-/// The newest stable release, as the update detector last recorded it.
+/// The newest stable release cave has seen: from its own lookup, or else
+/// from the image update detector's record.
 fn latest_stable() -> Option<String> {
-    let record = read_json(&data_dir().ok()?.join(RECORD))?;
-    record.get("cave")?.as_str().map(str::to_string)
+    let data = data_dir().ok()?;
+    [LATEST, RECORD].iter().find_map(|file| {
+        let doc = read_json(&data.join(file))?;
+        doc.get("cave")?.as_str().map(str::to_string)
+    })
 }
 
 /// What `cave --version` prints: this version, and the newest stable
-/// release the update detector has seen (it looks once a day).
+/// release cave has seen.
 pub fn version_text() -> String {
     let latest = latest_stable().map_or_else(
-        || "not looked up yet; cave looks once a day while a VM runs".to_string(),
+        || "not looked up yet; cave looks when you run it in a terminal".to_string(),
         |v| display(&v),
     );
     format!("{}\nLatest Stable: {latest}", display(VERSION))
@@ -206,39 +223,74 @@ fn now_unix() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// Whether any VM is running, as the daemon says.
-fn any_running() -> Option<bool> {
-    match Connection::call(&Request::List { project: None }).ok()? {
-        Reply::List { entries } => Some(entries.iter().any(|e| e.state == Some(VmState::Running))),
-        _ => None,
-    }
+/// Seconds since `path` was last changed; `None` if it does not exist.
+fn age(path: &Path) -> Option<u64> {
+    let changed = fs::metadata(path).ok()?.modified().ok()?;
+    let changed = changed.duration_since(UNIX_EPOCH).ok()?.as_secs();
+    Some(now_unix().saturating_sub(changed))
 }
 
-/// Before a command: if the detector has seen a newer cave, starts
-/// installing it in the background and says so. Best effort; it never
-/// stops the command.
-pub fn start_if_newer() {
-    let Ok(data) = data_dir() else { return };
-    let Some(newest) = latest_stable() else {
-        return;
-    };
-    if !newer(&newest, VERSION) {
+/// Fetches the latest release's manifest into [`LATEST`] in the background,
+/// unless a lookup started less than [`LOOKUP_EVERY`] ago. The command does
+/// not wait for it; what it finds is offered the next time cave runs.
+fn look_up_soon(data: &Path) {
+    let looked = data.join(LOOKED);
+    if age(&looked).is_some_and(|age| age < LOOKUP_EVERY) {
         return;
     }
-    let tried = read_json(&data.join(TRIED));
-    let recently = tried.as_ref().is_some_and(|t| {
-        t["version"] == newest.as_str()
-            && now_unix().saturating_sub(t["at"].as_u64().unwrap_or(0)) < RETRY
-    });
-    if recently {
+    if fs::write(&looked, b"").is_err() {
         return;
     }
-    let off = project::current_dir()
+    // A plain GET with no identifying data, as the image detector's. nohup
+    // keeps it going when the terminal closes right after the command.
+    let _ = Command::new("/usr/bin/nohup")
+        .args([
+            "/bin/sh",
+            "-c",
+            r#"/usr/bin/curl -fsSL --max-time 20 -o "$1.part" "$2" && /bin/mv "$1.part" "$1""#,
+            "sh",
+        ])
+        .arg(data.join(LATEST))
+        .arg(LATEST_URL)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+/// The project's `cave.toml`, if cave runs in one, turns updates off.
+fn updates_off() -> bool {
+    project::current_dir()
         .ok()
         .and_then(|dir| project::find(&dir, project::home().as_deref()))
         .and_then(|p| fs::read_to_string(p.join(project::CONFIG_FILE)).ok())
-        .is_some_and(|config| turned_off(&config));
-    if off {
+        .is_some_and(|config| turned_off(&config))
+}
+
+/// `version` was declined less than [`ASK_AGAIN`] ago.
+fn declined_recently(data: &Path, version: &str) -> bool {
+    read_json(&data.join(DECLINED)).is_some_and(|d| {
+        d["version"] == version
+            && now_unix().saturating_sub(d["at"].as_u64().unwrap_or(0)) < ASK_AGAIN
+    })
+}
+
+/// Before a command run in a terminal: looks up the newest stable release
+/// in the background, and if one already seen is newer than this copy,
+/// asks whether to install it now. After installing it, cave stops so the
+/// command runs again on the new version. Scripts and pipes are never
+/// asked and never look anything up.
+pub fn offer_update() {
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() || updates_off() {
+        return;
+    }
+    let Ok(data) = data_dir() else { return };
+    let _ = fs::create_dir_all(&data);
+    look_up_soon(&data);
+    let Some(newest) = latest_stable() else {
+        return;
+    };
+    if !newer(&newest, VERSION) || declined_recently(&data, &newest) {
         return;
     }
     let Some(install) = std::env::current_exe()
@@ -248,35 +300,44 @@ pub fn start_if_newer() {
     else {
         return;
     };
-    if any_running() != Some(false) {
+    let paint = Paint::stderr();
+    eprint!(
+        "{} cave {} is out; you have {}. Update now? [Y/n] ",
+        paint.notice("update:"),
+        display(&newest),
+        display(VERSION)
+    );
+    let _ = io::stderr().flush();
+    let mut answer = String::new();
+    // Ctrl-D, like an error, is not a yes.
+    if !matches!(io::stdin().lock().read_line(&mut answer), Ok(n) if n > 0) {
+        eprintln!();
         return;
     }
-    let record = json!({ "version": newest, "at": now_unix() });
-    if fs::write(data.join(TRIED), record.to_string() + "\n").is_err() {
+    if !matches!(answer.trim(), "" | "y" | "Y" | "yes" | "Yes") {
+        let record = json!({ "version": newest, "at": now_unix() });
+        let _ = fs::write(data.join(DECLINED), record.to_string() + "\n");
+        eprintln!("Not now. cave asks again tomorrow");
         return;
     }
-    let Ok(log) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(data.join(LOG))
-    else {
-        return;
-    };
-    let Ok(err) = log.try_clone() else { return };
-    // nohup keeps the install going when this terminal closes.
-    let started = Command::new("/usr/bin/nohup")
-        .args(["/bin/sh", "-c", &install_command(&install)])
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(log))
-        .stderr(Stdio::from(err))
-        .spawn();
-    if started.is_ok() {
+    let command = install_command(&install);
+    eprintln!("Updating cave to {}", display(&newest));
+    let installed = Command::new("/bin/sh")
+        .args(["-c", &command])
+        .status()
+        .is_ok_and(|s| s.success());
+    if installed {
         eprintln!(
-            "{} cave {newest} is out; installing it in the background (log: {}). The next command uses it",
-            Paint::stderr().notice("update:"),
-            data.join(LOG).display()
+            "Updated cave to {}. Run your command again to use it",
+            display(&newest)
         );
+        std::process::exit(0);
     }
+    eprintln!(
+        "{} the update did not finish; carrying on with {}. To update by hand: {command}",
+        paint.warning("warning:"),
+        display(VERSION)
+    );
 }
 
 /// The daemon at the other end of a handshake that sent `software` is a
