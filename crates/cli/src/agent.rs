@@ -41,6 +41,30 @@ const INSTALL_CODEX_IN_VM: &str = "command -v codex >/dev/null || \
      { echo 'Installing Codex in the VM with npm'; \
      sudo npm install -g @openai/codex; }";
 
+/// What an agent in the VM is told, since the project's skill and
+/// `AGENTS.md` line are written for agents on the Mac.
+const IN_VM_NOTE: &str = "You are running inside this project's cave VM, a disposable Linux machine, and /workspace is the project. Run commands and edit files directly with your own tools. Instructions that say to use `cave` commands or the cave MCP tools are for agents on the Mac; ignore them here, and do not look for .cave/AGENTS.md.";
+
+/// The arguments that keep the project's Mac-side setup away from agent
+/// `name` in the VM: Claude Code reads only its user settings, so the
+/// project's deny rules and `.mcp.json` server (written for the Mac) do
+/// not apply, and both agents get [`IN_VM_NOTE`].
+fn in_vm_setup(name: &str) -> Vec<String> {
+    match name {
+        "codex" => vec![
+            "-c".into(),
+            format!("developer_instructions={}", json!(IN_VM_NOTE)),
+        ],
+        _ => vec![
+            "--setting-sources".into(),
+            "user".into(),
+            "--strict-mcp-config".into(),
+            "--append-system-prompt".into(),
+            IN_VM_NOTE.into(),
+        ],
+    }
+}
+
 /// The line printed before an agent starts with its prompts skipped.
 const SKIPPED_LINE: &str = "Permissions skipped. The VM is the sandbox.";
 
@@ -299,7 +323,8 @@ fn claude_args(cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String>
 
 /// Agent `name` in the VM, found where its installer puts it, with its
 /// prompts skipped unless `safe`, then `extra` passed through unchanged.
-/// `BROWSER` is the helper that opens sign-in links on the Mac (D56).
+/// `BROWSER` is the helper that opens sign-in links on the Mac (D56), and
+/// [`in_vm_setup`] comes before `extra`.
 fn in_vm_argv(name: &str, safe: bool, extra: &[String]) -> Vec<String> {
     let mut argv = vec![
         "bash".to_string(),
@@ -313,6 +338,7 @@ fn in_vm_argv(name: &str, safe: bool, extra: &[String]) -> Vec<String> {
     if !safe {
         argv.push(skip_flag(name).into());
     }
+    argv.extend(in_vm_setup(name));
     argv.extend(extra.iter().cloned());
     argv
 }
@@ -403,8 +429,8 @@ mod tests {
     #[test]
     fn in_the_vm_arguments_pass_through_unquoted() {
         assert_eq!(
-            in_vm_argv("claude", true, &["-p".into(), "it's \"quoted\"".into()])[3..],
-            ["claude", "-p", "it's \"quoted\""]
+            in_vm_argv("claude", true, &["-p".into(), "it's \"quoted\"".into()])[9..],
+            ["-p", "it's \"quoted\""]
         );
     }
 
@@ -412,13 +438,29 @@ mod tests {
     fn in_the_vm_prompts_are_skipped_unless_safe() {
         assert_eq!(
             in_vm_argv("claude", false, &["-p".into(), "hi".into()])[3..],
-            ["claude", "--dangerously-skip-permissions", "-p", "hi"]
+            [
+                "claude",
+                "--dangerously-skip-permissions",
+                "--setting-sources",
+                "user",
+                "--strict-mcp-config",
+                "--append-system-prompt",
+                IN_VM_NOTE,
+                "-p",
+                "hi"
+            ]
         );
+        let note = format!("developer_instructions={}", json!(IN_VM_NOTE));
         assert_eq!(
             in_vm_argv("codex", false, &[])[3..],
-            ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+            [
+                "codex",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                &note
+            ]
         );
-        assert_eq!(in_vm_argv("codex", true, &[])[3..], ["codex"]);
+        assert_eq!(in_vm_argv("codex", true, &[])[3..], ["codex", "-c", &note]);
     }
 
     #[test]
