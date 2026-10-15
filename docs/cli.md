@@ -160,7 +160,8 @@ Sets up the current directory as a project. It writes:
   - `.cave/AGENTS.md`: the skill without its frontmatter. It is written again by the next command that boots the VM if `cave rm` removed it.
   - `AGENTS.md`: `This project runs in a cave VM. Before doing anything, read .cave/AGENTS.md: it says how to work inside the VM.`, between `<!-- cave:start -->` and `<!-- cave:end -->`. A section an older cave wrote there, with the whole text, is replaced by this line.
   - `.mcp.json`: registers `cave mcp` as the `cave` server.
-  - `.claude/settings.json`: adds `Bash` and `Read(./.env)` to `permissions.deny`, so Claude Code has no shell on the Mac and reaches the VM through MCP, and cannot read the credentials in `.env`. Claude Code asks once to approve the `cave` server, since a project's own settings cannot approve it.
+  - `.claude/settings.json`: adds `Bash`, `Read(./.env)`, `Edit`, `Write` and `NotebookEdit` to `permissions.deny`, so Claude Code has no shell on the Mac and reaches the VM through MCP, cannot read the credentials in `.env`, and cannot edit Mac files, whose edits would never reach the VM. Claude Code asks once to approve the `cave` server, since a project's own settings cannot approve it.
+  - `.claude/settings.local.json`, only after a yes to the question below: `permissions.defaultMode` set to `bypassPermissions`, and `Read`, `Glob`, `Grep` and `WebFetch` denied as well as the list above, so plain `claude` skips its prompts and can act only through the `cave` tools. The file is personal, so it is added to `.gitignore` ([D55](../ROADMAP.md#decisions)).
 
   Other settings in those files are kept. A file that already has these entries is not rewritten. A file that is not valid JSON is an error that says to fix it, and is left alone.
 
@@ -178,7 +179,13 @@ When stdin is a terminal and neither `--sealed` nor `--synced` is given, it asks
 Keep a copy of the code on your Mac? It lets you use your Mac editor and Spotlight. [y/N]
 ```
 
-Without a terminal it picks sealed and says so.
+and next to it whether plain `claude` may skip its permission prompts, with no as the default ([D55](../ROADMAP.md#decisions)):
+
+```
+Let Claude Code skip its permission prompts in this project? Its own tools on the Mac are turned off, so it can act only inside the VM, which is its sandbox. [y/N]
+```
+
+That second question is asked whenever stdin is a terminal and `cave.toml` is new, with or without `--sealed` and `--synced`. Without a terminal it picks sealed and no, and says so for sealed. MCP servers and plugins from your own Claude Code settings still run on the Mac ([docs/safety.md](safety.md#the-agent-boundary)).
 
 Running `cave init` again in a project is safe: it refreshes the skill files and never changes `cave.toml`.
 
@@ -194,7 +201,7 @@ Output:
 Created cave.toml (sealed, debian, 2 CPUs, 2 GB)
 Added .cave/ to .gitignore
 Wrote .cave/AGENTS.md, a line pointing to it in AGENTS.md, and .claude/skills/cave
-Set up Claude Code to use cave mcp, with host Bash and reading .env denied (.mcp.json, .claude/settings.json)
+Set up Claude Code to use cave mcp, with host Bash, Mac edits and reading .env denied (.mcp.json, .claude/settings.json)
 Added an Include line to ~/.ssh/config for cave's SSH hosts
 Edit in the VM: connect VS Code Remote-SSH or Zed to my-project.cave
 Next: cave shell, or cave agent claude
@@ -604,7 +611,7 @@ Denying Bash is a guardrail with limits: Claude Code keeps its other tools on th
 
 Agents in v1: `claude` (Claude Code) and `codex` (Codex, [D44](../ROADMAP.md#decisions), [D54](../ROADMAP.md#decisions)).
 
-With `--on-mac`, `cave` starts `claude` in the project folder with `--mcp-config`, naming `cave mcp` as the `cave` server (`cave mcp --fork <name>` with `--fork`), and `--disallowedTools=Bash,Read(./.env)`, which takes the Bash tool away from it and stops its Read and Grep tools from opening `.env`. Without the second rule, Claude Code on the Mac could read the credentials straight from `.env`. All of this was checked with Claude Code 2.1 on a Mac. In `--fork` runs there is no snapshot first, since forks cannot be snapshotted yet, and `cave` says so.
+With `--on-mac`, `cave` starts `claude` in the project folder with `--mcp-config`, naming `cave mcp` as the `cave` server (`cave mcp --fork <name>` with `--fork`), and `--disallowedTools=Bash,Read(./.env),Edit,Write,NotebookEdit`, which takes the Bash tool and its file-editing tools away from it and stops its Read and Grep tools from opening `.env`. Without the second rule, Claude Code on the Mac could read the credentials straight from `.env`. All of this was checked with Claude Code 2.1 on a Mac. In `--fork` runs there is no snapshot first, since forks cannot be snapshotted yet, and `cave` says so.
 
 Inside the VM, `cave` installs Claude Code with `curl -fsSL https://claude.ai/install.sh | bash` if it is not there, then runs it with `--dangerously-skip-permissions` (left out with `--safe`) on a pseudo-terminal like `cave shell`, so it needs a terminal.
 

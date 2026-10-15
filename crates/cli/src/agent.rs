@@ -221,10 +221,11 @@ fn snapshot_before(vm: &VmId) -> Result<Option<String>> {
     }
 }
 
-/// What Claude Code on the Mac may not use: a shell, and its Read tool on
-/// `.env`, which holds the credentials (D33). Checked with Claude Code 2.1:
-/// the Read rule covers Grep too.
-pub const DENIED_TOOLS: [&str; 2] = ["Bash", "Read(./.env)"];
+/// What Claude Code on the Mac may not use: a shell, its Read tool on
+/// `.env`, which holds the credentials (D33), and its tools that edit
+/// files on the Mac, whose edits never reach the VM (D55). Checked with
+/// Claude Code 2.1: the Read rule covers Grep too.
+pub const DENIED_TOOLS: [&str; 5] = ["Bash", "Read(./.env)", "Edit", "Write", "NotebookEdit"];
 
 /// The arguments for agent `name` on the Mac.
 fn mac_args(name: &str, cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String> {
@@ -348,7 +349,11 @@ mod tests {
         );
         assert_eq!(
             args[2..],
-            ["--disallowedTools=Bash,Read(./.env)", "-p", "hi"]
+            [
+                "--disallowedTools=Bash,Read(./.env),Edit,Write,NotebookEdit",
+                "-p",
+                "hi"
+            ]
         );
 
         let args = claude_args(Path::new("/opt/cave"), Some("try"), &[]);
