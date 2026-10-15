@@ -288,3 +288,4 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D49 | Ivan asked to stop asking contributors to mark AI assistance. | The PR template and `CONTRIBUTING.md` no longer ask; AI-assisted contributions stay welcome (decision 0022). |
 | D50 | Ivan asked to stop tracking `.claude`. | `.claude/` is in `.gitignore` and untracked; `cave init` still writes it into user projects (decision 0023). |
 | D51 | Ivan chose to prune the snapshots before agent runs and pushes. | They are automatic snapshots that count towards `[snapshots] keep`; a restore with no name passes over only undo points (decision 0024). |
+| D52 | Ivan set which releases get security fixes. | The 3 newest stable releases; a copy 2 or more behind is asked every time and stops on a no; `images.json` lists every stable release (decision 0025). |
