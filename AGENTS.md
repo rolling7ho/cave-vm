@@ -68,7 +68,7 @@ The last section, "Maintainer agents", is how Ivan's own agents work in this rep
 
 ## Maintainer agents
 
-These rules are for the agents working for Ivan, on top of everything above. They never touch branch protection or publish images or releases, as well as staying away from signing, release and CI secrets.
+These rules are for the agents working for Ivan, on top of everything above. They do not touch signing, release or CI secrets or branch protection, and do not publish images or releases.
 
 1. Request a review from @rolling7ho on every PR (`gh pr edit <n> --add-reviewer rolling7ho`).
 2. Watch main while PRs are open. After every merge:
