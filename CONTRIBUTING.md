@@ -33,10 +33,10 @@ Hardware tests that create real VMs are marked `#[ignore]`. On an Apple Silicon 
 cargo test --workspace -- --ignored --test-threads=1
 ```
 
-The gate 3 end-to-end test also needs the binaries and a locally built image:
+The end-to-end tests (gates 3 and 5, and snapshots) also need the binaries and a locally built kernel and image:
 
 ```sh
-image/debian/build.sh && image/manifest.sh
+image/kernel/build.sh && image/debian/build.sh && image/manifest.sh
 cargo build --workspace
 cargo test -p cave-vm-cli --test e2e -- --ignored
 ```

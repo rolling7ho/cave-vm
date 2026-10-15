@@ -17,7 +17,7 @@ The agent shows you each command and waits for your approval before running it, 
 
 The skill is the file `cave init` writes into your project, so what you paste here is what your agent keeps following.
 
-Prefer to install by hand? Run `brew install rolling7ho/cave/cave-vm`, then `cave init` in your project.
+Prefer to install by hand? Run `brew install rolling7ho/cave/cave-vm`, or without Homebrew `curl -fsSL https://github.com/rolling7ho/cave-vm/releases/latest/download/install.sh | sh`, then `cave init` in your project.
 
 ## The skill (what the copy button copies)
 
@@ -51,6 +51,8 @@ This project runs in a disposable Linux VM made by cave. The project folder iden
 | `cave snapshot [name]` | Save the VM's state |
 | `cave restore [name]` | Go back to a snapshot |
 | `cave fork [name]` | Make a copy of the VM to try something |
+| `cave exec --fork <name> -- <command>` | Run a command in a fork |
+| `cave rm <fork>` | Remove a fork |
 | `cave cp <from> <to>` | Copy files in or out; VM paths start with `:` |
 | `cave inspect` | Show the policy, resources and what the VM did |
 | `cave ls` | List this project's VM, forks and snapshots |

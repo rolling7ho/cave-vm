@@ -20,7 +20,7 @@ await fork.destroy();
 | `Sandbox.open(path = ".")` | The VM of the project `path` is in, found from `cave.toml` as `cave` finds it |
 | `start()` | Boots the VM if needed and returns its policy |
 | `exec(argv, { cwd, env, stdin, credentials })` | Runs a command and returns `{ code, signal, stdout, stderr, success }`, with the output as Buffers |
-| `readFile(path)` / `writeFile(path, data)` | Files in the VM; relative paths are under `/workspace` |
+| `readFile(path)` / `writeFile(path, contents)` | Files in the VM; relative paths are under `/workspace` |
 | `snapshot(name?)` / `restore(name?)` | Save the VM's state, and roll back to it |
 | `fork({ name, fromSnapshot })` | A new copy-on-write fork; `.sandbox` is the fork |
 | `forkNamed(name)` | An existing fork |

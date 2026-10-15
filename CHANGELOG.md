@@ -4,6 +4,9 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Changed
+- The docs match the code again: stale error messages and prompts in `docs/cli.md`, `[snapshots]`, `cpus` and `disk` in `docs/config.md`, the daemon requests in `docs/protocol.md`, and smaller fixes across the safety, snapshot, contributor and SDK docs. `cave init`'s skill now lists `cave exec --fork` and `cave rm <fork>`.
+
 ## [0.1.2-rc.2] - 2026-10-15
 
 The second release candidate for 0.1.2: cave asks before updating.

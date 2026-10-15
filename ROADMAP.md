@@ -201,7 +201,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 ## Cross-cutting rules
 
 - **Testing.** Device models are tested against the mock backend, with no network in any test. Hardware and end-to-end tests run on the self-hosted Mac and are kept out of the default `cargo test` run.
-- **unsafe.** Only in `hvf` and the guest-memory code, each block with a `// SAFETY:` comment. Every other crate has `#![deny(unsafe_code)]`.
+- **unsafe.** Only in `hvf`, the guest-memory code, the `vmm` `host` module and the `agent` `sys` module (D24), each block with a `// SAFETY:` comment. Every other crate or module has `#![deny(unsafe_code)]`.
 - **Dependencies.** None added without asking first, with the reason. [D4] lists the ones this plan expects to request, asked for once per phase.
 - **Off limits to agents.** Signing, release and CI secrets, branch protection, and publishing images or releases.
 - **Changelog.** Every user-visible change adds a line under Unreleased in `CHANGELOG.md`.

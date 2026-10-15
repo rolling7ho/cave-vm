@@ -176,7 +176,7 @@ This object is written `vm` below.
 
 ### Long-running operations
 
-Requests that take time (`start`, `snapshot`, `restore`, `fork`, image fetches during setup) send progress before the result:
+`start` sends `progress` while it downloads an image, and `sync` sends one while it waits for the VM, before the result:
 
 ```json
 {"type": "progress", "message": "downloading the debian image: 20% of 0.5 GB", "done": 104857600, "total": 524288000}
@@ -188,22 +188,24 @@ Requests that take time (`start`, `snapshot`, `restore`, `fork`, image fetches d
 
 | Request | Fields | Reply |
 | --- | --- | --- |
-| `init` | `project`, `storage` (`"sealed"` or `"synced"`), `image` | `ok` |
+| `init` | reserved | `cave init` writes its files itself, and the daemon answers `init` with `bad_request` |
 | `start` | `vm`, `net` (optional: `"off"`, `"nat"` or `"lan"`, from `--net`; the mode in `cave.toml` when left out), `ports` (list of `{mac, vm}`) | `policy` |
-| `stop` | `vm` | `ok` |
+| `stop` | `vm` | `ok` once the VM is suspended, its memory saved |
 | `stop_all` | none | `stopped_all`. Every running VM on the Mac stops at once without being saved, for `cave stop --force` ([D43](../ROADMAP.md#decisions)): each VMM gets SIGTERM, and SIGKILL 5 seconds later if it is still running |
 | `exec` | `vm`, the agent's `exec` fields, `credentials` (list of names) | the agent's stream, ending in `exit` |
 | `shell` | `vm`, the agent's `pty_open` fields | the agent's pty stream, ending in `exit` |
 | `ssh` | `vm` | `ok` once the agent has connected to sshd, port 22 in the guest, with `port_forward`. From then on the connection carries raw bytes, for remote editing. A `not_found` error means sshd is not listening yet |
 | `file_read` / `file_write` | `vm`, the agent's fields | as on the agent link |
-| `snapshot` | `vm`, `name` (optional; the default name otherwise) | `snapshot` with the name and size. A running VM keeps running and its memory is saved; a stopped VM's disk is saved |
-| `restore` | `vm`, `name` (optional; the newest snapshot taken by name otherwise) | `restored` once the VM runs from the snapshot. The state before is saved first as an automatic snapshot. `memory_restored` is `false` when it fell back to a disk boot |
+| `snapshot` | `vm`, `name` (optional; the default name otherwise) | `snapshot` with the name and size. A running VM keeps running and its memory is saved; a stopped VM's disk is saved. For a synced project, the Mac mirror is then synced |
+| `restore` | `vm`, `name` (optional; the newest snapshot otherwise, preferring named ones) | `restored` once the VM runs from the snapshot. The state before is saved first as an automatic snapshot, unless `[snapshots] auto` is `false`. `memory_restored` is `false` when it fell back to a disk boot |
 | `fork` | `vm`, `name` (optional; `fork-1`, `fork-2` and so on otherwise), `from` (optional snapshot; the VM's current state otherwise) | `forked` once the fork is running. It is then addressed as a `vm` with `fork` set |
 | `list` | `project` (optional; all known projects if absent) | `list` with VMs, forks and snapshots |
-| `remove` | `vm`, `name` (optional) | `ok` |
+| `remove` | `vm`, `name` (optional: the snapshot or fork to delete; without it the VM, its forks and its `.cave/` state are removed) | `ok`, or `not_found` for an unknown name |
 | `inspect` | `vm`, `log_limit` | `policy`, `resources` and `audit` entries |
 | `sync` | `vm` (a synced project's own VM) | `synced`. If the VM is not running, a `progress` with `waiting for the VM` comes first and the reply waits until it runs. A sealed project or a fork is refused at once with `bad_request` |
 | `pull` | `vm` (a synced project's own, running VM) | `pulled`, or an `error` with code `conflict` and a `files` list, in which case nothing was applied |
+
+`snapshot`, `restore` and `fork` act on a project's own VM only; with `fork` set in `vm` they are refused with `bad_request`.
 | `gc` | `apply` (boolean) | `usage`, and what was reclaimed when `apply` is true |
 | `images` | none | `images` |
 | `doctor` | none | `checks`, each with `name`, `ok` and `fix` |
