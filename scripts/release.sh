@@ -3,12 +3,14 @@
 #
 #   scripts/release.sh 0.1.1 --dry-run   # build everything into target/dist, publish nothing
 #   scripts/release.sh 0.1.1             # the same, then publish after asking
-#   scripts/release.sh 0.1.2 --prerelease "internal RC 1"
+#   scripts/release.sh 0.1.2-rc.1        # a release candidate
+#   scripts/release.sh 0.1.3-beta.1      # a beta
 #
-# --prerelease <label> publishes a GitHub pre-release titled
-# "cave-vm <version> (<label>)" and leaves the Homebrew formula alone.
-# GitHub's latest release stays where it was, so the install script, the
-# formula and copies updating themselves stay on it too.
+# A version ending in -rc.N or -beta.N is published as a GitHub pre-release
+# titled "cave-vm 0.1.2 RC 1" or "cave-vm 0.1.3 Beta 1", and the Homebrew
+# formula is left alone. GitHub's latest release stays where it was, so the
+# install script, the formula and copies updating themselves stay on the
+# latest stable release. `cave --version` shows the same label.
 #
 # Before running it, merge the usual "chore: release <version>" PR: the
 # workspace version in Cargo.toml is <version>, and CHANGELOG.md has a
@@ -44,23 +46,17 @@ fail() {
 
 version="${1:-}"
 dry_run=no
-prerelease=""
-[ $# -gt 0 ] && shift
-while [ $# -gt 0 ]; do
-    case "$1" in
-    --dry-run) dry_run=yes ;;
-    --prerelease)
-        [ $# -ge 2 ] && [ -n "$2" ] || fail "--prerelease needs a label, like: --prerelease \"internal RC 1\""
-        prerelease="$2"
-        shift
-        ;;
-    *) fail "unknown option $1; the options are: <version> [--dry-run] [--prerelease <label>]" ;;
-    esac
-    shift
-done
-echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
-    fail "give the version to release, like: scripts/release.sh 0.1.1 --dry-run"
+case "${2:-}" in
+"") ;;
+--dry-run) dry_run=yes ;;
+*) fail "unknown option $2; the options are: <version> [--dry-run]" ;;
+esac
+echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(rc|beta)\.[0-9]+)?$' ||
+    fail "give the version to release, like: scripts/release.sh 0.1.1 --dry-run, or 0.1.2-rc.1 or 0.1.3-beta.1"
 tag="v$version"
+# 0.1.2-rc.1 is "RC 1" and 0.1.3-beta.1 is "Beta 1"; a stable release has no label.
+prerelease="$(echo "$version" | sed -n -e 's/^.*-rc\.\([0-9]*\)$/RC \1/p' -e 's/^.*-beta\.\([0-9]*\)$/Beta \1/p')"
+title="cave-vm ${version%%-*}${prerelease:+ $prerelease}"
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -132,9 +128,7 @@ if [ "$dry_run" = yes ]; then
     exit 0
 fi
 
-title="cave-vm $version"
 if [ -n "$prerelease" ]; then
-    title="$title ($prerelease)"
     printf 'Publish %s as a pre-release: push tag %s and create it, leaving %s alone? [y/N] ' "$title" "$tag" "$TAP"
 else
     printf 'Publish cave-vm %s: push tag %s, create the release and update %s? [y/N] ' "$version" "$tag" "$TAP"

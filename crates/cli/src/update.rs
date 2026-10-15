@@ -48,16 +48,93 @@ enum Install {
     Script(PathBuf),
 }
 
-/// `a` is a newer `x.y.z` version than `b`.
+/// What a release is before it is stable, in the order they come.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Stage {
+    Beta,
+    Rc,
+    Stable,
+}
+
+/// A cave version: `x.y.z`, or `x.y.z-beta.N` or `x.y.z-rc.N` before it
+/// is stable. Orders as releases come: 0.1.2-beta.1, 0.1.2-rc.1, 0.1.2.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Version {
+    number: [u64; 3],
+    stage: Stage,
+    count: u64,
+}
+
+impl Version {
+    fn parse(text: &str) -> Option<Version> {
+        let text = text.trim().trim_start_matches('v');
+        let (number, pre) = match text.split_once('-') {
+            Some((number, pre)) => (number, Some(pre)),
+            None => (text, None),
+        };
+        let parts: Vec<u64> = number
+            .split('.')
+            .map(|p| p.parse().ok())
+            .collect::<Option<_>>()?;
+        let number: [u64; 3] = parts.try_into().ok()?;
+        let (stage, count) = match pre {
+            None => (Stage::Stable, 0),
+            Some(pre) => {
+                let (stage, count) = pre.split_once('.')?;
+                let stage = match stage {
+                    "beta" => Stage::Beta,
+                    "rc" => Stage::Rc,
+                    _ => return None,
+                };
+                (stage, count.parse().ok()?)
+            }
+        };
+        Some(Version {
+            number,
+            stage,
+            count,
+        })
+    }
+
+    /// As people read it: `v0.1.2`, `v0.1.2 RC 1`, `v0.1.3 Beta 1`.
+    fn display(&self) -> String {
+        let [major, minor, patch] = self.number;
+        let base = format!("v{major}.{minor}.{patch}");
+        match self.stage {
+            Stage::Stable => base,
+            Stage::Rc => format!("{base} RC {}", self.count),
+            Stage::Beta => format!("{base} Beta {}", self.count),
+        }
+    }
+}
+
+/// `a` is a newer version than `b`.
 fn newer(a: &str, b: &str) -> bool {
-    let parse = |v: &str| -> Option<Vec<u64>> {
-        let parts: Option<Vec<u64>> = v.trim().split('.').map(|p| p.parse().ok()).collect();
-        parts.filter(|p| p.len() == 3)
-    };
-    match (parse(a), parse(b)) {
+    match (Version::parse(a), Version::parse(b)) {
         (Some(a), Some(b)) => a > b,
         _ => false,
     }
+}
+
+/// `version` as people read it, or as it is if it is not a cave version.
+fn display(version: &str) -> String {
+    Version::parse(version).map_or_else(|| version.to_string(), |v| v.display())
+}
+
+/// The newest stable release, as the update detector last recorded it.
+fn latest_stable() -> Option<String> {
+    let record = read_json(&data_dir().ok()?.join(RECORD))?;
+    record.get("cave")?.as_str().map(str::to_string)
+}
+
+/// What `cave --version` prints: this version, and the newest stable
+/// release the update detector has seen (it looks once a day).
+pub fn version_text() -> String {
+    let latest = latest_stable().map_or_else(
+        || "not looked up yet; cave looks once a day while a VM runs".to_string(),
+        |v| display(&v),
+    );
+    format!("{}\nLatest Stable: {latest}", display(VERSION))
 }
 
 /// How the `cave` at `exe` (already resolved) was installed; `None` for a
@@ -142,9 +219,7 @@ fn any_running() -> Option<bool> {
 /// stops the command.
 pub fn start_if_newer() {
     let Ok(data) = data_dir() else { return };
-    let Some(newest) =
-        read_json(&data.join(RECORD)).and_then(|doc| doc.get("cave")?.as_str().map(str::to_string))
-    else {
+    let Some(newest) = latest_stable() else {
         return;
     };
     if !newer(&newest, VERSION) {
@@ -270,6 +345,24 @@ mod tests {
         assert!(!newer("0.1.0", "0.1.0"));
         assert!(!newer("0.1.0", "0.1.1"));
         assert!(!newer("garbage", "0.1.0"));
+    }
+
+    #[test]
+    fn betas_come_before_rcs_before_the_stable_release() {
+        assert!(newer("0.1.2-rc.1", "0.1.2-beta.3"));
+        assert!(newer("0.1.2-rc.2", "0.1.2-rc.1"));
+        assert!(newer("0.1.2", "0.1.2-rc.2"));
+        // An RC of 0.1.2 never goes back to the stable 0.1.1.
+        assert!(!newer("0.1.1", "0.1.2-rc.1"));
+        assert!(!newer("0.1.2-alpha.1", "0.1.1"));
+    }
+
+    #[test]
+    fn versions_read_as_people_say_them() {
+        assert_eq!(display("0.1.2-rc.1"), "v0.1.2 RC 1");
+        assert_eq!(display("0.1.3-beta.1"), "v0.1.3 Beta 1");
+        assert_eq!(display("0.1.1"), "v0.1.1");
+        assert_eq!(display("odd"), "odd");
     }
 
     #[test]

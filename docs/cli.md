@@ -75,7 +75,7 @@ Warnings use the same shape with `warning:` and do not change the exit code.
 | Flag | Meaning |
 | --- | --- |
 | `-h`, `--help` | Show help for `cave` or a command |
-| `-V`, `--version` | Print the version, for example `cave 0.1.0` |
+| `-V`, `--version` | Print the version, such as `v0.1.2`, `v0.1.2 RC 1` or `v0.1.3 Beta 1`, and on a second line the newest stable release the update detector has seen: `Latest Stable: v0.1.1` |
 
 There are no other global flags. `cave --help` lists every command with its flags and arguments, and `cave <command> --help` explains each flag.
 
