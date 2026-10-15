@@ -137,7 +137,7 @@ pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
         println!("Added .cave/ to .gitignore");
     }
     skill::write_all(&dir)?;
-    println!("Wrote the cave section of AGENTS.md and .claude/skills/cave");
+    println!("Wrote .cave/AGENTS.md, a line pointing to it in AGENTS.md, and .claude/skills/cave");
     println!(
         "Set up Claude Code to use cave mcp, with host Bash and reading .env denied (.mcp.json, .claude/settings.json)"
     );
@@ -161,6 +161,11 @@ fn write_project(dir: &Path, storage: Storage, image: &str) -> Result<()> {
 pub fn project_or_set_up() -> Result<std::path::PathBuf> {
     let dir = project::current_dir()?;
     if let Some(found) = project::find(&dir, project::home().as_deref()) {
+        // `.cave/` goes with `cave rm`; the text the AGENTS.md line points
+        // to comes back with the VM (D37).
+        if !found.join(skill::CAVE_AGENTS_FILE).exists() {
+            let _ = skill::write_cave_agents(&found);
+        }
         return Ok(found);
     }
     check_folder(&dir)?;

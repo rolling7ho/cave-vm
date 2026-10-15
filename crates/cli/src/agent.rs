@@ -20,6 +20,7 @@ use crate::exec::{self, EXIT_CAVE_FAILED_RUNNING};
 use crate::init;
 use crate::mirror;
 use crate::shell;
+use crate::skill;
 
 /// The agents `cave agent` knows.
 const AGENTS: [&str; 2] = ["claude", "codex"];
@@ -187,6 +188,10 @@ fn codex_args(cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String> 
         format!("mcp_servers.cave.args={}", toml(json!(mcp_args))),
         "-c".into(),
         "mcp_servers.cave.default_tools_approval_mode=\"approve\"".into(),
+        // Codex has no shell here to open `.cave/AGENTS.md`, which the
+        // project's AGENTS.md points to (D37), so it gets the text itself.
+        "-c".into(),
+        format!("developer_instructions={}", toml(json!(skill::body()))),
     ];
     for feature in CODEX_DISABLED {
         args.extend(["--disable".into(), feature.into()]);
@@ -292,6 +297,8 @@ mod tests {
                 "mcp_servers.cave.args=[\"mcp\",\"--fork\",\"try\"]",
                 "-c",
                 "mcp_servers.cave.default_tools_approval_mode=\"approve\"",
+                "-c",
+                &format!("developer_instructions={}", json!(skill::body())),
                 "--disable",
                 "shell_tool",
                 "--disable",

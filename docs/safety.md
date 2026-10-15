@@ -27,7 +27,7 @@ Widening always takes an explicit flag or config change, and `cave run` echoes i
 
 cave ships guidance and a guardrail.
 
-- **Guidance:** the skill that `cave init` writes into `AGENTS.md` and `.claude/skills/cave/` tells the agent to work only inside the VM. A skill is guidance, not enforcement. An agent can ignore it.
+- **Guidance:** the skill that `cave init` writes into `.cave/AGENTS.md`, with a line in `AGENTS.md` pointing there, and into `.claude/skills/cave/` tells the agent to work only inside the VM. A skill is guidance, not enforcement. An agent can ignore it.
 - **Guardrail:** the MCP server, `cave mcp`, gives the agent `exec`, `read_file`, `write_file`, `snapshot`, `restore`, `fork` and `destroy`, all inside the VM. `cave agent claude` starts Claude Code with that server and with Bash denied, and `cave init` writes the same denial into `.claude/settings.json`. Claude Code is also denied reading `.env`, so it cannot see the credentials there. `cave agent codex` starts Codex with the same server and its shell tools turned off; Codex then has no tool that reads a file on the Mac, so it cannot read `.env` either ([D44](../ROADMAP.md#decisions)). Codex's calls to the `cave` server are approved in advance, since they act only on the VM.
 
 The limit, stated plainly: **a confused or prompt-injected agent that still has a host shell can step outside the VM.** The VM contains only what runs inside it. In particular:

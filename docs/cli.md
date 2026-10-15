@@ -144,9 +144,10 @@ Sets up the current directory as a project. It writes:
 
 - `cave.toml` with the design's minimal keys (see [config.md](config.md)).
 - `.cave/`, and adds `.cave/` to `.gitignore`, creating the file if needed.
-- The agent skill files: a cave section in `AGENTS.md` (existing content is kept; the section sits between marker comments so it can be updated), a `.claude/skills/` entry, and, for agents that support it, a permissions config that denies host Bash. The skill's text is [`skill/cave/SKILL.md`](../skill/cave/SKILL.md) in this repository, the same text as the bootstrap skill on the website ([docs/bootstrap.md](bootstrap.md)). For Claude Code that means:
+- The agent skill files: the skill's text in `.cave/AGENTS.md`, and a line in `AGENTS.md` telling agents to read it (existing content is kept; the line sits between marker comments so it can be updated, and an `AGENTS.md` is created with just the line if there is none) ([D37](../ROADMAP.md#decisions)), a `.claude/skills/` entry, and, for agents that support it, a permissions config that denies host Bash. The skill's text is [`skill/cave/SKILL.md`](../skill/cave/SKILL.md) in this repository, the same text as the bootstrap skill on the website ([docs/bootstrap.md](bootstrap.md)). For Claude Code that means:
   - `.claude/skills/cave/SKILL.md`: the skill.
-  - `AGENTS.md`: the skill without its frontmatter, between `<!-- cave:start -->` and `<!-- cave:end -->`.
+  - `.cave/AGENTS.md`: the skill without its frontmatter. It is written again by the next command that boots the VM if `cave rm` removed it.
+  - `AGENTS.md`: `This project runs in a cave VM. Before doing anything, read .cave/AGENTS.md: it says how to work inside the VM.`, between `<!-- cave:start -->` and `<!-- cave:end -->`. A section an older cave wrote there, with the whole text, is replaced by this line.
   - `.mcp.json`: registers `cave mcp` as the `cave` server.
   - `.claude/settings.json`: adds `Bash` and `Read(./.env)` to `permissions.deny`, so Claude Code has no shell on the Mac and reaches the VM through MCP, and cannot read the credentials in `.env`. Claude Code asks once to approve the `cave` server, since a project's own settings cannot approve it.
 
@@ -181,7 +182,7 @@ Output:
 ```
 Created cave.toml (sealed, debian, 2 CPUs, 2 GB)
 Added .cave/ to .gitignore
-Wrote the cave section of AGENTS.md and .claude/skills/cave
+Wrote .cave/AGENTS.md, a line pointing to it in AGENTS.md, and .claude/skills/cave
 Set up Claude Code to use cave mcp, with host Bash and reading .env denied (.mcp.json, .claude/settings.json)
 Added an Include line to ~/.ssh/config for cave's SSH hosts
 Edit in the VM: connect VS Code Remote-SSH or Zed to my-project.cave
@@ -563,7 +564,7 @@ On the Mac, `cave` starts `claude` in the project folder with `--mcp-config`, na
 
 `--in-vm` installs Claude Code with `curl -fsSL https://claude.ai/install.sh | bash` inside the VM if it is not there, then runs it on a pseudo-terminal like `cave shell`, so it needs a terminal.
 
-For Codex, `cave` starts `codex` in the project folder with `-c` settings naming `cave mcp` as the `cave` MCP server (with `--fork <name>` for a fork) and approving its tools in advance, since they act only on the VM, and with `--disable shell_tool --disable unified_exec`, which takes away its shell. Without a shell, Codex has no tool that reads a file on the Mac, so `.env` is out of its reach too. This was checked with Codex 0.162 on a Mac: it ran commands in the VM through `cave` and reported no tool that could read `.env`. `--in-vm` installs Codex with `sudo npm install -g @openai/codex` inside the VM if it is not there.
+For Codex, `cave` starts `codex` in the project folder with `-c` settings naming `cave mcp` as the `cave` MCP server (with `--fork <name>` for a fork), approving its tools in advance, since they act only on the VM, and giving it the text of `.cave/AGENTS.md` as `developer_instructions`, since without a shell it cannot open that file, and with `--disable shell_tool --disable unified_exec`, which takes away its shell. Without a shell, Codex has no tool that reads a file on the Mac, so `.env` is out of its reach too. This was checked with Codex 0.162 on a Mac: it ran commands in the VM through `cave` and reported no tool that could read `.env`. `--in-vm` installs Codex with `sudo npm install -g @openai/codex` inside the VM if it is not there.
 
 Exit code: the agent's.
 
