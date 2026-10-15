@@ -36,7 +36,7 @@ The first time `cave` runs on a Mac it also does the first-run setup from the de
 
 ### Forks
 
-A fork is a VM that lives inside its parent project at `.cave/forks/<name>`, and forks are how a project has more than one VM ([D40](../ROADMAP.md#decisions)): they are picked by name, never by number. Every command that acts on a VM takes `--fork <name>` to act on that fork instead of the project's own VM, for example `cave exec --fork try-2 npm test` or `cave stop --fork try-2` ([D18](../ROADMAP.md#decisions)), and `cave rm try-2` removes one. `cave ls` lists them.
+A fork is a VM that lives inside its parent project at `.cave/forks/<name>`, and forks are how a project has more than one VM ([D40](../ROADMAP.md#decisions)): they are picked by name, never by number. The commands that act on one VM (`run`, `stop`, `shell`, `exec`, `snapshot`, `restore`, `inspect`, `view`, `agent` and `mcp`) take `--fork <name>` to act on that fork instead of the project's own VM, for example `cave exec --fork try-2 npm test` or `cave stop --fork try-2` ([D18](../ROADMAP.md#decisions)), and `cave rm try-2` removes one. `cave ls` lists them.
 
 ### Names
 
@@ -53,8 +53,8 @@ Snapshots and forks are named, never numbered. A project's snapshot and fork nam
 Every error says what went wrong and how to fix it, in this shape:
 
 ```
-error: the project folder is not on an APFS volume, so cave cannot clone the base image
-  fix: move the project to a folder on an APFS volume, such as your home folder
+error: not a cave project (no cave.toml here or in any parent folder)
+  fix: Run `cave init` to set up this folder
 ```
 
 Warnings use the same shape with `warning:` and do not change the exit code.
@@ -75,9 +75,19 @@ Warnings use the same shape with `warning:` and do not change the exit code.
 | Flag | Meaning |
 | --- | --- |
 | `-h`, `--help` | Show help for `cave` or a command |
-| `-V`, `--version` | Print the version, such as `v0.1.2`, `v0.1.2 RC 1` or `v0.1.3 Beta 1`, and on a second line the newest stable release the update detector has seen: `Latest Stable: v0.1.1` |
+| `-V`, `--version` | Print the version, such as `v0.1.2`, `v0.1.2 RC 1` or `v0.1.3 Beta 1`, and on a second line the newest stable release cave has seen: `Latest Stable: v0.1.1`, or `not looked up yet` before the first lookup |
 
 There are no other global flags. `cave --help` lists every command with its flags and arguments, and `cave <command> --help` explains each flag.
+
+### Updates
+
+When `cave` runs in a terminal, it looks up the newest stable release in the background, at most every 10 minutes ([D47](../ROADMAP.md#decisions)). When the last lookup found one newer than this copy, it asks before the command runs:
+
+```
+update: cave v0.1.3 is out; you have v0.1.2 RC 2. Update now? [Y/n]
+```
+
+Yes installs it the way this copy was installed, with Homebrew or the install script, then exits so you run the command again. No skips that version for a day. A copy built from source is never offered an update. It never asks without a terminal, nor for `cave mcp` and `cave ssh-proxy`, and `check = false` under `[updates]` in `cave.toml` turns it off ([config](config.md#updates)). Pre-releases are never offered.
 
 ### The daemon and the data directory
 
@@ -87,7 +97,7 @@ Shared state (kernels, base images, the daemon socket and the list of known proj
 
 ### The startup policy
 
-The design says `cave run` prints the policy at startup and echoes widening flags back. Every command that boots a VM (`run`, `shell`, `exec`, `agent`) prints it to stderr when it boots or restores one, and prints nothing if the VM was already running.:
+The design says `cave run` prints the policy at startup and echoes widening flags back. Every command that boots a VM (`run`, `shell`, `exec`, `agent`) prints it to stderr when it boots or restores one, and prints nothing if the VM was already running, except `cave run` and `cave agent`, which print it again:
 
 ```
 my-project: started in 0.4s (debian, sha256:3f2a9c1e)
@@ -195,7 +205,6 @@ Errors:
 | Error | Fix |
 | --- | --- |
 | `this folder is inside the project at <path>` | Run cave from that project, or move this folder out of it |
-| `the project folder is not on an APFS volume, so cave cannot clone the base image` [A9] | Move the project to a folder on an APFS volume, such as your home folder |
 | `cave cannot set up a project in your home folder itself` | Run `cave init` in a project folder instead. |
 | `unknown image "<name>"` | Run `cave images` to see the image names |
 
@@ -226,15 +235,15 @@ Yes runs `cave fork`, so the new VM is a fork of the running one's current state
 
 Without `--net`, the mode comes from `cave.toml`, which is `nat` by default. Flags apply to this boot only; there is no way to make `--net lan` or a port forward permanent in `cave.toml`, so a cloned repository cannot widen access on its own ([config.md](config.md#network)).
 
-On a running VM, `-p` adds a forward without a restart, because forwarding goes through the guest agent. Changing `--net` needs the VM to stop first.
+On a running VM, `-p` adds a forward without a restart, because forwarding goes through the guest agent. `--net` takes effect only when the VM boots: on a running VM it is ignored, and the policy printed shows the mode the VM is still running with. Run `cave stop` first to change it.
 
 Errors:
 
 | Error | Fix |
 | --- | --- |
-| `the VM is running with network "nat"; --net lan needs a restart` | `cave stop`, then `cave run --net lan` |
 | `port 3000 on this Mac is already in use` | Pick another Mac port: `cave run -p 3001:3000` |
-| `the VM did not start: <reason>` | Run `cave doctor`; the reason names the failing piece |
+| `cannot clone the base image into <folder>: the folder must be on an APFS volume, the same one as your home folder` [A9] | Move the project to a folder on your Mac's main disk |
+| `the VM did not boot: <reason>` | See `vmm.log` in the VM's folder for the VMM's output |
 
 Warning, from the design: `memory is getting tight: N VMs are running and M GB is free`. It is printed after a VM boots, by `cave run` and by every command that boots one, when macOS reports memory pressure or when less memory is available than the VM's `memory` cap. There is no cap on the number of VMs, so the VM boots anyway; `cave stop` frees the memory of one you are not using.
 
@@ -274,8 +283,8 @@ Errors:
 
 | Error | Fix |
 | --- | --- |
-| `cave shell needs a terminal` | Use `cave exec -- <cmd>` from scripts |
-| `the guest agent is not answering` | `cave stop`, then try again; if it keeps happening, run `cave doctor` |
+| `cave shell needs a terminal` | Use `cave exec <cmd>` from scripts |
+| `lost the connection to the guest agent: <reason>` | Run `cave stop`, then `cave run`; the guest's console is in `vmm.log` in the VM's folder |
 
 ### cave exec
 
@@ -283,7 +292,7 @@ Errors:
 cave exec [--fork <name>] <cmd> [args...]
 ```
 
-Runs one command in the VM and streams its stdout and stderr back, keeping them separate. Stdin is passed through. It boots the VM first if needed. The command runs in the project directory inside the VM, without a shell, so `cave exec sh -c 'cd sub && make'` is the way to use shell syntax. There is no pseudo-terminal; use `cave shell` for interactive programs. no `-t` flag.
+Runs one command in the VM and streams its stdout and stderr back, keeping them separate. Stdin is passed through. It boots the VM first if needed. The command runs in the project directory inside the VM, without a shell, so `cave exec sh -c 'cd sub && make'` is the way to use shell syntax. There is no pseudo-terminal and no `-t` flag; use `cave shell` for interactive programs.
 
 Everything from the command on belongs to the command, so cave's own flags go before it: in `cave exec --fork try-2 npm test --fork x`, the second `--fork x` goes to `npm`. A `--` before the command still works, as in `cave exec -- uname -a` ([D35](../ROADMAP.md#decisions)).
 
@@ -294,7 +303,7 @@ Errors:
 | Error | Fix |
 | --- | --- |
 | `missing the command to run` | `cave exec uname -a` |
-| `command not found in the VM: <cmd>` (exit 127) | Install it in the VM, for example `cave exec -- sudo apt-get install -y <pkg>` |
+| `cave: <cmd>: command not found` on stderr, exit 127 (126 when it cannot be run) | Install it in the VM, for example `cave exec sudo apt-get install -y <pkg>` |
 
 ### cave snapshot
 
@@ -311,7 +320,6 @@ Errors:
 | Error | Fix |
 | --- | --- |
 | `a snapshot or fork named "<name>" already exists` | Pick another name, or remove it with `cave rm <name>` |
-| `not enough disk space for a snapshot (needs about N GB)` | Run `cave gc` to see what can be reclaimed |
 
 ### cave restore
 
@@ -348,7 +356,7 @@ Errors:
 
 | Error | Fix |
 | --- | --- |
-| `no snapshot named "<name>"` | Run `cave ls` to see this project's snapshots |
+| `no snapshot named <name>` | Run `cave ls` to see this project's snapshots |
 | `this project has no snapshots yet` | Take one with `cave snapshot` |
 
 ### cave fork
@@ -373,7 +381,7 @@ Forking the VM's current state names the fresh snapshot it was made from as `the
 
 Output: `Forked fork-1 from my-project-2026-10-12-debian (0.3s). Use it with: cave shell --fork fork-1`.
 
-Errors: the same name errors as `cave snapshot`, and `no snapshot named "<name>"` for `--from`.
+Errors: the same name errors as `cave snapshot`, and `no snapshot named <name>` for `--from`.
 
 ### cave ls
 
@@ -404,11 +412,11 @@ With no name, removes this project's VM: `.cave/` with its disk, snapshots and f
 Because `.cave/` can hold the only copy of the work in sealed mode, it asks first (design):
 
 ```
-Remove the VM for my-project? Its disk, 3 snapshots and 1 fork are deleted (4.8 GB).
+Remove the VM for my-project? Its disk, snapshots and forks are deleted (4.8 GB).
 This project is sealed, so code that is only in the VM is lost. [y/N]
 ```
 
-`--yes` skips the question, for scripts. Without a terminal and without `--yes`, it refuses.
+With a name it asks `Remove <name>? [y/N]`. `--yes` skips the question, for scripts. Without a terminal and without `--yes`, it refuses.
 
 Exit code: 1 when the answer is no.
 
@@ -487,7 +495,7 @@ Wrote 2 files to your Mac: src/app.ts, src/util.ts
 1 file you changed on your Mac waits for `cave push`: README.md
 ```
 
-`--watch` is the live mode ([D41](../ROADMAP.md#decisions)): it syncs every 2 seconds until Ctrl-C and prints each pass's writes and deletions with the time. Files waiting for `cave push` or left alone are listed again only when that list changes, and `The Mac mirror is up to date` is said once, at the start. It is one-way, from the VM to the Mac, with the same rules as one `cave sync`; edits on the Mac still reach the VM only through `cave push`. Each pass compares every file, so on a large project it keeps the VM a little busy.
+`--watch` is the live mode ([D41](../ROADMAP.md#decisions)): it says `Updating the Mac mirror from the VM every 2 seconds. Ctrl-C stops`, syncs every 2 seconds until Ctrl-C, and prints each pass's writes and deletions with the time. Files waiting for `cave push` or left alone are listed again only when that list changes, and `The Mac mirror is up to date` is said once, at the start. It is one-way, from the VM to the Mac, with the same rules as one `cave sync`; edits on the Mac still reach the VM only through `cave push`. Each pass compares every file, so on a large project it keeps the VM a little busy.
 
 ```
 12:04:05  Wrote 1 file to your Mac: src/app.ts
@@ -661,7 +669,7 @@ Exit code: 1 if any check fails.
 The design gives agents an MCP server that resolves the VM from the working directory, and `cave init` registers it in agent configs. Something has to start it, so this spec gives it a command:
 
 ```
-cave mcp
+cave mcp [--fork <name>]
 ```
 
 Runs the MCP server on stdin and stdout for the project in the current directory. `--fork <name>` makes the tools act on that fork when a call names none. People do not run it by hand; `cave agent` and the configs `cave init` writes do. It is left out of `cave --help`'s main list.

@@ -54,7 +54,7 @@ What this does not cover:
 In synced mode the project folder on your Mac is a mirror of the code in the VM. It is a convenience for your editor and a backup of source files, not of the VM:
 
 - It lacks `node_modules`, `target`, everything `.gitignore` names, `.git`, and the VM's running processes.
-- It is updated only when the daemon syncs: after `cave snapshot`, at the end of `cave agent`, and on `cave sync`. Work since the last sync is only in the VM.
+- It is updated only when the daemon syncs: after `cave snapshot`, at the end of `cave agent`, and on `cave sync`, or every 2 seconds under `cave sync --watch`. Forks have no mirror. Work since the last sync is only in the VM.
 
 VM snapshots are the real safety net. Take one before a risky change, and use `cave restore` to go back. To keep work outside the VM, use `git push` from inside it, `cave export`, or `cave cp`.
 
@@ -64,7 +64,7 @@ macOS has no jailer like Firecracker's. Each VM's VMM process runs under a macOS
 
 ## The audit log
 
-Each VM records exec calls, file writes and network connections, allowed or denied, in `.cave/`: the newest in `audit-latest.log`, older ones in files named for the date and time they were moved aside, once the latest passes 10 MB. `cave inspect` shows the latest entries. The log is a record of what happened, not a block, and it is removed with the VM.
+Each VM records exec calls, file writes and network connections, allowed or denied, in `.cave/`: the newest in `audit-latest.log`, older ones in files named for the date and time they were moved aside, once the latest passes 10 MB. `cave inspect` shows the last 20 entries (`--log` for all of them), and `cave view` follows them live. The log is a record of what happened, not a block, and it is removed with the VM.
 
 ## Reporting a problem
 

@@ -37,13 +37,13 @@ The things cave-vm promises to protect, and so the reports we most want:
 - **Credential leaks:** a credential is exposed to the agent, written to a log, or stored somewhere it should not be. Credentials are meant to be injected into a command and never returned to the agent, and logs record names, not values.
 - **Daemon and socket access:** another user or process can talk to the daemon's socket, or a VM can reach the daemon beyond its intended interface.
 - **Snapshot and image integrity:** a tampered snapshot, image, kernel or update response is accepted without detection.
-- **Install and update flow:** the setup skill, installer or update detector can be made to run attacker-controlled commands or fetch attacker-controlled content.
+- **Install and update flow:** the setup skill, the install script, the update detector or cave's self-update (`Update now?`) can be made to run attacker-controlled commands, fetch attacker-controlled content or install an attacker's build.
 - **Memory safety bugs** in any `unsafe` code, in particular the Hypervisor.framework wrapper and guest-memory handling.
 
 ## What is not a vulnerability
 
 - Anything an agent does **inside** a VM within the VM's policy, such as deleting files in the VM, installing packages, or using the network when the policy allows it. The VM exists so that this is contained.
-- Secrets that a user chooses to place inside a VM. A snapshot of a VM that has held a credential can contain it, and cave-vm warns when you fork or export one.
+- Secrets that a user chooses to place inside a VM. A snapshot of a VM that has held a credential can contain it, and cave-vm warns when you fork, restore or export one.
 - Access that the user opts into with a flag, such as `--net lan`.
 - Attacks that need an attacker who already has code execution as your macOS user on the host, or physical access to the Mac.
 - Vulnerabilities in Apple's Hypervisor.framework or macOS itself. Please report those to Apple.

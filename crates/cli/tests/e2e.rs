@@ -3,7 +3,7 @@
 //! Apple Silicon Mac with the hypervisor entitlement and a built image:
 //!
 //! ```sh
-//! image/debian/build.sh && image/manifest.sh
+//! image/kernel/build.sh && image/debian/build.sh && image/manifest.sh
 //! cargo build --workspace
 //! cargo test -p cave-vm-cli --test e2e -- --ignored
 //! ```

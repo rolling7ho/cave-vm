@@ -51,7 +51,7 @@ check        = true
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `image` | string | `"base"` | Base image name from `cave images`. `base` and `debian` are Debian 13 (trixie), the recommended default, and `ubuntu` is Ubuntu 26.04 LTS (design: the user chooses Debian or Ubuntu). On first run cave pins it by writing the digest into this key, as `base@sha256:...`, and uses that digest from then on ([D22](../ROADMAP.md#decisions)) |
-| `cpus` | integer | `2` | Virtual CPUs, 1 to the Mac's CPU count |
+| `cpus` | integer | `2` | Virtual CPUs, at least 1 |
 | `memory` | size | `"2G"` | Guest memory. The configurable guest address size bounds the maximum [A4] |
 | `idle_suspend` | duration or `"off"` | `"30m"` | Suspend the VM after this long idle, as `cave stop` would. Idle means no `cave` or SDK or MCP connection to the VM and no traffic on a forwarded port: the time counts from when the last command, shell, file copy or forwarded connection closed, or from `cave run`. An open forwarded connection counts as traffic even when quiet. The daemon checks every 10 seconds |
 | `ttl` | duration or `"off"` | `"off"` | Lifetime for disposable VMs, counted from the VM's first boot; a suspend and resume or a restore does not reset it. When it passes, the VM is stopped and its state removed, as `cave rm --yes` would. The daemon checks every 10 seconds, and a VM whose TTL ran out while the daemon was not running is removed when it is next started, which then boots a new one. `cave run` prints when that will happen. Decided by [D21](../ROADMAP.md#decisions) |
@@ -63,7 +63,7 @@ The design says `cave.toml` "plus a pinned base-image digest rebuilds the enviro
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `mode` | `"sealed"` or `"synced"` | `"sealed"` | Fixed by the design. Sealed keeps code only on the VM disk; synced also keeps a Mac mirror |
-| `disk` | size | `"20G"` | The design's 20 GB sparse disk, growable. Raising it grows the disk on the next boot; lowering it is an error |
+| `disk` | size | `"20G"` | The design's 20 GB sparse disk, growable. Raising it grows the disk on the next boot; lowering it has no effect, since disks do not shrink |
 
 Changing `mode` from sealed to synced creates the mirror on the next `cave sync`. Changing from synced to sealed stops syncing and leaves the Mac files where they are.
 
@@ -79,8 +79,8 @@ Changing `mode` from sealed to synced creates the mirror on the next `cave sync`
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `auto` | boolean | `true` | Take automatic snapshots before each `cave agent` run (design), before each `cave push` (design) and before each `cave restore` (see [cli.md](cli.md#cave-restore)). The snapshot before `cave push` is always taken, even when this is `false`, because the design requires it |
-| `keep` | integer | `10` | How many automatic snapshots to keep. When there are more, the oldest automatic one is deleted, after each new automatic snapshot. The one just taken and one being restored are never deleted, even with `keep = 0`. Snapshots named by the user are never deleted automatically |
+| `auto` | boolean | `true` | Take the automatic snapshot that saves the state before each `cave restore` (see [cli.md](cli.md#cave-restore)). The snapshots before each `cave agent` run and each `cave push` (design) are always taken, even when this is `false`, are kept like named ones, and do not count towards `keep` |
+| `keep` | integer | `10` | How many automatic snapshots to keep. When there are more, the oldest automatic ones are deleted after each `cave restore`, and by `cave gc`. The one just taken and one being restored are never deleted, even with `keep = 0`. Snapshots named by the user are never deleted automatically |
 
 ### [updates]
 
@@ -110,7 +110,7 @@ error: cave.toml line 4: memory = 2048 needs a unit
 ```
 
 ```
-error: cave.toml line 9: network mode "lan" cannot be set in cave.toml
+error: cave.toml line 10: network mode "lan" cannot be set in cave.toml
   fix: pass --net lan to cave run when you need LAN access
 ```
 

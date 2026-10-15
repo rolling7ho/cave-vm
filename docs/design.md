@@ -107,7 +107,7 @@ The skill is the cheapest, highest-leverage piece of the project, but a skill is
 
 **Guidance**
 
-- `cave init` writes an `AGENTS.md` section, and a `.claude/skills/` entry for Claude Code, into the project.
+- `cave init` writes the agent text to `.cave/AGENTS.md` with a one-line pointer in `AGENTS.md` (D37), and a `.claude/skills/` entry for Claude Code, into the project.
 - The text says: all work happens inside this project's VM; run commands with `cave exec`; do not read or write files outside the VM; snapshot before risky changes and restore if something breaks. It also lists the commands, and notes that the project directory identifies the VM.
 
 **Guardrail**
@@ -178,7 +178,7 @@ The first run fetches the kernel and base image and does all setup. The CLI is a
 | `cave images` | list base images |
 | `cave doctor` | check entitlements, macOS version, disk space and image state |
 
-**SDK** (Rust first, then Python and TypeScript) mirrors the CLI, for example `Sandbox.open(".")`, `sb.exec(...)`, `sb.snapshot("before")`, `Sandbox.fork("base")`, `sb.destroy()`.
+**SDK** (Rust first, then Python and TypeScript) mirrors the CLI, for example `Sandbox.open(".")`, `sb.exec(...)`, `sb.snapshot("before")`, `sb.fork(from_snapshot="before")`, `sb.destroy()`.
 
 **MCP server** exposes the same operations as tools, resolving the VM from the working directory.
 
@@ -348,7 +348,7 @@ cave-vm/
 - [x] Remote editing uses sshd inside the VM, reached over vsock.
 - [x] NAT is a userspace network stack inside the VMM.
 - [x] Sync: the VM is the source, the sync waits if the VM is not running, and `cave push` compares SHA-256 hashes of the Mac copy against the VM.
-- [x] Sync conflicts: per-file rules for changes on one side or both, an automatic snapshot before a pull, and dependency and build folders excluded.
+- [x] Sync conflicts: per-file rules for changes on one side or both, an automatic snapshot before a push (D42), and dependency and build folders excluded.
 - [x] Guest agent protocol, daemon API, VM lifecycle, disk and defaults: see the decisions tables under Architecture.
 - [x] `cave agent <name>`: the agent runs on the Mac and uses the VM through MCP; `--in-vm` runs it inside the VM instead. See `docs/decisions/0002-cave-agent-runs-on-the-mac.md`.
 - [x] Roadmap: six phases, each of the first five closed by a gate, and phase 6 ending at the v1 release. See `docs/decisions/0001-roadmap-phases-and-gates.md`.
