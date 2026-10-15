@@ -341,7 +341,8 @@ fn main() -> ExitCode {
     };
     // Not for commands other programs talk to over stdin and stdout.
     if !matches!(cli.command, Cmd::Mcp { .. } | Cmd::SshProxy { .. }) {
-        update::offer_update();
+        // An outdated copy may still copy the work out (D52).
+        update::offer_update(!matches!(cli.command, Cmd::Export { .. }));
     }
     let result = match cli.command {
         Cmd::Init {

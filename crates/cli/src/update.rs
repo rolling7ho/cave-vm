@@ -305,10 +305,15 @@ fn behind<'a>(releases: impl Iterator<Item = &'a str>, version: &str) -> usize {
 }
 
 /// The question, and for an urgent one what follows a no.
-fn question(newest: &str, behind: usize) -> String {
+fn question(newest: &str, behind: usize, may_block: bool) -> String {
     if behind >= URGENT_BEHIND {
+        let stops = if may_block {
+            ", and cave does not run until it is updated"
+        } else {
+            ""
+        };
         format!(
-            "cave {} is out, and this cave ({}) is {behind} releases behind. Only the {SUPPORTED} newest releases get security fixes, and cave does not run until it is updated. Update now? [Y/n] ",
+            "cave {} is out, and this cave ({}) is {behind} releases behind. Only the {SUPPORTED} newest releases get security fixes{stops}. Update now? [Y/n] ",
             display(newest),
             display(VERSION)
         )
@@ -343,8 +348,10 @@ fn refuse(behind: usize, command: Option<&str>) -> ! {
 /// command runs again on the new version. Scripts and pipes are never
 /// asked and never look anything up; when an earlier lookup found this
 /// copy [`URGENT_BEHIND`] or more releases behind, they get a warning.
-/// In a terminal such a copy is asked every time and stops on a no (D52).
-pub fn offer_update() {
+/// In a terminal such a copy is asked every time and stops on a no (D52),
+/// unless `may_block` is false, as for `cave export`, which gets the work
+/// out of the VM whatever the version.
+pub fn offer_update(may_block: bool) {
     if updates_off() {
         return;
     }
@@ -368,6 +375,7 @@ pub fn offer_update() {
     };
     let behind = releases_behind(&data);
     let urgent = behind >= URGENT_BEHIND;
+    let block = urgent && may_block;
     if !newer(&newest, VERSION) || (!urgent && declined_recently(&data, &newest)) {
         return;
     }
@@ -386,19 +394,23 @@ pub fn offer_update() {
         }
         return;
     };
-    eprint!("{} {}", paint.notice("update:"), question(&newest, behind));
+    eprint!(
+        "{} {}",
+        paint.notice("update:"),
+        question(&newest, behind, may_block)
+    );
     let _ = io::stderr().flush();
     let mut answer = String::new();
     // Ctrl-D, like an error, is not a yes.
     if !matches!(io::stdin().lock().read_line(&mut answer), Ok(n) if n > 0) {
         eprintln!();
-        if urgent {
+        if block {
             refuse(behind, Some(&install_command(&install)));
         }
         return;
     }
     if !matches!(answer.trim(), "" | "y" | "Y" | "yes" | "Yes") {
-        if urgent {
+        if block {
             refuse(behind, Some(&install_command(&install)));
         }
         let record = json!({ "version": newest, "at": now_unix() });
@@ -419,7 +431,7 @@ pub fn offer_update() {
         );
         std::process::exit(0);
     }
-    if urgent {
+    if block {
         refuse(behind, Some(&command));
     }
     eprintln!(
@@ -519,8 +531,9 @@ mod tests {
 
     #[test]
     fn two_releases_behind_is_asked_urgently() {
-        assert!(!question("0.1.3", 1).contains("security"));
-        let urgent = question("0.1.4", 2);
+        assert!(!question("0.1.3", 1, true).contains("security"));
+        assert!(!question("0.1.4", 2, false).contains("does not run"));
+        let urgent = question("0.1.4", 2, true);
         assert!(urgent.contains("2 releases behind"), "{urgent}");
         assert!(urgent.contains("Only the 3 newest releases get security fixes"));
         assert!(urgent.ends_with("Update now? [Y/n] "));
