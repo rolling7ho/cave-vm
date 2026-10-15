@@ -16,6 +16,8 @@
 //! in the guest). A snapshot saves the device's state but not the disk, so
 //! restore with the same `--disk` file, unchanged since the snapshot.
 
+#![deny(unsafe_code)]
+
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn main() {
     if let Err(message) = spike::main() {

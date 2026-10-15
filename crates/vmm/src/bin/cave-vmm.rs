@@ -11,6 +11,8 @@
 //! memory mapped copy-on-write from the snapshot's `memory` file. If the
 //! link closes, the VM stops; if the guest powers off, the process exits.
 
+#![deny(unsafe_code)]
+
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn main() -> std::process::ExitCode {
     vmm::main()
