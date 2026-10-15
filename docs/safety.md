@@ -60,7 +60,7 @@ VM snapshots are the real safety net. Take one before a risky change, and use `c
 
 ## Host isolation
 
-macOS has no jailer like Firecracker's. Each VM's VMM process runs under a macOS sandbox profile that lets it read and write only its project's `.cave/` folder, read the shared image cache and the kernel, and make outbound connections. It has no access to your other folders. The daemon, not the VMM, writes the mirror.
+macOS has no jailer like Firecracker's. Each VM's VMM process runs under a macOS sandbox profile that lets it read and write only its project's `.cave/` folder, read the shared image cache and the kernel, and make outbound connections. It has no access to your other folders. The daemon, not the VMM, writes the mirror. A guest also cannot exhaust the Mac by opening connections without end: the VMM keeps at most 1024 outbound TCP connections, 1024 UDP flows and 1024 guest connections to the host over vsock, and resets or drops any past that.
 
 ## The audit log
 

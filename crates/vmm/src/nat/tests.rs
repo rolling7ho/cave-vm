@@ -447,6 +447,28 @@ fn denied_destinations_are_reset_without_a_host_connection() {
 }
 
 #[test]
+fn connections_past_the_limit_are_reset_until_one_closes() {
+    let mut r = rig(Mode::Nat, FakeHost::default());
+    r.stack.flows.max = 1;
+    let first = r.connect(REMOTE, 80);
+    let _peer = r.peer();
+    r.until("the guest to connect", |r| {
+        r.state(first) == tcp::State::Established
+    });
+    let second = r.connect(REMOTE, 81);
+    r.until("the reset", |r| r.state(second) == tcp::State::Closed);
+    assert_eq!(r.host.attempts.lock().unwrap().len(), 1);
+
+    r.socket(first).abort();
+    r.until("the flow to close", |r| !r.stack.flows.is_full());
+    let third = r.connect(REMOTE, 82);
+    let _peer = r.peer();
+    r.until("the guest to connect", |r| {
+        r.state(third) == tcp::State::Established
+    });
+}
+
+#[test]
 fn lan_mode_forwards_private_destinations() {
     let mut r = rig(Mode::Lan, FakeHost::default());
     let s = r.connect(Ipv4Addr::new(10, 0, 0, 5), 22);

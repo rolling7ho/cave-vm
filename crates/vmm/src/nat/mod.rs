@@ -284,6 +284,8 @@ impl Stack {
                     }
                 } else {
                     match self.policy.check(*key.dst.ip()) {
+                        // smoltcp resets it, as for a denied one.
+                        Verdict::Forward if self.flows.is_full() => {}
                         Verdict::Forward => {
                             self.connects.push(ConnectEvent {
                                 protocol: Protocol::Tcp,
