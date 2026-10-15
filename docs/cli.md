@@ -457,7 +457,7 @@ Audit log (last 20 of 412, cave inspect --log for all)
 ### cave sync
 
 ```
-cave sync
+cave sync [--watch]
 ```
 
 Synced mode only. Updates the Mac mirror from the VM now; the daemon also does it after agent runs and on snapshot (design). If the VM is not running, the sync waits until it is, and the command says so: it blocks and prints "waiting for the VM" rather than returning.
@@ -467,6 +467,13 @@ The VM is authoritative, so a file changed only in the VM is written to the mirr
 ```
 Wrote 2 files to your Mac: src/app.ts, src/util.ts
 1 file you changed on your Mac waits for `cave pull`: README.md
+```
+
+`--watch` is the live mode ([D41](../ROADMAP.md#decisions)): it syncs every 2 seconds until Ctrl-C and prints each pass's writes and deletions with the time. Files waiting for `cave pull` or left alone are listed again only when that list changes, and `The Mac mirror is up to date` is said once, at the start. It is one-way, from the VM to the Mac, with the same rules as one `cave sync`; edits on the Mac still reach the VM only through `cave pull`. Each pass compares every file, so on a large project it keeps the VM a little busy.
+
+```
+12:04:05  Wrote 1 file to your Mac: src/app.ts
+12:04:09  Deleted 1 file on your Mac to match the VM: src/old.ts
 ```
 
 The mirror backs up source only: it lacks dependencies, build output, `.git` and running processes, so snapshots remain the safety net ([docs/safety.md](safety.md#the-mac-mirror-backs-up-source-only)). When nothing changed in the VM it prints `The Mac mirror is up to date`. After `cave snapshot` and at the end of `cave agent`, the sync runs on its own; a failed one is reported and does not change the command's result.

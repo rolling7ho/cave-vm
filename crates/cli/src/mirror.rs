@@ -1,6 +1,9 @@
 //! `cave sync` and `cave pull`: synced mode's Mac mirror (docs/cli.md,
-//! "cave sync" and "cave pull"). The daemon does the work; this prints
+//! "cave sync" and "cave pull"). `cave sync --watch` keeps syncing (D41). The daemon does the work; this prints
 //! what it did.
+
+use std::thread;
+use std::time::Duration;
 
 use cave_vm_proto::daemon::{Reply, Request, VmId};
 
@@ -12,13 +15,34 @@ use crate::project;
 /// Names listed in a line before the rest are counted.
 const LISTED: usize = 10;
 
-/// `cave sync`. Waits for the VM if it is not running.
-pub fn sync() -> Result<()> {
+const UP_TO_DATE: &str = "The Mac mirror is up to date";
+
+/// How often `cave sync --watch` syncs (D41).
+const WATCH_INTERVAL: Duration = Duration::from_secs(2);
+
+/// `cave sync`. Waits for the VM if it is not running. With `watch`, syncs
+/// again every [`WATCH_INTERVAL`] until interrupted, printing each pass's
+/// lines only when they differ from the pass before (D41).
+pub fn sync(watch: bool) -> Result<()> {
     let vm = vm_id(&project::require()?, None);
-    for line in sync_lines(&sync_vm(&vm)?) {
-        println!("{line}");
+    if !watch {
+        for line in sync_lines(&sync_vm(&vm)?) {
+            println!("{line}");
+        }
+        return Ok(());
     }
-    Ok(())
+    eprintln!("Updating the Mac mirror from the VM every 2 seconds. Ctrl-C stops");
+    let mut waiting = Vec::new();
+    let mut first = true;
+    loop {
+        let lines = watch_lines(&sync_vm(&vm)?, &mut waiting, first);
+        first = false;
+        let time = clock_now();
+        for line in lines {
+            println!("{time}  {line}");
+        }
+        thread::sleep(WATCH_INTERVAL);
+    }
 }
 
 /// Sends `sync` for `vm` and returns the reply.
@@ -63,6 +87,57 @@ pub fn pull() -> Result<()> {
     Ok(())
 }
 
+/// What one pass of `cave sync --watch` prints: what it wrote and
+/// deleted, and the files waiting for `cave pull` or left alone only when
+/// that list changed since the pass before (`waiting`). "Up to date" is
+/// said on the first pass only.
+fn watch_lines(reply: &Reply, waiting: &mut Vec<String>, first: bool) -> Vec<String> {
+    let Reply::Synced {
+        written,
+        deleted,
+        conflicts,
+        pending,
+    } = reply
+    else {
+        return Vec::new();
+    };
+    let events = Reply::Synced {
+        written: written.clone(),
+        deleted: deleted.clone(),
+        conflicts: Vec::new(),
+        pending: Vec::new(),
+    };
+    let mut lines: Vec<String> = sync_lines(&events)
+        .into_iter()
+        .filter(|l| first || l != UP_TO_DATE)
+        .collect();
+    let state = Reply::Synced {
+        written: Vec::new(),
+        deleted: Vec::new(),
+        conflicts: conflicts.clone(),
+        pending: pending.clone(),
+    };
+    let now: Vec<String> = sync_lines(&state)
+        .into_iter()
+        .filter(|l| l != UP_TO_DATE)
+        .collect();
+    if now != *waiting {
+        lines.extend(now.iter().cloned());
+        *waiting = now;
+    }
+    lines
+}
+
+/// The local time as `12:04:05`, through date(1), since std has no time
+/// zones.
+fn clock_now() -> String {
+    std::process::Command::new("/bin/date")
+        .arg("+%H:%M:%S")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
 /// What a `synced` reply says, one line each.
 pub fn sync_lines(reply: &Reply) -> Vec<String> {
     let Reply::Synced {
@@ -76,7 +151,7 @@ pub fn sync_lines(reply: &Reply) -> Vec<String> {
     };
     let mut lines = Vec::new();
     if written.is_empty() && deleted.is_empty() {
-        lines.push("The Mac mirror is up to date".to_string());
+        lines.push(UP_TO_DATE.to_string());
     }
     if !written.is_empty() {
         lines.push(format!(
@@ -171,6 +246,35 @@ mod tests {
             pending: vec![],
         };
         assert_eq!(sync_lines(&quiet), ["The Mac mirror is up to date"]);
+    }
+
+    #[test]
+    fn watching_repeats_only_what_happened() {
+        let synced = |written: &[&str], pending: &[&str]| Reply::Synced {
+            written: paths(written),
+            deleted: vec![],
+            conflicts: vec![],
+            pending: paths(pending),
+        };
+        let mut waiting = Vec::new();
+        assert_eq!(
+            watch_lines(&synced(&[], &[]), &mut waiting, true),
+            ["The Mac mirror is up to date"]
+        );
+        assert!(watch_lines(&synced(&[], &[]), &mut waiting, false).is_empty());
+        assert_eq!(
+            watch_lines(&synced(&["b"], &["a"]), &mut waiting, false),
+            [
+                "Wrote 1 file to your Mac: b",
+                "1 file you changed on your Mac waits for `cave pull`: a"
+            ]
+        );
+        assert_eq!(
+            watch_lines(&synced(&["b"], &["a"]), &mut waiting, false),
+            ["Wrote 1 file to your Mac: b"]
+        );
+        assert!(watch_lines(&synced(&[], &[]), &mut waiting, false).is_empty());
+        assert_eq!(waiting, Vec::<String>::new());
     }
 
     #[test]

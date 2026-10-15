@@ -191,7 +191,11 @@ enum Cmd {
     /// Bring Mac edits into the VM (synced mode).
     Pull,
     /// Update the Mac mirror from the VM (synced mode).
-    Sync,
+    Sync {
+        /// Keep updating it every 2 seconds until Ctrl-C.
+        #[arg(long)]
+        watch: bool,
+    },
     /// Interactive shell in the VM.
     Shell {
         #[arg(long)]
@@ -355,7 +359,7 @@ fn main() -> ExitCode {
         Cmd::SshProxy { project, fork } => ssh::proxy(&project, fork),
         Cmd::Stop { force: true, .. } => commands::force_stop(),
         Cmd::Stop { fork, .. } => commands::stop(fork),
-        Cmd::Sync => mirror::sync(),
+        Cmd::Sync { watch } => mirror::sync(watch),
         Cmd::Ls { all, json } => commands::ls(all, json),
     };
     match result {
