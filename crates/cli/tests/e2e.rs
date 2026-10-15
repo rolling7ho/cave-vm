@@ -764,7 +764,7 @@ fn credentials_reach_the_command_but_not_the_agent() {
     );
 
     // The audit log and a snapshot name it, but never hold the value.
-    let log = fs::read_to_string(rig.project().join(".cave/audit.log")).unwrap();
+    let log = fs::read_to_string(rig.project().join(".cave/audit-latest.log")).unwrap();
     assert!(log.contains(r#""credentials":["API_KEY"]"#), "{log}");
     assert!(!log.contains(VALUE));
     assert!(rig.cave(&["snapshot", "after"]).status.success());
@@ -834,7 +834,7 @@ fn agent_on_the_mac_reaches_the_vm_only_through_mcp() {
         "{stderr}"
     );
     // The audit log shows what it did.
-    let log = fs::read_to_string(rig.project().join(".cave/audit.log")).unwrap();
+    let log = fs::read_to_string(rig.project().join(".cave/audit-latest.log")).unwrap();
     assert!(log.contains("uname -s"), "{log}");
 }
 
@@ -1074,7 +1074,7 @@ fn gate_5() {
         inspect.contains("API_KEY") && !inspect.contains(VALUE),
         "{inspect}"
     );
-    let log = fs::read_to_string(rig.project().join(".cave/audit.log")).unwrap();
+    let log = fs::read_to_string(rig.project().join(".cave/audit-latest.log")).unwrap();
     assert!(!log.contains(VALUE), "{log}");
 
     // The snapshot taken before the run undoes it.
