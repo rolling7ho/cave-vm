@@ -274,6 +274,32 @@ fn now_unix() -> u64 {
 }
 
 /// A VM's display name: the fork's name, or the project folder's.
+/// `--net` names a mode other than the one a running VM booted with.
+fn net_needs_restart(vm: &VmId, running: NetMode, asked: NetMode) -> ErrorMessage {
+    let mode = |m: NetMode| match m {
+        NetMode::Off => "off",
+        NetMode::Nat => "nat",
+        NetMode::Lan => "lan",
+    };
+    let fork = vm
+        .fork
+        .as_ref()
+        .map_or_else(String::new, |f| format!(" --fork {f}"));
+    error(
+        ErrorCode::BadRequest,
+        format!(
+            "{} is running with network \"{}\"; --net {} needs a restart",
+            display_name(vm),
+            mode(running),
+            mode(asked)
+        ),
+    )
+    .with_fix(format!(
+        "Run `cave stop{fork}`, then `cave run{fork} --net {}`",
+        mode(asked)
+    ))
+}
+
 fn display_name(vm: &VmId) -> String {
     vm.fork.clone().unwrap_or_else(|| {
         Path::new(&vm.project)
@@ -346,6 +372,13 @@ impl Vms {
         let vm = self.vm(id)?;
         let mut slot = vm.idle_slot();
         if let Slot::Running(running) = &mut *slot {
+            // The network device is chosen at boot, so a different mode
+            // needs a stop first rather than being ignored.
+            if let Some(net) = net
+                && net != running.policy.net
+            {
+                return Err(net_needs_restart(id, running.policy.net, net));
+            }
             running.activity.touch();
             // Forwarding goes through the agent, so `-p` on a running VM
             // adds forwards without a restart.
