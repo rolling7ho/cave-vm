@@ -705,7 +705,7 @@ sshd runs in the VM and is reached over vsock, so an editor that expects SSH, su
 
 A command run through the MCP server's `exec` tool, or the SDK's `Command::credential`, can name credentials, such as `API_KEY` (design, "Credentials"). The daemon reads each value from `.env` in the project folder and gives it to that command only, as an environment variable. The agent never gets the value:
 
-- Output that prints it has the exact value replaced with the name in brackets, so `API_KEY: snednao_#m34nr` comes back as `API_KEY: [API_KEY]`, even when the value is split across two writes [D9]. This is best effort: a command can still leak the value through files it writes or the network.
+- Output that prints it has the exact value replaced with the name in brackets, so `API_KEY: snednao_#m34nr` comes back as `API_KEY: [API_KEY]`, even when the value is split across two writes [D9]. Every credential the VM's memory may hold is redacted this way, from the output of later commands that do not name it and from files read out of the VM (the MCP server's `read_file`, `cave cp`), using the value `.env` has now. This is best effort: a command can still leak the value through the network, a file changed since, or `cave sync` and `cave export`, which copy files as they are.
 - The audit log records the name, never the value.
 - A snapshot taken afterwards records the names, since the VM's memory may still hold the values, and `cave restore`, `cave fork` and `cave export` of it warn.
 
