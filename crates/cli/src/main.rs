@@ -29,7 +29,6 @@ use std::process::ExitCode;
 use cave_vm_proto::daemon::{NetMode, PortMap};
 use clap::{Parser, Subcommand, ValueEnum};
 
-/// Disposable Linux VMs for coding agents, one per project.
 #[derive(Parser)]
 #[command(name = "cave", version)]
 struct Cli {
