@@ -86,7 +86,7 @@ This adds a `Signed-off-by: Your Name <you@example.com>` line. Pull requests wit
 
 ## AI-assisted contributions
 
-AI-assisted contributions are welcome. Say so in the pull request description, and name the tool if you like. You are responsible for everything you submit: you have read it, understood it, tested it, and can answer review questions about it. The DCO sign-off applies to you, not to the tool.
+AI-assisted contributions are welcome, and you do not need to mark them. You are responsible for everything you submit: you have read it, understood it, tested it, and can answer review questions about it. The DCO sign-off applies to you, not to the tool.
 
 ## Pull request checklist
 
@@ -96,7 +96,6 @@ AI-assisted contributions are welcome. Say so in the pull request description, a
 - [ ] Every new `unsafe` block has a `// SAFETY:` comment.
 - [ ] Any new dependency is explained.
 - [ ] Commits follow Conventional Commits and are signed off.
-- [ ] AI assistance is disclosed, if used.
 
 ## License
 
