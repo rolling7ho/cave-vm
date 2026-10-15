@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cave-vm"
-version = "0.1.2rc2"
+version = "0.1.2rc3"
 description = "Python client for cave-vm, disposable Linux VMs for coding agents on macOS"
 readme = "README.md"
 license = { text = "Apache-2.0" }
