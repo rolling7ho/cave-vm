@@ -5,6 +5,8 @@ use std::time::Duration;
 
 use cave_vm_proto::daemon::{NetMode, Policy, Storage};
 
+use crate::style::Paint;
+
 /// Column where the widening flags are echoed.
 const MARK_COLUMN: usize = 58;
 
@@ -16,11 +18,14 @@ fn image(image: &str) -> String {
     }
 }
 
-fn line(label: &str, text: &str, marks: &[&str]) -> String {
-    let mut line = format!("  {label:<9} {text}");
+/// One row: the label in bold, and the flags that widened it in yellow.
+fn line(paint: Paint, label: &str, text: &str, marks: &[&str]) -> String {
+    let plain = format!("  {label:<9} {text}");
+    let mut line = format!("  {} {text}", paint.bold(&format!("{label:<9}")));
     if !marks.is_empty() {
-        let width = MARK_COLUMN.max(line.len() + 2);
-        line = format!("{line:<width$}[{}]", marks.join(" "));
+        let gap = MARK_COLUMN.max(plain.len() + 2) - plain.len();
+        let marks = format!("[{}]", marks.join(" "));
+        line = format!("{line}{}{}", " ".repeat(gap), paint.notice(&marks));
     }
     line
 }
@@ -45,17 +50,23 @@ fn duration(seconds: u64) -> String {
 
 /// The policy lines. `headline` is what follows the VM's name, such as
 /// `started in 0.4s`.
-pub fn render(policy: &Policy, headline: &str) -> String {
-    lines(policy, headline, None)
+pub fn render(policy: &Policy, headline: &str, paint: Paint) -> String {
+    lines(policy, headline, None, paint)
 }
 
 /// The policy lines with the disk in use and its size on the resources
 /// line, as `cave inspect` shows them.
-pub fn render_with_disk(policy: &Policy, headline: &str, used: u64, size: u64) -> String {
-    lines(policy, headline, Some((used, size)))
+pub fn render_with_disk(
+    policy: &Policy,
+    headline: &str,
+    used: u64,
+    size: u64,
+    paint: Paint,
+) -> String {
+    lines(policy, headline, Some((used, size)), paint)
 }
 
-fn lines(policy: &Policy, headline: &str, disk: Option<(u64, u64)>) -> String {
+fn lines(policy: &Policy, headline: &str, disk: Option<(u64, u64)>, paint: Paint) -> String {
     let marks = |prefix: &str| -> Vec<&str> {
         policy
             .widened
@@ -95,11 +106,16 @@ fn lines(policy: &Policy, headline: &str, disk: Option<(u64, u64)>) -> String {
         |s| format!("removed {} after boot", duration(s)),
     );
     [
-        format!("{}: {headline} ({})", policy.name, image(&policy.image)),
-        line("files", files, &[]),
-        line("network", network, &marks("--net")),
-        line("ports", &ports, &marks("-p")),
+        format!(
+            "{}: {headline} ({})",
+            paint.bold(&policy.name),
+            image(&policy.image)
+        ),
+        line(paint, "files", files, &[]),
+        line(paint, "network", network, &marks("--net")),
+        line(paint, "ports", &ports, &marks("-p")),
         line(
+            paint,
             "resources",
             &match disk {
                 None => format!("{cpus}, {} memory", gigabytes(policy.memory_bytes)),
@@ -112,7 +128,7 @@ fn lines(policy: &Policy, headline: &str, disk: Option<(u64, u64)>) -> String {
             },
             &[],
         ),
-        line("lifetime", &lifetime, &[]),
+        line(paint, "lifetime", &lifetime, &[]),
     ]
     .join("\n")
 }
@@ -144,7 +160,7 @@ mod tests {
     #[test]
     fn default_policy_matches_the_spec() {
         assert_eq!(
-            render(&policy(), "started in 0.4s"),
+            render(&policy(), "started in 0.4s", Paint::OFF),
             "my-project: started in 0.4s (base, sha256:3f2a9c1e)
   files     sealed: nothing on your Mac is reachable from the VM
   network   nat: outbound only; LAN ranges and this Mac are blocked
@@ -163,7 +179,7 @@ mod tests {
             vm: 3000,
         }];
         p.widened = vec!["--net lan".into(), "-p 3000".into()];
-        let text = render(&p, "started in 0.4s");
+        let text = render(&p, "started in 0.4s", Paint::OFF);
         assert!(
             text.contains("  network   lan: outbound, and LAN ranges are reachable   [--net lan]"),
             "{text}"
@@ -180,7 +196,7 @@ mod tests {
         p.ttl_seconds = Some(7200);
         p.memory_bytes = 3 << 29;
         p.cpus = 1;
-        let text = render(&p, "running");
+        let text = render(&p, "running", Paint::OFF);
         assert!(text.contains("1 CPU, 1.5 GB memory"), "{text}");
         assert!(text.contains("removed 2h after boot"), "{text}");
     }

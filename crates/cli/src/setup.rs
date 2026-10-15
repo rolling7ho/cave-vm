@@ -20,6 +20,7 @@ use cave_vm_proto::daemon::Check;
 
 use crate::doctor;
 use crate::error::{CliError, Result};
+use crate::style::Paint;
 
 /// The entitlement `cave-vmm` needs to create VMs.
 const ENTITLEMENTS: &str = include_str!("../../../scripts/hypervisor.entitlements");
@@ -47,7 +48,7 @@ pub fn before_daemon(dir: &Path, daemon: &Path) -> Result<()> {
         // so if it runs out.
         let disk = doctor::disk_space();
         if !disk.ok {
-            eprintln!("warning: {}", disk.name);
+            eprintln!("{} {}", Paint::stderr().warning("warning:"), disk.name);
         }
     }
     Ok(())

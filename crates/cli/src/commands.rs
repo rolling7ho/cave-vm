@@ -16,6 +16,7 @@ use crate::init;
 use crate::memory;
 use crate::policy;
 use crate::project;
+use crate::style::Paint;
 
 pub fn vm_id(project: &Path, fork: Option<String>) -> VmId {
     VmId {
@@ -91,11 +92,14 @@ pub fn ensure_running(
     };
     if was_running {
         if always_print {
-            eprintln!("{}", policy::render(&policy, "already running"));
+            eprintln!(
+                "{}",
+                policy::render(&policy, "already running", Paint::stderr())
+            );
         }
     } else {
         let headline = format!("started in {}", policy::seconds(started.elapsed()));
-        eprintln!("{}", policy::render(&policy, &headline));
+        eprintln!("{}", policy::render(&policy, &headline, Paint::stderr()));
         memory::warn_if_tight(policy.memory_bytes);
     }
     if first_boot && !was_running {
@@ -284,9 +288,18 @@ pub fn ls(all: bool, json: bool) -> Result<()> {
         .unwrap_or(4)
         .max(4)
         + 2;
+    let paint = Paint::stdout();
+    // Headings underlined, then padded, so the columns stay aligned.
+    let column = |name: &str, width: usize| {
+        format!("{}{}", paint.heading(name), " ".repeat(width - name.len()))
+    };
     let mut out = format!(
-        "{:<width$}{:<10}{:<11}{:<8}CREATED\n",
-        "NAME", "KIND", "STATE", "SIZE"
+        "{}{}{}{}{}\n",
+        column("NAME", width),
+        column("KIND", 10),
+        column("STATE", 11),
+        column("SIZE", 8),
+        paint.heading("CREATED")
     );
     for e in &entries {
         let kind = match e.kind {
@@ -301,8 +314,14 @@ pub fn ls(all: bool, json: bool) -> Result<()> {
             (None, true) => "auto",
             (None, false) => "-",
         };
+        let state = format!("{state:<11}");
+        let state = if e.state == Some(VmState::Running) {
+            paint.good(&state)
+        } else {
+            state
+        };
         out.push_str(&format!(
-            "{:<width$}{kind:<10}{state:<11}{:<8}{}\n",
+            "{:<width$}{kind:<10}{state}{:<8}{}\n",
             e.name,
             size(e.size),
             local_time(e.created_unix)

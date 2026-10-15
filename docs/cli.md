@@ -46,7 +46,7 @@ Snapshots and forks are named, never numbered. A project's snapshot and fork nam
 
 - Results go to stdout. Progress, the startup policy and errors go to stderr, so `cave exec -- cat file > out` captures only the file.
 - `cave ls`, `cave inspect`, `cave images` and `cave gc` take `--json` and print one JSON document for scripts.
-- Colour and progress bars appear only when stderr is a terminal, and `NO_COLOR` turns colour off.
+- Colour and progress bars appear only when stderr is a terminal, and `NO_COLOR` turns colour off. On a terminal, `error:` is red and `fix:` green, `warning:` yellow, headings and labels bold or underlined, and results coloured: an allowed connection or `exit 0` green, a denied connection red, another exit code yellow, a running VM green, and the flags that widened the policy yellow. `NO_COLOR`, `TERM=dumb` or output to a file or a pipe leaves all of it plain.
 
 ### Errors
 

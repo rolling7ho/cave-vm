@@ -16,6 +16,7 @@ use crate::commands::folder_name;
 use crate::error::{CliError, Result};
 use crate::inspect::{audit_line, local_offset};
 use crate::project;
+use crate::style::Paint;
 
 /// Entries shown from before `cave view` started.
 const EARLIER: usize = 10;
@@ -60,6 +61,7 @@ pub fn run(fork: Option<String>) -> Result<()> {
         "Following what happens in {name}: commands, file writes and connections. Ctrl-C stops"
     );
     let offset = local_offset();
+    let paint = Paint::stdout();
     let mut file: Option<(File, u64)> = None;
     let mut pending = Vec::new();
     let mut first = true;
@@ -79,7 +81,7 @@ pub fn run(fork: Option<String>) -> Result<()> {
                 entries.drain(..entries.len().saturating_sub(EARLIER));
             }
             for entry in &entries {
-                println!("{}", audit_line(entry, offset));
+                println!("{}", audit_line(entry, offset, paint));
             }
             // Moved aside: what was left in the old file is read above; now
             // the new one.

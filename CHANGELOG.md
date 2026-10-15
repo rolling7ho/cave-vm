@@ -5,7 +5,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 ## [Unreleased]
 
 ### Changed
-
+- The CLI uses colour, bold and underline on a terminal: red errors with green fixes, yellow warnings, bold or underlined headings and labels in `cave help`, `cave ls`, `cave inspect` and the startup policy, and green, yellow or red results in the audit rows. `NO_COLOR`, `TERM=dumb` or a pipe keeps the output plain.
 - `cave pull` is now `cave push`, since it sends Mac edits to the VM. `cave pull` still works, hidden from help and with a note, until the next minor release (D42).
 - `cave run` on a VM that is already running asks, in a terminal and with no flags, whether to start another VM as a fork of it. A project's other VMs are its forks, picked by name with `--fork` (D40).
 - `cave export [folder] [--from <snapshot>]` replaces `cave export [snapshot] [-o <dir>]`. A folder that does not exist is created after asking (D38).

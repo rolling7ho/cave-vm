@@ -9,6 +9,7 @@ use crate::commands::vm_id;
 use crate::error::{CliError, Result};
 use crate::policy;
 use crate::project;
+use crate::style::Paint;
 
 /// `cave snapshot [name]`.
 pub fn snapshot(name: Option<String>, fork: Option<String>) -> Result<()> {
@@ -50,13 +51,20 @@ pub fn restore(name: Option<String>, fork: Option<String>) -> Result<()> {
         ));
     };
     if let Some(reason) = &reason {
-        eprintln!("{}", fallback_warning(&name, reason));
+        eprintln!(
+            "{}",
+            Paint::stderr().warning(&fallback_warning(&name, reason))
+        );
     }
     if !credentials.is_empty() {
         let source = format!("snapshot {name}");
         eprintln!(
             "{}",
-            credential_warning(&source, &credentials, "the VM's memory")
+            Paint::stderr().warning(&credential_warning(
+                &source,
+                &credentials,
+                "the VM's memory"
+            ))
         );
     }
     println!("{}", restored(&name, started.elapsed(), saved.as_deref()));
@@ -93,7 +101,11 @@ pub fn fork(name: Option<String>, from: Option<String>) -> Result<()> {
         };
         eprintln!(
             "{}",
-            credential_warning(&source, &credentials, "the fork's memory")
+            Paint::stderr().warning(&credential_warning(
+                &source,
+                &credentials,
+                "the fork's memory"
+            ))
         );
     }
     println!("{}", forked(&name, &from, started.elapsed()));

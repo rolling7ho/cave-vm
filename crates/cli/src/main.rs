@@ -24,6 +24,7 @@ mod shell;
 mod skill;
 mod snapshot;
 mod ssh;
+mod style;
 mod view;
 
 use std::process::ExitCode;
@@ -240,20 +241,32 @@ enum Cmd {
 /// `cave` with a help page that shows each command's flags, not only its
 /// one-line description.
 fn command() -> clap::Command {
-    let mut cmd = Cli::command();
+    use clap::builder::styling::{AnsiColor, Effects, Styles};
+    // clap leaves these out on a pipe, with NO_COLOR, or with TERM=dumb.
+    let styles = Styles::styled()
+        .header((Effects::BOLD | Effects::UNDERLINE).into())
+        .usage((Effects::BOLD | Effects::UNDERLINE).into())
+        .literal(Effects::BOLD.into())
+        .placeholder(AnsiColor::Cyan.on_default())
+        .error(AnsiColor::Red.on_default() | Effects::BOLD)
+        .valid(AnsiColor::Green.on_default())
+        .invalid(AnsiColor::Yellow.on_default());
+    let header = *styles.get_header();
+    let mut cmd = Cli::command().styles(styles);
     cmd.build();
     let list = commands_help(&cmd);
     cmd.help_template(format!(
-        "{{usage-heading}} {{usage}}\n\nCommands:\n{list}\nOptions:\n{{options}}"
+        "{{usage-heading}} {{usage}}\n\n{header}Commands:{header:#}\n{list}\n{header}Options:{header:#}\n{{options}}"
     ))
 }
 
 /// The help page's command list: each visible command with its arguments,
 /// and its description on the line below.
 fn commands_help(cmd: &clap::Command) -> String {
+    let bold = *cmd.get_styles().get_literal();
     let mut out = String::new();
     for sub in cmd.get_subcommands().filter(|s| !s.is_hide_set()) {
-        let mut line = sub.get_name().to_string();
+        let mut line = format!("{bold}{}{bold:#}", sub.get_name());
         for arg in sub.get_arguments().filter(|a| !a.is_hide_set()) {
             if arg.get_id() == "help" {
                 continue;
@@ -264,7 +277,8 @@ fn commands_help(cmd: &clap::Command) -> String {
         let about = sub.get_about().map(ToString::to_string).unwrap_or_default();
         out.push_str(&format!("  {line}\n      {about}\n"));
     }
-    out.push_str("  help [COMMAND]\n      Print help for cave or one command\n");
+    out.push_str(&format!("  {bold}help{bold:#} [COMMAND]\n"));
+    out.push_str("      Print help for cave or one command\n");
     out
 }
 
@@ -388,7 +402,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("{e}");
+            eprintln!("{}", e.render(style::Paint::stderr()));
             ExitCode::from(e.code)
         }
     }

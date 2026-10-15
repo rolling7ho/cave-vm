@@ -9,6 +9,7 @@ use crate::commands::vm_id;
 use crate::error::{CliError, Result};
 use crate::policy;
 use crate::project;
+use crate::style::Paint;
 
 /// Audit entries shown without `--log`.
 const RECENT: u32 = 20;
@@ -39,13 +40,13 @@ pub fn run(fork: Option<String>, log: bool, json: bool) -> Result<()> {
         );
         return Ok(());
     }
-    print!("{}", render(&reply, local_offset()));
+    print!("{}", render(&reply, local_offset(), Paint::stdout()));
     Ok(())
 }
 
 /// The whole report for an `inspect` reply, with times shifted by
 /// `offset` seconds from UTC.
-fn render(reply: &Reply, offset: i64) -> String {
+fn render(reply: &Reply, offset: i64, paint: Paint) -> String {
     let Reply::Inspect {
         policy,
         resources,
@@ -66,30 +67,39 @@ fn render(reply: &Reply, offset: i64) -> String {
         (VmState::Suspended, _) => "suspended".to_string(),
         (VmState::Stopped, _) => "stopped".to_string(),
     };
-    let mut out =
-        policy::render_with_disk(policy, &headline, resources.disk_used, resources.disk_size);
+    let mut out = policy::render_with_disk(
+        policy,
+        &headline,
+        resources.disk_used,
+        resources.disk_size,
+        paint,
+    );
     out.push_str("\n\n");
     let shown = audit.len() as u64;
     if *audit_total == 0 {
-        out.push_str("Audit log: nothing recorded yet\n");
+        out.push_str(&format!(
+            "{}: nothing recorded yet\n",
+            paint.heading("Audit log")
+        ));
         return out;
     }
     if shown < *audit_total {
         out.push_str(&format!(
-            "Audit log (last {shown} of {audit_total}, cave inspect --log for all)\n"
+            "{} (last {shown} of {audit_total}, cave inspect --log for all)\n",
+            paint.heading("Audit log")
         ));
     } else {
-        out.push_str("Audit log\n");
+        out.push_str(&format!("{}\n", paint.heading("Audit log")));
     }
     for entry in audit {
-        out.push_str(&audit_line(entry, offset));
+        out.push_str(&audit_line(entry, offset, paint));
         out.push('\n');
     }
     out
 }
 
 /// One audit entry as a row: time, event, what, and how it went.
-pub fn audit_line(entry: &AuditEntry, offset: i64) -> String {
+pub fn audit_line(entry: &AuditEntry, offset: i64, paint: Paint) -> String {
     let time = clock((entry.time_unix_ms / 1000) as i64 + offset);
     let (kind, detail, result) = match &entry.event {
         AuditEvent::Exec {
@@ -101,8 +111,11 @@ pub fn audit_line(entry: &AuditEntry, offset: i64) -> String {
             if !credentials.is_empty() {
                 detail.push_str(&format!("   credentials: {}", credentials.join(", ")));
             }
-            let result =
-                exit_code.map_or_else(|| "no exit code".to_string(), |c| format!("exit {c}"));
+            let result = match exit_code {
+                Some(0) => paint.good("exit 0"),
+                Some(c) => paint.notice(&format!("exit {c}")),
+                None => paint.notice("no exit code"),
+            };
             ("exec", detail, result)
         }
         AuditEvent::Write { path, size } => ("write", path.clone(), bytes(*size)),
@@ -113,15 +126,16 @@ pub fn audit_line(entry: &AuditEntry, offset: i64) -> String {
             reason,
         } => {
             let result = match (allowed, reason) {
-                (true, _) => "allowed".to_string(),
-                (false, Some(reason)) => format!("denied ({reason})"),
-                (false, None) => "denied".to_string(),
+                (true, _) => paint.good("allowed"),
+                (false, Some(reason)) => paint.bad(&format!("denied ({reason})")),
+                (false, None) => paint.bad("denied"),
             };
             ("connect", format!("{host}:{port}"), result)
         }
     };
     let gap = DETAIL_WIDTH.saturating_sub(detail.chars().count()).max(3);
-    format!("  {time}  {kind:<9}{detail}{}{result}", " ".repeat(gap))
+    let kind = paint.bold(&format!("{kind:<9}"));
+    format!("  {time}  {kind}{detail}{}{result}", " ".repeat(gap))
 }
 
 /// `HH:MM:SS` of `seconds` since the epoch, already shifted to local time.
@@ -263,7 +277,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            render(&reply(audit, 412), 0),
+            render(&reply(audit, 412), 0, Paint::OFF),
             "my-project: running since 09:14 (debian, sha256:3f2a9c1e)
   files     sealed: nothing on your Mac is reachable from the VM
   network   nat: outbound only; LAN ranges and this Mac are blocked
@@ -293,7 +307,7 @@ Audit log (last 5 of 412, cave inspect --log for all)
                 exit_code: None,
             },
         )];
-        let text = render(&reply(one, 1), 0);
+        let text = render(&reply(one, 1), 0, Paint::OFF);
         assert!(
             text.contains("\n\nAudit log\n  00:00:01  exec     yes"),
             "{text}"
@@ -314,7 +328,7 @@ Audit log (last 5 of 412, cave inspect --log for all)
             state: VmState::Suspended,
             started_unix: None,
         };
-        let text = render(&stopped, 0);
+        let text = render(&stopped, 0, Paint::OFF);
         assert!(text.starts_with("my-project: suspended ("), "{text}");
         assert!(
             text.ends_with("Audit log: nothing recorded yet\n"),
