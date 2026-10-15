@@ -191,6 +191,7 @@ Requests that take time (`start`, `snapshot`, `restore`, `fork`, image fetches d
 | `init` | `project`, `storage` (`"sealed"` or `"synced"`), `image` | `ok` |
 | `start` | `vm`, `net` (optional: `"off"`, `"nat"` or `"lan"`, from `--net`; the mode in `cave.toml` when left out), `ports` (list of `{mac, vm}`) | `policy` |
 | `stop` | `vm` | `ok` |
+| `stop_all` | none | `stopped_all`. Every running VM on the Mac stops at once without being saved, for `cave stop --force` ([D43](../ROADMAP.md#decisions)): each VMM gets SIGTERM, and SIGKILL 5 seconds later if it is still running |
 | `exec` | `vm`, the agent's `exec` fields, `credentials` (list of names) | the agent's stream, ending in `exit` |
 | `shell` | `vm`, the agent's `pty_open` fields | the agent's pty stream, ending in `exit` |
 | `ssh` | `vm` | `ok` once the agent has connected to sshd, port 22 in the guest, with `port_forward`. From then on the connection carries raw bytes, for remote editing. A `not_found` error means sshd is not listening yet |
@@ -217,6 +218,7 @@ The reply objects mirror the `--json` output of the matching CLI command. Sizes 
 | --- | --- |
 | `policy` | `name`, `image` (the pinned value), `storage`, `net`, `ports`, `cpus`, `memory_bytes`, optional `ttl_seconds`, and `widened`: the flags that widened the defaults, echoed back |
 | `snapshot` | `name`, `size` |
+| `stopped_all` | `vms`: the VMs `stop_all` stopped |
 | `restored` | `name`, `memory_restored`, `reason` (why the memory was not restored, when it was not), `saved` (the automatic snapshot taken first, which undoes the restore) and `credentials` (the names the snapshot recorded, left out when none) |
 | `forked` | `name`, `from` (the snapshot, or the VM whose state was forked), `reason` (why the fork booted from its disk rather than the snapshot's memory, when it did) and `credentials` (the names the snapshot recorded, left out when none) |
 | `synced` | `written` (files copied from the VM to the Mac), `deleted` (files deleted on the Mac to match the VM), `conflicts` (files changed on both sides, left alone) and `pending` (files changed only on the Mac, waiting for `pull`), each a list of paths relative to the project and left out when empty |

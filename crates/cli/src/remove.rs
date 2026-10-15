@@ -69,7 +69,8 @@ fn question(name: &str, used: u64, synced: bool) -> String {
     text
 }
 
-fn confirmed(question: &str) -> Result<bool> {
+/// Asks `question` on the terminal; true for a yes.
+pub fn confirmed(question: &str) -> Result<bool> {
     eprint!("{question}");
     let mut answer = String::new();
     io::stdin().lock().read_line(&mut answer)?;

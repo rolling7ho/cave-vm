@@ -234,9 +234,19 @@ Added by [D20](../ROADMAP.md#decisions). The design has running, suspended and s
 
 ```
 cave stop [--fork <name>]
+cave stop --force
 ```
 
 Suspends the VM to a snapshot, freeing its memory, and prints `Suspended <name> (1.2s)`. The next command that needs the VM restores it with processes intact, unless it changes `--net` between `off` and another mode, which boots from the disk ([suspensions](snapshots.md#suspensions)). If the VM is not running, it says so and exits 0. If the VM cannot be saved, it keeps running and the error says why.
+
+`cave stop --force` is the emergency stop ([D43](../ROADMAP.md#decisions)). It stops every running VM on this Mac, in every project, at once and saves nothing: each VMM process gets SIGTERM, and SIGKILL if it is still running 5 seconds later. It names them and asks first:
+
+```
+Stop 2 VMs now without saving: try-a (fork of my-project), my-project?
+Processes running in them are lost; their disks keep what was written. [y/N]
+```
+
+Then it prints `Stopped 2 VMs without saving: try-a, my-project. The next start boots each from its disk`. Without a terminal it refuses, since it cannot ask. With no VM running it says so and exits 0.
 
 ### cave shell
 

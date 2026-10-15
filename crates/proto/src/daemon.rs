@@ -67,6 +67,9 @@ pub enum Request {
     Stop {
         vm: VmId,
     },
+    /// Every running VM on the Mac, stopped at once without saving
+    /// (`cave stop --force`, D43): SIGTERM, then SIGKILL.
+    StopAll,
     /// The agent's `exec`, plus credential names. The daemon resolves the
     /// values and passes them only on the agent link.
     Exec {
@@ -191,6 +194,10 @@ pub enum Reply {
     /// The reply to `start`: what the VM can reach, as the startup policy
     /// prints it.
     Policy(Policy),
+    /// The reply to `stop_all`: the VMs it stopped.
+    StoppedAll {
+        vms: Vec<VmId>,
+    },
 
     // The agent's stream messages, relayed.
     Output {

@@ -1,5 +1,6 @@
 //! `cave run`, `cave stop`, `cave ls` and `cave images`.
 
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
@@ -141,6 +142,75 @@ pub fn stop(fork: Option<String>) -> Result<()> {
         crate::policy::seconds(started.elapsed())
     );
     Ok(())
+}
+
+/// `cave stop --force`: every running VM on the Mac, stopped at once
+/// without saving, after asking (D43).
+pub fn force_stop() -> Result<()> {
+    let Reply::List { entries } = Connection::call(&Request::List { project: None })? else {
+        return Err(CliError::new("the daemon sent an unexpected reply to list"));
+    };
+    let running: Vec<String> = entries
+        .iter()
+        .filter(|e| e.state == Some(VmState::Running))
+        .map(|e| match e.kind {
+            EntryKind::Fork => format!(
+                "{} (fork of {})",
+                e.name,
+                folder_name(Path::new(&e.project))
+            ),
+            _ => e.name.clone(),
+        })
+        .collect();
+    if running.is_empty() {
+        println!("No VMs are running");
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        return Err(
+            CliError::new("cave stop --force needs a terminal to ask first")
+                .fix("Run it in Terminal, or stop each VM with cave stop, which saves it"),
+        );
+    }
+    if !crate::remove::confirmed(&force_question(&running))? {
+        return Err(CliError::new("nothing was stopped"));
+    }
+    let Reply::StoppedAll { vms } = Connection::call(&Request::StopAll)? else {
+        return Err(CliError::new(
+            "the daemon sent an unexpected reply to stop_all",
+        ));
+    };
+    let names: Vec<String> = vms
+        .iter()
+        .map(|vm| {
+            vm.fork
+                .clone()
+                .unwrap_or_else(|| folder_name(Path::new(&vm.project)))
+        })
+        .collect();
+    println!(
+        "Stopped {} without saving: {}. The next start boots each from its disk",
+        vms_count(names.len()),
+        names.join(", ")
+    );
+    Ok(())
+}
+
+fn vms_count(n: usize) -> String {
+    if n == 1 {
+        "1 VM".into()
+    } else {
+        format!("{n} VMs")
+    }
+}
+
+/// The question `cave stop --force` asks.
+fn force_question(running: &[String]) -> String {
+    format!(
+        "Stop {} now without saving: {}?\nProcesses running in them are lost; their disks keep what was written. [y/N] ",
+        vms_count(running.len()),
+        running.join(", ")
+    )
 }
 
 pub fn folder_name(path: &Path) -> String {
@@ -293,6 +363,15 @@ pub fn images(json: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_force_question_names_every_vm() {
+        assert_eq!(
+            force_question(&["try-a (fork of app)".into(), "app".into()]),
+            "Stop 2 VMs now without saving: try-a (fork of app), app?\nProcesses running in them are lost; their disks keep what was written. [y/N] "
+        );
+        assert!(force_question(&["app".into()]).starts_with("Stop 1 VM now"));
+    }
 
     fn image(name: &str, digest: &str, downloaded: bool, used_by: u32) -> ImageInfo {
         ImageInfo {

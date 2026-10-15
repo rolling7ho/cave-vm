@@ -41,6 +41,11 @@ fn exec_takes_credential_names_beside_the_agent_fields() {
 }
 
 #[test]
+fn stop_all_has_no_fields() {
+    check(json!({"type": "stop_all"}), Request::StopAll);
+}
+
+#[test]
 fn vm_object_example() {
     check(
         json!({"type": "stop", "vm": {"project": "/Users/ivan/Desktop/Projects/my-project", "fork": "try-a"}}),
@@ -180,6 +185,18 @@ fn replies_round_trip() {
             message: "Downloading the debian image".into(),
             done: Some(104_857_600),
             total: Some(524_288_000),
+        },
+    );
+    check(
+        json!({"type": "stopped_all", "vms": [{"project": "/p"}, {"project": "/p", "fork": "f1"}]}),
+        Reply::StoppedAll {
+            vms: vec![
+                vm("/p"),
+                VmId {
+                    project: "/p".into(),
+                    fork: Some("f1".into()),
+                },
+            ],
         },
     );
     check(

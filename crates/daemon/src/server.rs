@@ -25,6 +25,9 @@ use crate::vms::Vms;
 /// The port sshd listens on in the VM, for remote editing.
 const SSH_PORT: u16 = 22;
 
+/// How long `stop_all` gives each VMM after SIGTERM before SIGKILL (D43).
+const FORCE_STOP_GRACE: Duration = Duration::from_secs(5);
+
 /// How often a `sync` waiting for its VM checks that the client is still
 /// there.
 const WAIT_POLL: Duration = Duration::from_millis(500);
@@ -231,6 +234,9 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
             return Ok(());
         }
         Request::Stop { vm } => vms.suspend(&vm).map(|_| Reply::Ok),
+        Request::StopAll => Ok(Reply::StoppedAll {
+            vms: vms.force_stop_all(FORCE_STOP_GRACE),
+        }),
         Request::Sync { vm } => {
             // A sealed project would otherwise wait for nothing.
             let ready = vms

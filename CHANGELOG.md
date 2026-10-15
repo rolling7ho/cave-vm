@@ -14,6 +14,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- `cave stop --force`: an emergency stop of every running VM on the Mac. It names them and asks first, then stops them all at once without saving, with SIGTERM and SIGKILL 5 seconds later. The daemon gains a `stop_all` request (D43).
 - The Python and TypeScript SDK READMEs say how to install them from the release tag.
 
 - An install script for Macs without Homebrew: `curl -fsSL https://github.com/rolling7ho/cave-vm/releases/latest/download/install.sh | sh`. Each release carries a copy pinned to its own binaries and their checksum; `scripts/install.sh` is the template.

@@ -200,6 +200,9 @@ enum Cmd {
     Stop {
         #[arg(long)]
         fork: Option<String>,
+        /// Stop every VM on this Mac at once, saving nothing, after asking.
+        #[arg(long, conflicts_with = "fork")]
+        force: bool,
     },
     /// List project VMs.
     Ls {
@@ -349,7 +352,8 @@ fn main() -> ExitCode {
         },
         Cmd::Snapshot { name, fork } => snapshot::snapshot(name, fork),
         Cmd::SshProxy { project, fork } => ssh::proxy(&project, fork),
-        Cmd::Stop { fork } => commands::stop(fork),
+        Cmd::Stop { force: true, .. } => commands::force_stop(),
+        Cmd::Stop { fork, .. } => commands::stop(fork),
         Cmd::Sync => mirror::sync(),
         Cmd::Ls { all, json } => commands::ls(all, json),
     };
