@@ -7,7 +7,7 @@ This is the spec for the `cave` command, written before any code (ROADMAP task P
 The quickstart stays at two commands:
 
 ```sh
-brew install cave-vm
+brew install rolling7ho/cave/cave-vm
 cd my-project && cave agent claude
 ```
 
@@ -665,7 +665,7 @@ The design does not say where the code lives inside the VM or which user runs co
 ### First run (the quickstart)
 
 ```sh
-brew install cave-vm
+brew install rolling7ho/cave/cave-vm
 cd my-project && cave agent claude
 ```
 

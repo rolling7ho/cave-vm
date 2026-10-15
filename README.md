@@ -2,7 +2,7 @@
 
 **A fast, disposable Linux VM for every project, built for coding agents on macOS.**
 
-> **Status: pre-release.** Every command below works on an Apple Silicon Mac with macOS 26 when built from source, as [CONTRIBUTING.md](CONTRIBUTING.md) describes. Nothing is published yet: `brew install cave-vm` and the first-run download work once v1 is released.
+> **Status: v0.1.0, the first release.** It works on Apple Silicon Macs with macOS 26 or later. v1.0 follows the release review.
 
 cave-vm (Coding Agent Virtual Environment, command: `cave`) is an open-source microVM runtime for Macs with Apple Silicon (M-series) chips. It gives each project directory its own Linux VM that starts quickly, can be snapshotted, rolled back and forked, and shows you exactly what it can reach.
 
@@ -20,7 +20,7 @@ Coding agents are most useful when you stop approving every command, and most ri
 ## Quickstart
 
 ```sh
-brew install cave-vm
+brew install rolling7ho/cave/cave-vm
 cd my-project && cave agent claude
 ```
 

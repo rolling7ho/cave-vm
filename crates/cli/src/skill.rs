@@ -198,7 +198,7 @@ mod tests {
             "The project folder identifies the VM",
             "`uname -m` must print `arm64`",
             "26 or later",
-            "`brew install cave-vm`",
+            "`brew install rolling7ho/cave/cave-vm`",
             "`cave doctor`",
             "`cave init`",
             "`cave exec -- uname -a`",
