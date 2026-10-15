@@ -4,9 +4,9 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
-## [0.1.2-rc.3] - 2026-10-15
+## [1.0.0-rc.1] - 2026-10-15
 
-The third release candidate for 0.1.2: `cave agent` runs the agent inside the VM without permission prompts, `cave init` can let plain `claude` skip them, and sign-in links from the VM open in the Mac's browser.
+The first release candidate for 1.0.0: `cave agent` runs the agent inside the VM without permission prompts, `cave init` can let plain `claude` skip them, and sign-in links from the VM open in the Mac's browser.
 
 ### Fixed
 - `cave agent claude` in the VM refused to work: it read the project's `.claude/settings.json` and `.mcp.json`, written for the Mac, which deny its shell and point at a `cave` that is not in the VM. It now reads only your user settings there, uses no project MCP servers, and is told it is already inside the VM; Codex gets the same note.
