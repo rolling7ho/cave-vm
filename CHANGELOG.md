@@ -4,6 +4,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-10-15
+
+The first release candidate for 1.0.0: `cave agent` runs the agent inside the VM without permission prompts, `cave init` can let plain `claude` skip them, and sign-in links from the VM open in the Mac's browser.
+
 ### Fixed
 - `cave agent claude` in the VM refused to work: it read the project's `.claude/settings.json` and `.mcp.json`, written for the Mac, which deny its shell and point at a `cave` that is not in the VM. It now reads only your user settings there, uses no project MCP servers, and is told it is already inside the VM; Codex gets the same note.
 - A guest can no longer exhaust the Mac by opening connections: outbound TCP connections and guest vsock connections to the host are capped at 1024 each, a guest cannot claim more vsock credit than the device offers, and resets it provokes stop queueing once 4096 packets wait.
