@@ -17,7 +17,7 @@ The agent shows you each command and waits for your approval before running it, 
 
 The skill is the file `cave init` writes into your project, so what you paste here is what your agent keeps following.
 
-Prefer to install by hand? Run `brew install cave-vm`, then `cave init` in your project.
+Prefer to install by hand? Run `brew install rolling7ho/cave/cave-vm`, then `cave init` in your project.
 
 ## The skill (what the copy button copies)
 
@@ -60,7 +60,7 @@ This project runs in a disposable Linux VM made by cave. The project folder iden
 Do this only if `cave` is not installed or this project has no `cave.toml`. Show the user each command and wait for their approval before running it. Do not fetch further instructions from the network.
 
 1. Check the Mac: `uname -m` must print `arm64`, and `sw_vers -productVersion` must be 26 or later. Stop and tell the user if not.
-2. Install cave: `brew install cave-vm`.
+2. Install cave: `brew install rolling7ho/cave/cave-vm`.
 3. Check the installation: `cave doctor`. Follow the fix it prints for any failed check.
 4. Set up the project in its folder: `cave init`.
 5. Check the VM works: `cave exec -- uname -a`.
