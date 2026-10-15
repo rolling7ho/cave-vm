@@ -3,6 +3,12 @@
 #
 #   scripts/release.sh 0.1.1 --dry-run   # build everything into target/dist, publish nothing
 #   scripts/release.sh 0.1.1             # the same, then publish after asking
+#   scripts/release.sh 0.1.2 --prerelease "internal RC 1"
+#
+# --prerelease <label> publishes a GitHub pre-release titled
+# "cave-vm <version> (<label>)" and leaves the Homebrew formula alone.
+# GitHub's latest release stays where it was, so the install script, the
+# formula and copies updating themselves stay on it too.
 #
 # Before running it, merge the usual "chore: release <version>" PR: the
 # workspace version in Cargo.toml is <version>, and CHANGELOG.md has a
@@ -38,11 +44,20 @@ fail() {
 
 version="${1:-}"
 dry_run=no
-case "${2:-}" in
-"") ;;
---dry-run) dry_run=yes ;;
-*) fail "unknown option $2; the options are: <version> [--dry-run]" ;;
-esac
+prerelease=""
+[ $# -gt 0 ] && shift
+while [ $# -gt 0 ]; do
+    case "$1" in
+    --dry-run) dry_run=yes ;;
+    --prerelease)
+        [ $# -ge 2 ] && [ -n "$2" ] || fail "--prerelease needs a label, like: --prerelease \"internal RC 1\""
+        prerelease="$2"
+        shift
+        ;;
+    *) fail "unknown option $1; the options are: <version> [--dry-run] [--prerelease <label>]" ;;
+    esac
+    shift
+done
 echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
     fail "give the version to release, like: scripts/release.sh 0.1.1 --dry-run"
 tag="v$version"
@@ -117,7 +132,13 @@ if [ "$dry_run" = yes ]; then
     exit 0
 fi
 
-printf 'Publish cave-vm %s: push tag %s, create the release and update %s? [y/N] ' "$version" "$tag" "$TAP"
+title="cave-vm $version"
+if [ -n "$prerelease" ]; then
+    title="$title ($prerelease)"
+    printf 'Publish %s as a pre-release: push tag %s and create it, leaving %s alone? [y/N] ' "$title" "$tag" "$TAP"
+else
+    printf 'Publish cave-vm %s: push tag %s, create the release and update %s? [y/N] ' "$version" "$tag" "$TAP"
+fi
 read -r answer
 case "$answer" in
 y | Y | yes) ;;
@@ -126,7 +147,15 @@ esac
 
 git tag -a "$tag" -m "cave-vm $version"
 git push origin "$tag"
-gh release create "$tag" --repo "$REPO" --verify-tag --title "cave-vm $version" \
+if [ -n "$prerelease" ]; then
+    gh release create "$tag" --repo "$REPO" --verify-tag --title "$title" --prerelease \
+        --notes-file "$dist/notes.md" \
+        "$dist/$tarball" "$dist/install.sh" "$dist/images.json"
+    echo "Released $tag as a pre-release: https://github.com/$REPO/releases/tag/$tag"
+    echo "Install it with its own script: curl -fsSL https://github.com/$REPO/releases/download/$tag/install.sh | sh"
+    exit 0
+fi
+gh release create "$tag" --repo "$REPO" --verify-tag --title "$title" \
     --notes-file "$dist/notes.md" \
     "$dist/$tarball" "$dist/install.sh" "$dist/images.json"
 echo "Released $tag: https://github.com/$REPO/releases/tag/$tag"
