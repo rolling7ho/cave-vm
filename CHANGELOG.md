@@ -18,6 +18,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- `cave sync --watch`: a live mode that updates the Mac mirror from the VM every 2 seconds until Ctrl-C, one way, with the same rules as `cave sync` (D41).
 - `cave agent codex` starts Codex on the Mac against the project's VM, with `cave mcp` as its `cave` server and its shell turned off, so it works in the VM and cannot read `.env`. `cave agent codex --in-vm` installs it in the VM with npm (D44).
 - `cave stop --force`: an emergency stop of every running VM on the Mac. It names them and asks first, then stops them all at once without saving, with SIGTERM and SIGKILL 5 seconds later. The daemon gains a `stop_all` request (D43).
 - The Python and TypeScript SDK READMEs say how to install them from the release tag.
