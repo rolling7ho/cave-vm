@@ -1,6 +1,6 @@
 //! Synced mode's rules (design, "Storage"; docs/cli.md, "cave sync" and
-//! "cave pull"; P5.10): which files `cave sync` writes to the Mac mirror and
-//! which `cave pull` brings into the VM, decided from the SHA-256 of each
+//! "cave push"; P5.10): which files `cave sync` writes to the Mac mirror and
+//! which `cave push` brings into the VM, decided from the SHA-256 of each
 //! file on the Mac, in the VM and at the last sync.
 //!
 //! A file changed on one side is the change that side made since the last
@@ -11,7 +11,7 @@
 //!   to different contents stops the pull before anything is applied.
 //! - `sync`: the VM is authoritative, so a file changed only in the VM is
 //!   written to the mirror. A file changed on the Mac is never written
-//!   over: it waits for `cave pull`, and one changed on both sides is
+//!   over: it waits for `cave push`, and one changed on both sides is
 //!   listed.
 //!
 //! Dependency and build folders are excluded: `node_modules`, `target` and

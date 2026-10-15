@@ -153,12 +153,12 @@ impl Vms {
             let mut e = error(
                 ErrorCode::Conflict,
                 format!(
-                    "{} {} changed both on your Mac and in the VM since the last sync, so nothing was pulled",
+                    "{} {} changed both on your Mac and in the VM since the last sync, so nothing was pushed",
                     files.len(),
                     if files.len() == 1 { "file" } else { "files" }
                 ),
             )
-            .with_fix("keep one version of each file (copy it with cave cp, or undo the edit on your Mac), then run cave pull again");
+            .with_fix("keep one version of each file (copy it with cave cp, or undo the edit on your Mac), then run cave push again");
             e.files = Some(files);
             e
         })?;

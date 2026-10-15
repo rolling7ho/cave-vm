@@ -900,10 +900,10 @@ fn synced_mode_mirrors_the_vm_and_pulls_mac_edits() {
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
     // The first boot copied the folder in, so both sides agree.
-    let out = rig.cave(&["pull"]);
+    let out = rig.cave(&["push"]);
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "Nothing to pull: the VM has every edit from your Mac\n"
+        "Nothing to push: the VM has every edit from your Mac\n"
     );
     assert_eq!(rig.exec(&["cat", "src/app.ts"], 0), "one\n");
     assert_eq!(sync(&rig), "The Mac mirror is up to date\n");
@@ -930,9 +930,9 @@ fn synced_mode_mirrors_the_vm_and_pulls_mac_edits() {
     // after a snapshot.
     fs::write(mac.join("src/app.ts"), "mac\n").unwrap();
     assert!(
-        sync(&rig).contains("1 file you changed on your Mac waits for `cave pull`: src/app.ts")
+        sync(&rig).contains("1 file you changed on your Mac waits for `cave push`: src/app.ts")
     );
-    let out = rig.cave(&["pull"]);
+    let out = rig.cave(&["push"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
@@ -940,7 +940,7 @@ fn synced_mode_mirrors_the_vm_and_pulls_mac_edits() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("Saved snapshot ") && stdout.contains(" before pulling"),
+        stdout.contains("Saved snapshot ") && stdout.contains(" before pushing"),
         "{stdout}"
     );
     assert!(
@@ -952,11 +952,11 @@ fn synced_mode_mirrors_the_vm_and_pulls_mac_edits() {
     // A file changed on both sides stops the pull and is listed.
     fs::write(mac.join("both.txt"), "mac\n").unwrap();
     rig.exec(&["sh", "-c", "echo vm > both.txt"], 0);
-    let out = rig.cave(&["pull"]);
+    let out = rig.cave(&["push"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "{stderr}");
     assert!(
-        stderr.contains("1 file changed both on your Mac and in the VM since the last sync, so nothing was pulled\n  both.txt\n  fix: "),
+        stderr.contains("1 file changed both on your Mac and in the VM since the last sync, so nothing was pushed\n  both.txt\n  fix: "),
         "{stderr}"
     );
     assert_eq!(rig.exec(&["cat", "both.txt"], 0), "vm\n");

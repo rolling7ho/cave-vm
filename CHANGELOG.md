@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Changed
 
+- `cave pull` is now `cave push`, since it sends Mac edits to the VM. `cave pull` still works, hidden from help and with a note, until the next minor release (D42).
 - `cave run` on a VM that is already running asks, in a terminal and with no flags, whether to start another VM as a fork of it. A project's other VMs are its forks, picked by name with `--fork` (D40).
 - `cave export [folder] [--from <snapshot>]` replaces `cave export [snapshot] [-o <dir>]`. A folder that does not exist is created after asking (D38).
 - `cave init` writes the agent instructions to `.cave/AGENTS.md` and puts only a line pointing there in the project's `AGENTS.md`, replacing the whole section older versions wrote. `cave agent codex` passes the text to Codex directly, since it has no shell to open the file (D37).

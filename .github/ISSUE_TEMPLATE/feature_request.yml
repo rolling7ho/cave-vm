@@ -35,7 +35,7 @@ body:
         - VMM and device models
         - Guest agent
         - Snapshots and forks
-        - Storage and sync (sealed, synced, cave pull)
+        - Storage and sync (sealed, synced, cave push)
         - Network and policy
         - Credentials
         - MCP server and agent integration

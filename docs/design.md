@@ -91,7 +91,7 @@ The code lives inside the VM, and the VM is always authoritative. The Mac copy, 
 
 1. The VM is authoritative. The agent only ever works inside it.
 2. Sync is one-directional by default: the host-side daemon writes the Mac mirror after agent runs, on snapshot, or on `cave sync`. The mirror is never written by the agent.
-3. Mac edits are detected by file hash: `cave pull` compares the SHA-256 of each file in the Mac copy against the VM's and applies the files that changed on the Mac. A file that changed only on the Mac is applied, one that changed only in the VM is left alone, and one that changed on both sides since the last sync stops the pull and is listed. A snapshot is taken automatically before the pull applies anything, and dependency and build folders (node\_modules, target, and paths in .gitignore) are excluded. The mirror is editable by design, and \`cave pull\` is the only path by which Mac edits reach the VM.
+3. Mac edits are detected by file hash: `cave push` compares the SHA-256 of each file in the Mac copy against the VM's and applies the files that changed on the Mac. A file that changed only on the Mac is applied, one that changed only in the VM is left alone, and one that changed on both sides since the last sync stops the pull and is listed. A snapshot is taken automatically before the pull applies anything, and dependency and build folders (node\_modules, target, and paths in .gitignore) are excluded. The mirror is editable by design, and \`cave push\` is the only path by which Mac edits reach the VM.
 4. The mirror backs up source only. It lacks `node_modules`, build output and running processes, so VM snapshots remain the real safety net, and the docs should say that plainly.
 5. Escape hatches: `cave cp`, `cave export` and `git push` from inside the VM.
 
@@ -172,7 +172,7 @@ The first run fetches the kernel and base image and does all setup. The CLI is a
 | `cave fork [name]` | create a new VM from a snapshot, copy-on-write |
 | `cave ls` / `cave rm` / `cave gc` | list project VMs, remove one, show and reclaim disk |
 | `cave inspect` | show the policy, resources and audit log |
-| `cave sync` / `cave pull` | update the Mac mirror / bring Mac edits in (synced mode) |
+| `cave sync` / `cave push` | update the Mac mirror / bring Mac edits in (synced mode) |
 | `cave cp` / `cave export` | move files in and out |
 | `cave agent <name>` | start an agent on the Mac against this VM through MCP; `--in-vm` runs it inside the VM |
 | `cave images` | list base images |
@@ -233,7 +233,7 @@ Forks, editing, networking and sync:
 | Remote editing | sshd runs inside the VM and is reached over vsock through a `cave` proxy command, with keys generated automatically. Editors that expect SSH (VS Code Remote, Zed) work without the user touching SSH. The image includes openssh-server. |
 | NAT implementation | A userspace network stack inside the VMM, since Apple's vmnet framework probably needs an entitlement that ad hoc signing cannot get (the spike confirms). This is a large piece of the Core VM phase. |
 | Sync direction | The VM is the source. The daemon syncs from the VM to the Mac copy, and if the VM is not running, the sync waits until it is. |
-| `cave pull` | Compares the SHA-256 of each file in the Mac copy against the VM's, and applies the files that changed on the Mac. |
+| `cave push` | Compares the SHA-256 of each file in the Mac copy against the VM's, and applies the files that changed on the Mac. |
 
 Interfaces, defaults and process:
 
@@ -335,7 +335,7 @@ cave-vm/
 - [x] Name: package, repo and crate names are `cave-vm`, confirmed free on GitHub, crates.io, npm and Homebrew. The command stays `cave`.
 - [x] Open source under Apache 2.0, the same license as Firecracker.
 - [x] Network in v1: full NAT, outbound only, with `--net off` still available. An allowlist (needs a userspace NAT or proxy) comes after v1.
-- [x] Mirror in `synced` mode is editable, with `cave pull` as the path into the VM.
+- [x] Mirror in `synced` mode is editable, with `cave push` as the path into the VM.
 - [x] VMM language: Rust.
 - [x] Editing in `sealed` mode: remote editing through the guest agent.
 - [x] Install and signing: v1 signs the binary ad hoc on the user's machine with the hypervisor entitlement, so no paid Apple account is needed; the spike confirms this works. Developer ID signing and notarization come later, if releases are downloaded through a browser.
@@ -346,7 +346,7 @@ cave-vm/
 - [x] Forks live inside the parent project at `.cave/forks/<name>`.
 - [x] Remote editing uses sshd inside the VM, reached over vsock.
 - [x] NAT is a userspace network stack inside the VMM.
-- [x] Sync: the VM is the source, the sync waits if the VM is not running, and `cave pull` compares SHA-256 hashes of the Mac copy against the VM.
+- [x] Sync: the VM is the source, the sync waits if the VM is not running, and `cave push` compares SHA-256 hashes of the Mac copy against the VM.
 - [x] Sync conflicts: per-file rules for changes on one side or both, an automatic snapshot before a pull, and dependency and build folders excluded.
 - [x] Guest agent protocol, daemon API, VM lifecycle, disk and defaults: see the decisions tables under Architecture.
 - [x] `cave agent <name>`: the agent runs on the Mac and uses the VM through MCP; `--in-vm` runs it inside the VM instead. See `docs/decisions/0002-cave-agent-runs-on-the-mac.md`.

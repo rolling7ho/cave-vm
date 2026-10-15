@@ -188,7 +188,10 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Bring Mac edits into the VM (synced mode).
+    /// Send Mac edits to the VM (synced mode).
+    Push,
+    /// The old name of `cave push`, until the next minor release (D42).
+    #[command(hide = true)]
     Pull,
     /// Update the Mac mirror from the VM (synced mode).
     Sync {
@@ -348,7 +351,11 @@ fn main() -> ExitCode {
             cave_vm_mcp::serve(std::io::stdin().lock(), std::io::stdout().lock(), &tools)
                 .map_err(Into::into)
         }),
-        Cmd::Pull => mirror::pull(),
+        Cmd::Pull => {
+            eprintln!("cave pull is now cave push; the old name goes in a later release");
+            mirror::push()
+        }
+        Cmd::Push => mirror::push(),
         Cmd::Restore { name, fork } => snapshot::restore(name, fork),
         Cmd::Rm { name, yes } => remove::run(name, yes),
         Cmd::Shell { fork } => match shell::run(fork) {
