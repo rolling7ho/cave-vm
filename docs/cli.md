@@ -525,10 +525,10 @@ Errors:
 ### cave export
 
 ```
-cave export [snapshot] [-o <dir>]
+cave export [folder] [--from <snapshot>]
 ```
 
-Decided by [D19](../ROADMAP.md#decisions). The design lists `cave export` with `cave cp` as the way to "move files in and out" and as an escape hatch for code in sealed mode. `cave export` copies the project directory out of the VM, or out of a snapshot's disk, into a folder on the Mac. Without `-o`, the folder is `./<ProjectFolder>-export-<YYYY-MM-DD>`. It copies everything, including `.git`, and leaves out nothing, so it is a full copy of the work. Exporting from a snapshot that recorded injected credentials shows the same warning as `cave fork`, ending in `the exported files may contain it`.
+Decided by [D19](../ROADMAP.md#decisions), with the arguments from [D38](../ROADMAP.md#decisions). The design lists `cave export` with `cave cp` as the way to "move files in and out" and as an escape hatch for code in sealed mode. `cave export` copies the project directory out of the VM, or out of a snapshot's disk, into a folder on the Mac. `--from <snapshot>` exports that snapshot instead of the VM. Without a folder, it is `./<ProjectFolder>-export-<YYYY-MM-DD>`. A folder you name that does not exist is created after asking `<folder> does not exist. Create it? [Y/n]`, where Enter means yes; without a terminal it is created, and cave says so. It copies everything, including `.git`, and leaves out nothing, so it is a full copy of the work. Exporting from a snapshot that recorded injected credentials shows the same warning as `cave fork`, ending in `the exported files may contain it`.
 
 Output: `Exported 1,204 files (38 MB) to ./my-project-export-2026-10-12`.
 
