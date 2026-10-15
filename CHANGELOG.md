@@ -4,6 +4,9 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Removed
+- `cave mirror`, and `cave agent`'s recording of the agent's terminal (D46). It only repeated the agent's own screen; `cave view` stays. `cave agent` deletes a recording an earlier version left in `.cave/agent.term`.
+
 ## [0.1.1] - 2026-10-15
 
 CLI changes from feedback on 0.1.0, and cave now updates itself: from this version on, copies install new releases by themselves. Copies on 0.1.0 need one `brew upgrade cave-vm` (or the install script again).
