@@ -38,7 +38,7 @@ Commands:
 | `cave snapshot` / `cave restore` | Save VM state and roll back to it |
 | `cave fork` | Create a new VM from a snapshot, copy-on-write |
 | `cave inspect` | Show the VM's policy, resources and audit log |
-| `cave sync` / `cave pull` | Keep a Mac copy of the code in step with the VM, and bring Mac edits back (synced mode) |
+| `cave sync` / `cave push` | Keep a Mac copy of the code in step with the VM, and bring Mac edits back (synced mode) |
 | `cave agent claude` | Start Claude Code against this project's VM, with host Bash denied |
 | `cave doctor` | Check entitlements, macOS version, disk space and image state |
 

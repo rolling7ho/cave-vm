@@ -1,5 +1,5 @@
-//! `cave sync` and `cave pull`: synced mode's Mac mirror (docs/cli.md,
-//! "cave sync" and "cave pull"). `cave sync --watch` keeps syncing (D41). The daemon does the work; this prints
+//! `cave sync` and `cave push`: synced mode's Mac mirror (docs/cli.md,
+//! "cave sync" and "cave push"). `cave sync --watch` keeps syncing (D41). The daemon does the work; this prints
 //! what it did.
 
 use std::thread;
@@ -53,8 +53,8 @@ pub fn sync_vm(vm: &VmId) -> Result<Reply> {
     }
 }
 
-/// `cave pull`.
-pub fn pull() -> Result<()> {
+/// `cave push`, called `cave pull` before D42.
+pub fn push() -> Result<()> {
     let vm = vm_id(&project::require()?, None);
     let Reply::Pulled {
         snapshot,
@@ -65,10 +65,10 @@ pub fn pull() -> Result<()> {
         return Err(CliError::new("the daemon sent an unexpected reply to pull"));
     };
     if let Some(snapshot) = snapshot {
-        println!("Saved snapshot {snapshot} before pulling");
+        println!("Saved snapshot {snapshot} before pushing");
     }
     if applied.is_empty() && deleted.is_empty() {
-        println!("Nothing to pull: the VM has every edit from your Mac");
+        println!("Nothing to push: the VM has every edit from your Mac");
     }
     if !applied.is_empty() {
         println!(
@@ -88,7 +88,7 @@ pub fn pull() -> Result<()> {
 }
 
 /// What one pass of `cave sync --watch` prints: what it wrote and
-/// deleted, and the files waiting for `cave pull` or left alone only when
+/// deleted, and the files waiting for `cave push` or left alone only when
 /// that list changed since the pass before (`waiting`). "Up to date" is
 /// said on the first pass only.
 fn watch_lines(reply: &Reply, waiting: &mut Vec<String>, first: bool) -> Vec<String> {
@@ -169,7 +169,7 @@ pub fn sync_lines(reply: &Reply) -> Vec<String> {
     }
     if !pending.is_empty() {
         lines.push(format!(
-            "{} you changed on your Mac {} for `cave pull`: {}",
+            "{} you changed on your Mac {} for `cave push`: {}",
             capitalized(&files(pending)),
             if pending.len() == 1 { "waits" } else { "wait" },
             list(pending)
@@ -235,7 +235,7 @@ mod tests {
             [
                 "Wrote 2 files to your Mac: src/app.ts, README.md",
                 "Deleted 1 file on your Mac to match the VM: old.ts",
-                "1 file you changed on your Mac waits for `cave pull`: notes.md",
+                "1 file you changed on your Mac waits for `cave push`: notes.md",
                 "Left alone 1 file changed both on your Mac and in the VM: package.json",
             ]
         );
@@ -266,7 +266,7 @@ mod tests {
             watch_lines(&synced(&["b"], &["a"]), &mut waiting, false),
             [
                 "Wrote 1 file to your Mac: b",
-                "1 file you changed on your Mac waits for `cave pull`: a"
+                "1 file you changed on your Mac waits for `cave push`: a"
             ]
         );
         assert_eq!(
