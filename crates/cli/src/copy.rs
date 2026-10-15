@@ -264,7 +264,7 @@ fn vm_ok(
 
 /// Runs `argv` in the VM with `input` as stdin, writes its stdout to
 /// `out`, and returns its exit code and stderr.
-fn exec_in_vm(
+pub(crate) fn exec_in_vm(
     vm: &VmId,
     argv: &[&str],
     input: Option<Box<dyn Read + Send>>,

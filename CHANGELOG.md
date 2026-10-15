@@ -4,6 +4,9 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Fixed
+- Signing in to Claude Code inside the VM through the browser ended on "Safari can't connect to the server": the sign-in returns to `localhost` on the Mac, while Claude Code waits for it inside the VM. During `cave agent`, `cave` now listens on that port on the Mac's loopback until the browser comes back and passes the request into the VM (D56, decision 0027).
+
 ## [1.0.0-rc.1] - 2026-10-15
 
 The first release candidate for 1.0.0: `cave agent` runs the agent inside the VM without permission prompts, `cave init` can let plain `claude` skip them, and sign-in links from the VM open in the Mac's browser.
