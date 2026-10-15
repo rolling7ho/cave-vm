@@ -77,7 +77,7 @@ Warnings use the same shape with `warning:` and do not change the exit code.
 | `-h`, `--help` | Show help for `cave` or a command |
 | `-V`, `--version` | Print the version, for example `cave 0.1.0` |
 
-There are no other global flags.
+There are no other global flags. `cave --help` lists every command with its flags and arguments, and `cave <command> --help` explains each flag.
 
 ### The daemon and the data directory
 

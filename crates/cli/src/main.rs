@@ -27,7 +27,7 @@ mod ssh;
 use std::process::ExitCode;
 
 use cave_vm_proto::daemon::{NetMode, PortMap};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(name = "cave", version)]
@@ -204,8 +204,93 @@ enum Cmd {
     },
 }
 
+/// `cave` with a help page that shows each command's flags, not only its
+/// one-line description.
+fn command() -> clap::Command {
+    let mut cmd = Cli::command();
+    cmd.build();
+    let list = commands_help(&cmd);
+    cmd.help_template(format!(
+        "{{usage-heading}} {{usage}}\n\nCommands:\n{list}\nOptions:\n{{options}}"
+    ))
+}
+
+/// The help page's command list: each visible command with its arguments,
+/// and its description on the line below.
+fn commands_help(cmd: &clap::Command) -> String {
+    let mut out = String::new();
+    for sub in cmd.get_subcommands().filter(|s| !s.is_hide_set()) {
+        let mut line = sub.get_name().to_string();
+        for arg in sub.get_arguments().filter(|a| !a.is_hide_set()) {
+            if arg.get_id() == "help" {
+                continue;
+            }
+            line.push(' ');
+            line.push_str(&arg_usage(arg));
+        }
+        let about = sub.get_about().map(ToString::to_string).unwrap_or_default();
+        out.push_str(&format!("  {line}\n      {about}\n"));
+    }
+    out.push_str("  help [COMMAND]\n      Print help for cave or one command\n");
+    out
+}
+
+/// One argument as the usage line writes it: `--net <off|lan>`, `[NAME]`,
+/// `-p <PORT>...`, wrapped in brackets unless it is required.
+fn arg_usage(arg: &clap::Arg) -> String {
+    let values = arg.get_value_names().map_or_else(
+        || arg.get_id().to_string().to_uppercase(),
+        |names| names.join(" "),
+    );
+    let takes_value = arg.get_num_args().is_some_and(|n| n.takes_values());
+    let possible: Vec<String> = arg
+        .get_possible_values()
+        .iter()
+        .filter(|v| !v.is_hide_set())
+        .map(|v| v.get_name().to_string())
+        .collect();
+    let value = if possible.is_empty() {
+        format!("<{values}>")
+    } else {
+        format!("<{}>", possible.join("|"))
+    };
+    let repeats = matches!(arg.get_action(), clap::ArgAction::Append)
+        && arg
+            .get_num_args()
+            .is_none_or(|n| n.max_values() > 1 || !arg.is_positional());
+    let mut text = if arg.is_positional() {
+        let dashes = if arg.is_last_set() { "-- " } else { "" };
+        if arg.is_required_set() {
+            format!("{dashes}<{values}>")
+        } else {
+            format!("{dashes}[{values}]")
+        }
+    } else {
+        let flag = arg.get_long().map_or_else(
+            || format!("-{}", arg.get_short().unwrap_or('?')),
+            |l| format!("--{l}"),
+        );
+        if takes_value {
+            format!("{flag} {value}")
+        } else {
+            flag
+        }
+    };
+    if repeats {
+        text.push_str("...");
+    }
+    if arg.is_required_set() || arg.is_positional() {
+        text
+    } else {
+        format!("[{text}]")
+    }
+}
+
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = match Cli::from_arg_matches(&command().get_matches()) {
+        Ok(cli) => cli,
+        Err(e) => e.exit(),
+    };
     let result = match cli.command {
         Cmd::Init {
             sealed,
@@ -266,5 +351,25 @@ fn main() -> ExitCode {
             eprintln!("{e}");
             ExitCode::from(e.code)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_help_page_shows_each_commands_flags() {
+        let help = command().render_help().to_string();
+        assert!(help.contains("  run [--net <off|lan>] [-p <PORT>...] [--fork <FORK>]\n      Boot or restore this project's VM\n"), "{help}");
+        assert!(help.contains("  rm [NAME] [--yes]\n"), "{help}");
+        assert!(
+            help.contains("  agent <NAME> [--in-vm] [--fork <FORK>] -- [ARGS]...\n"),
+            "{help}"
+        );
+        assert!(
+            !help.contains("ssh-proxy"),
+            "hidden commands stay hidden: {help}"
+        );
     }
 }
