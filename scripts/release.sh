@@ -27,7 +27,8 @@
 # images.json is copied from the latest release, so first runs keep finding
 # the same images: a release never drops older entries (decision 0010). Its
 # "cave" key becomes this version, which is how copies of cave learn that
-# there is a newer one and install it (decision 0018).
+# there is a newer one and install it (decision 0018), and "releases" lists
+# every stable release from the repository's tags, newest first (D52).
 # Publishing new images stays a separate step (image/manifest.sh).
 #
 # It uses your own `gh` login and signs nothing: the formula and install.sh
@@ -97,12 +98,20 @@ fi
 gh release download --repo "$REPO" --pattern images.json --dir "$dist" --clobber ||
     fail "cannot fetch images.json from the latest release"
 python3 - "$dist/images.json" "$version" <<'PY' || fail "the latest release's images.json is not a manifest with images"
-import json, sys
+import json, re, subprocess, sys
 path, version = sys.argv[1], sys.argv[2]
 manifest = json.load(open(path))
 assert manifest["images"]
-manifest = {"version": manifest["version"], "cave": version,
-            **{k: v for k, v in manifest.items() if k not in ("version", "cave")}}
+# Every stable release, newest first, so a copy of cave can tell how many
+# releases behind it is (D52).
+tags = subprocess.run(["git", "tag", "--list", "v*"], capture_output=True,
+                      text=True, check=True).stdout.split()
+stable = {t[1:] for t in tags if re.fullmatch(r"v\d+\.\d+\.\d+", t)}
+if re.fullmatch(r"\d+\.\d+\.\d+", version):
+    stable.add(version)
+releases = sorted(stable, key=lambda v: tuple(map(int, v.split("."))), reverse=True)
+manifest = {"version": manifest["version"], "cave": version, "releases": releases,
+            **{k: v for k, v in manifest.items() if k not in ("version", "cave", "releases")}}
 with open(path, "w") as f:
     json.dump(manifest, f, indent=2)
     f.write("\n")

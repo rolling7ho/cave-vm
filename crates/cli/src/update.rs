@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 use crate::client::data_dir;
+use crate::error::CliError;
 use crate::project;
 use crate::style::Paint;
 
@@ -275,22 +276,99 @@ fn declined_recently(data: &Path, version: &str) -> bool {
     })
 }
 
+/// How many stable releases behind this copy is at which cave urgently
+/// asks to update, and refuses to run without it (D52).
+const URGENT_BEHIND: usize = 2;
+
+/// How many of the newest stable releases get security fixes (D52).
+const SUPPORTED: usize = 3;
+
+/// How many stable releases newer than this copy the last lookup found.
+/// Its `releases` list names them; a manifest from before D52 has only
+/// `cave`, which counts as one.
+fn releases_behind(data: &Path) -> usize {
+    let Some(doc) = read_json(&data.join(LATEST)) else {
+        return latest_stable().map_or(0, |v| usize::from(newer(&v, VERSION)));
+    };
+    match doc.get("releases").and_then(Value::as_array) {
+        Some(releases) => behind(releases.iter().filter_map(Value::as_str), VERSION),
+        None => doc
+            .get("cave")
+            .and_then(Value::as_str)
+            .map_or(0, |v| usize::from(newer(v, VERSION))),
+    }
+}
+
+/// How many of `releases` are newer than `version`.
+fn behind<'a>(releases: impl Iterator<Item = &'a str>, version: &str) -> usize {
+    releases.filter(|r| newer(r, version)).count()
+}
+
+/// The question, and for an urgent one what follows a no.
+fn question(newest: &str, behind: usize) -> String {
+    if behind >= URGENT_BEHIND {
+        format!(
+            "cave {} is out, and this cave ({}) is {behind} releases behind. Only the {SUPPORTED} newest releases get security fixes, and cave does not run until it is updated. Update now? [Y/n] ",
+            display(newest),
+            display(VERSION)
+        )
+    } else {
+        format!(
+            "cave {} is out; you have {}. Update now? [Y/n] ",
+            display(newest),
+            display(VERSION)
+        )
+    }
+}
+
+/// Stops cave after an urgent update was declined or could not run.
+fn refuse(behind: usize, command: Option<&str>) -> ! {
+    let mut error = CliError::new(format!(
+        "this cave ({}) is {behind} releases behind, so it does not run until it is updated",
+        display(VERSION)
+    ));
+    error = match command {
+        Some(command) => error.fix(format!(
+            "Run cave again and answer yes, or update by hand: {command}"
+        )),
+        None => error.fix("Update cave the way you installed it"),
+    };
+    eprintln!("{}", error.render(Paint::stderr()));
+    std::process::exit(1);
+}
+
 /// Before a command run in a terminal: looks up the newest stable release
 /// in the background, and if one already seen is newer than this copy,
 /// asks whether to install it now. After installing it, cave stops so the
 /// command runs again on the new version. Scripts and pipes are never
-/// asked and never look anything up.
+/// asked and never look anything up; when an earlier lookup found this
+/// copy [`URGENT_BEHIND`] or more releases behind, they get a warning.
+/// In a terminal such a copy is asked every time and stops on a no (D52).
 pub fn offer_update() {
-    if !io::stdin().is_terminal() || !io::stderr().is_terminal() || updates_off() {
+    if updates_off() {
         return;
     }
     let Ok(data) = data_dir() else { return };
+    let paint = Paint::stderr();
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+        let behind = releases_behind(&data);
+        if behind >= URGENT_BEHIND {
+            eprintln!(
+                "{} this cave ({}) is {behind} releases behind; only the {SUPPORTED} newest get security fixes. Run cave in a terminal to update",
+                paint.warning("warning:"),
+                display(VERSION)
+            );
+        }
+        return;
+    }
     let _ = fs::create_dir_all(&data);
     look_up_soon(&data);
     let Some(newest) = latest_stable() else {
         return;
     };
-    if !newer(&newest, VERSION) || declined_recently(&data, &newest) {
+    let behind = releases_behind(&data);
+    let urgent = behind >= URGENT_BEHIND;
+    if !newer(&newest, VERSION) || (!urgent && declined_recently(&data, &newest)) {
         return;
     }
     let Some(install) = std::env::current_exe()
@@ -298,23 +376,31 @@ pub fn offer_update() {
         .ok()
         .and_then(|exe| install_of(&exe))
     else {
+        // A build cave cannot update: say so, but let it run.
+        if urgent {
+            eprintln!(
+                "{} this cave ({}) is {behind} releases behind; only the {SUPPORTED} newest get security fixes",
+                paint.warning("warning:"),
+                display(VERSION)
+            );
+        }
         return;
     };
-    let paint = Paint::stderr();
-    eprint!(
-        "{} cave {} is out; you have {}. Update now? [Y/n] ",
-        paint.notice("update:"),
-        display(&newest),
-        display(VERSION)
-    );
+    eprint!("{} {}", paint.notice("update:"), question(&newest, behind));
     let _ = io::stderr().flush();
     let mut answer = String::new();
     // Ctrl-D, like an error, is not a yes.
     if !matches!(io::stdin().lock().read_line(&mut answer), Ok(n) if n > 0) {
         eprintln!();
+        if urgent {
+            refuse(behind, Some(&install_command(&install)));
+        }
         return;
     }
     if !matches!(answer.trim(), "" | "y" | "Y" | "yes" | "Yes") {
+        if urgent {
+            refuse(behind, Some(&install_command(&install)));
+        }
         let record = json!({ "version": newest, "at": now_unix() });
         let _ = fs::write(data.join(DECLINED), record.to_string() + "\n");
         eprintln!("Not now. cave asks again tomorrow");
@@ -332,6 +418,9 @@ pub fn offer_update() {
             display(&newest)
         );
         std::process::exit(0);
+    }
+    if urgent {
+        refuse(behind, Some(&command));
     }
     eprintln!(
         "{} the update did not finish; carrying on with {}. To update by hand: {command}",
@@ -416,6 +505,25 @@ mod tests {
         // An RC of 0.1.2 never goes back to the stable 0.1.1.
         assert!(!newer("0.1.1", "0.1.2-rc.1"));
         assert!(!newer("0.1.2-alpha.1", "0.1.1"));
+    }
+
+    #[test]
+    fn releases_behind_count_only_newer_stable_releases() {
+        let releases = ["0.1.4", "0.1.3", "0.1.2", "0.1.1", "0.1.0"];
+        assert_eq!(behind(releases.into_iter(), "0.1.4"), 0);
+        assert_eq!(behind(releases.into_iter(), "0.1.3"), 1);
+        assert_eq!(behind(releases.into_iter(), "0.1.2"), 2);
+        assert_eq!(behind(releases.into_iter(), "0.1.2-rc.1"), 3);
+        assert_eq!(behind(releases.into_iter(), "0.1.5-beta.1"), 0);
+    }
+
+    #[test]
+    fn two_releases_behind_is_asked_urgently() {
+        assert!(!question("0.1.3", 1).contains("security"));
+        let urgent = question("0.1.4", 2);
+        assert!(urgent.contains("2 releases behind"), "{urgent}");
+        assert!(urgent.contains("Only the 3 newest releases get security fixes"));
+        assert!(urgent.ends_with("Update now? [Y/n] "));
     }
 
     #[test]

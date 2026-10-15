@@ -26,7 +26,7 @@ cave-vm is a small open-source project, so these are targets, not guarantees.
 
 ## Supported versions
 
-cave-vm has not had a stable release yet. Until it does, only the latest commit on `main` receives security fixes. After the first release, this section will list the supported versions.
+The three newest stable releases, and `main`, get security fixes. Release candidates, betas and older releases get none. cave asks to update when a newer release is out, and a copy two or more releases behind does not run in a terminal until it is updated (D52). Update with `brew upgrade cave-vm` or by running the install script again.
 
 ## What counts as a vulnerability
 

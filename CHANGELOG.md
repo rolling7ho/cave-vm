@@ -12,6 +12,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `CODE_OF_CONDUCT.md` (D48, decision 0021).
 
 ### Changed
+- A copy of cave 2 or more stable releases behind asks to update every time it runs in a terminal, says only the 3 newest releases get security fixes, and stops the command on a no. Without a terminal it warns. `SECURITY.md` names the 3 newest stable releases as supported, and release `images.json` lists every stable release (D52, decision 0025).
 - The snapshots before each `cave agent` run and each `cave push` are automatic and count towards `[snapshots] keep`, so they no longer pile up (D51, decision 0024). `cave restore` with no name still goes back to the snapshot before the last agent run.
 - `CONTRIBUTING.md` no longer says unsigned commits fail a DCO check, since none runs; reviewers ask for the sign-off.
 - The pull request template and `CONTRIBUTING.md` no longer ask contributors to mark AI assistance (D49, decision 0022).
