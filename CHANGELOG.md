@@ -4,6 +4,9 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Removed
+- `CODE_OF_CONDUCT.md` (D48, decision 0021).
+
 ### Changed
 - The docs match the code again: stale error messages and prompts in `docs/cli.md`, `[snapshots]`, `cpus` and `disk` in `docs/config.md`, the daemon requests in `docs/protocol.md`, and smaller fixes across the safety, snapshot, contributor and SDK docs. `cave init`'s skill now lists `cave exec --fork` and `cave rm <fork>`.
 
