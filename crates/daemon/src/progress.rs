@@ -35,8 +35,8 @@ pub fn report(message: impl Into<String>, done: Option<u64>, total: Option<u64>)
     });
 }
 
-/// Reports a download in steps of a tenth, so a large file sends about
-/// ten messages: `downloading <what>: 40% of 1.9 GB`.
+/// Reports a download each time its whole percentage changes, so a large
+/// file sends about a hundred messages: `downloading <what>: 42% of 1.9 GB`.
 pub struct Download {
     what: String,
     reported: Option<u64>,
@@ -59,14 +59,14 @@ impl Download {
             }
             return;
         };
-        let tenth = (done.min(total) * 10 / total) * 10;
-        if self.reported.is_some_and(|r| r >= tenth) {
+        let percent = done.min(total) * 100 / total;
+        if self.reported.is_some_and(|r| r >= percent) {
             return;
         }
-        self.reported = Some(tenth);
+        self.reported = Some(percent);
         report(
             format!(
-                "downloading {}: {tenth}% of {:.1} GB",
+                "downloading {}: {percent}% of {:.1} GB",
                 self.what,
                 total as f64 / (1u64 << 30) as f64
             ),
@@ -97,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn a_download_reports_each_tenth_once() {
+    fn a_download_reports_each_percent_once() {
         let got = messages(|| {
             let mut d = Download::new("the debian image");
             for done in (0..=1000).step_by(7) {
@@ -105,9 +105,10 @@ mod tests {
             }
             d.update(1000, Some(1000));
         });
-        assert_eq!(got.len(), 11, "{got:?}");
+        assert_eq!(got.len(), 101, "{got:?}");
         assert_eq!(got[0], "downloading the debian image: 0% of 0.0 GB");
-        assert!(got[10].contains(": 100% of"), "{got:?}");
+        assert_eq!(got[42], "downloading the debian image: 42% of 0.0 GB");
+        assert!(got[100].contains(": 100% of"), "{got:?}");
     }
 
     #[test]

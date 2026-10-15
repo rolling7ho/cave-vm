@@ -118,14 +118,20 @@ impl Connection {
     }
 }
 
-/// Prints a progress message. A download's steps overwrite one line on a
-/// terminal, and end it when the download is done.
+/// Prints a progress message. A download's percentage updates one line
+/// live on a terminal, and ends it when the download is done. Elsewhere,
+/// such as in a log, only every tenth is printed, one line each.
 fn show_progress(message: &str, done: Option<u64>, total: Option<u64>) {
     match (done, total) {
         (Some(done), Some(total)) if std::io::stderr().is_terminal() => {
             eprint!("\r{message}\x1b[K");
             if done >= total {
                 eprintln!();
+            }
+        }
+        (Some(done), Some(total)) if total > 0 => {
+            if done.min(total) * 100 / total % 10 == 0 {
+                eprintln!("{message}");
             }
         }
         _ => eprintln!("{message}"),

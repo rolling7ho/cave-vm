@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Changed
 
+- The image download on first run shows its percentage live, one percent at a time, instead of in steps of 10%. Output that is not a terminal still gets a line at every tenth.
 - `cave --help` no longer opens with the line "Disposable Linux VMs for coding agents, one per project".
 - `cave --help` lists each command with its flags and arguments, such as `run [--net <off|lan>] [-p <PORT>...] [--fork <FORK>]`, with its description on the line below.
 
