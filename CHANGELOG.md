@@ -4,6 +4,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Changed
+
+- `cave --help` no longer opens with the line "Disposable Linux VMs for coding agents, one per project".
+
 ### Added
 
 - The Python and TypeScript SDK READMEs say how to install them from the release tag.
