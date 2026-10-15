@@ -18,6 +18,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `cave --help` lists each command with its flags and arguments, such as `run [--net <off|lan>] [-p <PORT>...] [--fork <FORK>]`, with its description on the line below.
 
 ### Added
+- `scripts/release.sh <version> [--dry-run]` publishes a release: it tags main, uploads the binary tarball, a pinned `install.sh` and `images.json`, and points the Homebrew formula at the new tag. `--dry-run` builds everything into `target/dist` and publishes nothing.
 
 - `cave mirror [--fork <name>]` shows the terminal of the agent `cave agent` runs, live and read-only; `cave agent` records it to `.cave/agent.term` when it runs in a terminal (D39).
 - `cave view [--fork <name>]` follows what happens in the VM live: each command, file write and connection, as the audit log records it, until Ctrl-C (D39).
