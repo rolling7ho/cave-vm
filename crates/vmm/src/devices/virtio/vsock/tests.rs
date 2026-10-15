@@ -293,6 +293,71 @@ fn host_data_stays_within_the_guest_credit() {
 }
 
 #[test]
+fn the_guest_cannot_claim_more_credit_than_the_device_offers() {
+    let mut r = rig();
+    let mut host = with_timeout(r.dev.connector().connect(AGENT_PORT).unwrap());
+    let (req, _) = r.next_packet();
+    let huge = Header {
+        buf_alloc: u32::MAX,
+        ..r.guest_header(AGENT_PORT, req.src_port, op::RESPONSE)
+    };
+    r.guest_send(huge, &[]);
+    let writer = thread::spawn(move || {
+        let _ = host.write_all(&vec![7u8; BUF_ALLOC as usize + 4096]);
+        host
+    });
+    let mut got = 0;
+    while got < BUF_ALLOC as usize {
+        got += r.next_packet().1.len();
+    }
+    assert_eq!(got, BUF_ALLOC as usize);
+    r.no_packet();
+    r.dev.reset();
+    drop(writer.join().unwrap());
+}
+
+#[test]
+fn guest_connections_past_the_limit_are_reset_until_one_closes() {
+    let mut r = rig();
+    // The host ends stay open, so no connection ends on its own.
+    let (handed_out, _host_ends) = mpsc::channel();
+    let handed_out = Mutex::new(handed_out);
+    r.dev.serve_host_port(
+        5000,
+        Arc::new(move || {
+            let (host, device) = UnixStream::pair()?;
+            handed_out.lock().unwrap().send(host).unwrap();
+            Ok(device)
+        }),
+    );
+    r.dev.shared.lock().max_guest_conns = 1;
+    r.guest_send(r.guest_header(777, 5000, op::REQUEST), &[]);
+    assert_eq!(r.next_packet().0.op, op::RESPONSE);
+    r.guest_send(r.guest_header(778, 5000, op::REQUEST), &[]);
+    let (rst, _) = r.next_packet();
+    assert_eq!((rst.op, rst.dst_port), (op::RST, 778));
+
+    r.guest_send(r.guest_header(777, 5000, op::RST), &[]);
+    r.guest_send(r.guest_header(779, 5000, op::REQUEST), &[]);
+    let (resp, _) = r.next_packet();
+    assert_eq!((resp.op, resp.dst_port), (op::RESPONSE, 779));
+}
+
+#[test]
+fn resets_the_guest_provokes_stop_queueing_once_the_backlog_is_full() {
+    let r = rig();
+    for port in 0..(2 * MAX_BACKLOG) as u32 {
+        handle(
+            &r.dev.shared,
+            r.guest_header(port, 2, op::RW),
+            b"x".to_vec(),
+        );
+    }
+    let backlog = r.dev.shared.lock().backlog.len();
+    assert_eq!(backlog, MAX_BACKLOG);
+}
+
+#[test]
 fn host_data_larger_than_a_receive_buffer_is_split_in_order() {
     let mut r = rig();
     let (mut host, _) = r.host_connect();

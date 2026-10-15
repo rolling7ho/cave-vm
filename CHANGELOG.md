@@ -5,6 +5,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 ## [Unreleased]
 
 ### Fixed
+- A guest can no longer exhaust the Mac by opening connections: outbound TCP connections and guest vsock connections to the host are capped at 1024 each, a guest cannot claim more vsock credit than the device offers, and resets it provokes stop queueing once 4096 packets wait.
 - Credentials given to an earlier command, or held in a restored snapshot or fork, are now redacted from every later command's output and from files read out of the VM, not only from the command that named them.
 - `cave run --net off` or `--net lan` on a VM already running with another network mode was ignored, so the VM kept its network. It is now an error that says to `cave stop` first.
 

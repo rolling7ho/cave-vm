@@ -33,6 +33,12 @@ pub const WINDOW: usize = 256 * 1024;
 /// Bytes read from a host socket at a time.
 const READ_CHUNK: usize = 16 * 1024;
 
+/// Most connections open or connecting at once, as for UDP. Each has two
+/// threads and up to two [`WINDOW`]s of buffers, so a guest opening
+/// connections without end cannot exhaust the Mac. A SYN that would open
+/// another is reset.
+const MAX_FLOWS: usize = 1024;
+
 /// A guest connection: its port, and where it is going.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FlowKey {
@@ -109,12 +115,27 @@ struct Open {
 }
 
 /// Every outbound TCP connection.
-#[derive(Default)]
 pub struct Flows {
     flows: HashMap<FlowKey, Phase>,
+    /// [`MAX_FLOWS`], lowered by tests.
+    pub(super) max: usize,
+}
+
+impl Default for Flows {
+    fn default() -> Flows {
+        Flows {
+            flows: HashMap::new(),
+            max: MAX_FLOWS,
+        }
+    }
 }
 
 impl Flows {
+    /// Whether another connection would pass [`MAX_FLOWS`].
+    pub fn is_full(&self) -> bool {
+        self.flows.len() >= self.max
+    }
+
     pub fn contains(&self, key: &FlowKey) -> bool {
         self.flows.contains_key(key)
     }

@@ -54,6 +54,16 @@ pub const BUF_ALLOC: u32 = 256 * 1024;
 /// Largest payload in one packet to the guest.
 const MAX_PAYLOAD: usize = 64 * 1024;
 
+/// Most connections the guest may open to the host at once. Each has two
+/// threads, so a guest opening them without end cannot exhaust the Mac. A
+/// request past it is reset.
+const MAX_GUEST_CONNS: usize = 1024;
+
+/// Most packets waiting for the guest before resets and credit updates
+/// the guest provoked are dropped instead of queued. Data is bounded by
+/// credit, and is never dropped.
+const MAX_BACKLOG: usize = 4096;
+
 /// Socket type: stream.
 const TYPE_STREAM: u16 = 1;
 
@@ -165,6 +175,8 @@ struct Conn {
     guest_closed: bool,
     /// The writer thread has not finished.
     writer_running: bool,
+    /// The guest opened it, so it counts towards [`MAX_GUEST_CONNS`].
+    from_guest: bool,
 }
 
 impl Conn {
@@ -186,6 +198,10 @@ struct State {
     rx: Option<ActiveQueue>,
     backlog: VecDeque<(Header, Vec<u8>)>,
     conns: HashMap<Key, Conn>,
+    /// Connections the guest opened, of `conns`.
+    guest_conns: usize,
+    /// [`MAX_GUEST_CONNS`], lowered by tests.
+    max_guest_conns: usize,
     next_host_port: u32,
     /// Bumped on every reset, so threads of an older driver session stop.
     generation: u64,
@@ -194,6 +210,17 @@ struct State {
     /// When a transport reset went to the guest, until the guest handles
     /// it. Packets wait in the backlog meanwhile, up to [`RESET_WAIT`].
     reset_sent: Option<Instant>,
+}
+
+impl State {
+    /// Forgets the connection `key`, and returns it.
+    fn remove(&mut self, key: Key) -> Option<Conn> {
+        let conn = self.conns.remove(&key)?;
+        if conn.from_guest {
+            self.guest_conns -= 1;
+        }
+        Some(conn)
+    }
 }
 
 /// Opens the host side of a guest connection to a host port.
@@ -229,13 +256,16 @@ impl Shared {
 
     /// Queues a packet for the guest and fills receive buffers.
     fn send(&self, state: &mut State, mut header: Header, data: Vec<u8>) {
+        if state.backlog.len() >= MAX_BACKLOG && matches!(header.op, op::RST | op::CREDIT_UPDATE) {
+            return;
+        }
         header.len = data.len() as u32;
         state.backlog.push_back((header, data));
         fill(state);
     }
 
     fn reset_conn(&self, state: &mut State, key: Key) {
-        if let Some(conn) = state.conns.remove(&key) {
+        if let Some(conn) = state.remove(key) {
             let _ = conn.stream.shutdown(Shutdown::Both);
         }
         let header = self.header(key, op::RST, None);
@@ -329,6 +359,8 @@ impl Vsock {
                 rx: None,
                 backlog: VecDeque::new(),
                 conns: HashMap::new(),
+                guest_conns: 0,
+                max_guest_conns: MAX_GUEST_CONNS,
                 next_host_port: FIRST_HOST_PORT,
                 generation: 0,
                 paused: false,
@@ -529,7 +561,9 @@ fn handle(shared: &Arc<Shared>, header: Header, data: Vec<u8>) {
         }
         return;
     };
-    conn.peer_buf_alloc = header.buf_alloc;
+    // The guest's claim is capped, so it cannot make the host queue more
+    // for it than it may queue for the host.
+    conn.peer_buf_alloc = header.buf_alloc.min(BUF_ALLOC);
     conn.peer_fwd_cnt = header.fwd_cnt;
     shared.changed.notify_all();
     match header.op {
@@ -564,7 +598,7 @@ fn handle(shared: &Arc<Shared>, header: Header, data: Vec<u8>) {
             }
         }
         op::RST => {
-            if let Some(conn) = state.conns.remove(&key) {
+            if let Some(conn) = state.remove(key) {
                 let _ = conn.stream.shutdown(Shutdown::Both);
             }
             shared.changed.notify_all();
@@ -593,14 +627,17 @@ fn connect_to_host(shared: &Arc<Shared>, key: Key, request: Header) {
         shared.reset_conn(&mut state, key);
         return;
     };
-    if state.conns.contains_key(&key) {
+    if state.conns.contains_key(&key) || state.guest_conns >= state.max_guest_conns {
+        let _ = stream.shutdown(Shutdown::Both);
         shared.reset_conn(&mut state, key);
         return;
     }
     let mut conn = new_conn(stream, ConnState::Connected);
-    conn.peer_buf_alloc = request.buf_alloc;
+    conn.peer_buf_alloc = request.buf_alloc.min(BUF_ALLOC);
     conn.peer_fwd_cnt = request.fwd_cnt;
+    conn.from_guest = true;
     state.conns.insert(key, conn);
+    state.guest_conns += 1;
     let generation = state.generation;
     start_threads(shared, key, generation, &mut state);
     let conn = state.conns.get(&key);
@@ -622,6 +659,7 @@ fn new_conn(stream: UnixStream, state: ConnState) -> Conn {
         guest_done_sending: false,
         guest_closed: false,
         writer_running: false,
+        from_guest: false,
     }
 }
 
@@ -818,6 +856,7 @@ impl VirtioDevice for Vsock {
         for (_, conn) in state.conns.drain() {
             let _ = conn.stream.shutdown(Shutdown::Both);
         }
+        state.guest_conns = 0;
         self.shared.changed.notify_all();
     }
 
