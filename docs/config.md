@@ -79,8 +79,8 @@ Changing `mode` from sealed to synced creates the mirror on the next `cave sync`
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `auto` | boolean | `true` | Take the automatic snapshot that saves the state before each `cave restore` (see [cli.md](cli.md#cave-restore)). The snapshots before each `cave agent` run and each `cave push` (design) are always taken, even when this is `false`, are kept like named ones, and do not count towards `keep` |
-| `keep` | integer | `10` | How many automatic snapshots to keep. When there are more, the oldest automatic ones are deleted after each `cave restore`, and by `cave gc`. The one just taken and one being restored are never deleted, even with `keep = 0`. Snapshots named by the user are never deleted automatically |
+| `auto` | boolean | `true` | Take the automatic snapshot that saves the state before each `cave restore` (see [cli.md](cli.md#cave-restore)). The automatic snapshots before each `cave agent` run and each `cave push` (design) are always taken, even when this is `false` |
+| `keep` | integer | `10` | How many automatic snapshots to keep. Automatic snapshots are the ones before each `cave agent` run, each `cave push` and each `cave restore` ([D51](../ROADMAP.md#decisions)). When there are more, the oldest are deleted after each new one before an agent run or a push, after each `cave restore`, and by `cave gc`. The one just taken and one being restored are never deleted, even with `keep = 0`. Snapshots named by the user are never deleted automatically |
 
 ### [updates]
 

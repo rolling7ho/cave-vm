@@ -330,7 +330,7 @@ cave restore [name] [--fork <name>]
 
 Rolls the VM back to a snapshot, by default the most recent one. Processes in the snapshot resume where they were. Open shells and running `cave exec` calls are disconnected first, and port forwards are re-applied.
 
-Before rolling back, it saves the current state as an automatic snapshot, so a restore can itself be undone. Automatic snapshots are deleted by the retention rules in `cave.toml` ([`[snapshots]`](config.md#snapshots)), once the restore is done, so restoring an old automatic snapshot does not delete it. With `auto = false` nothing is saved first, and the output has no second line. With no name, automatic snapshots are passed over, so a second `cave restore` does not just undo the first.
+Before rolling back, it saves the current state as an automatic snapshot, so a restore can itself be undone. Automatic snapshots are deleted by the retention rules in `cave.toml` ([`[snapshots]`](config.md#snapshots)), once the restore is done, so restoring an old automatic snapshot does not delete it. With `auto = false` nothing is saved first, and the output has no second line. With no name it restores the newest snapshot, passing over the ones restores save, so after an agent run it goes back to the snapshot taken before the run, and a second `cave restore` does not just undo the first.
 
 Output:
 
@@ -585,7 +585,7 @@ cave agent <name> [--in-vm] [--fork <name>] [<agent args>...]
 Starts a coding agent against this project's VM (design, [decision 0002](decisions/0002-cave-agent-runs-on-the-mac.md)):
 
 1. Sets up the project and boots the VM if needed, and prints the startup policy.
-2. Takes a snapshot, because the design calls for one before each agent run.
+2. Takes a snapshot, because the design calls for one before each agent run. It is an automatic snapshot, so it counts towards `keep` in `cave.toml` ([D51](../ROADMAP.md#decisions)).
 3. Starts the agent on the Mac, connected to this VM through the MCP server, with host Bash denied where the agent supports it. The model API key stays on the Mac.
 4. When the agent exits, in synced mode it updates the Mac mirror as `cave sync` does and prints what changed. It then prints how to undo the run:
 

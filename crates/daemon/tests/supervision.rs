@@ -855,6 +855,7 @@ impl Rig {
         self.request(Request::Snapshot {
             vm: id.clone(),
             name: name.map(String::from),
+            before: false,
         })
     }
 
@@ -1093,6 +1094,61 @@ fn automatic_snapshots_follow_the_project_settings() {
     let before = autos();
     assert_eq!(restore("named"), None);
     assert_eq!(autos(), before);
+}
+
+#[test]
+fn snapshots_before_an_agent_run_count_towards_keep_and_are_restored_by_default() {
+    let r = rig("before", NORMAL);
+    let (id, _) = snapshot_project(&r);
+    assert!(matches!(
+        r.request(Request::Start {
+            vm: id.clone(),
+            net: None,
+            ports: Vec::new()
+        }),
+        Reply::Policy(_)
+    ));
+    assert!(matches!(
+        r.snapshot(&id, Some("named")),
+        Reply::Snapshot { .. }
+    ));
+    *r.source.auto_snapshots.lock().unwrap() = AutoSnapshots {
+        auto: true,
+        keep: 2,
+    };
+    let before = || match r.request(Request::Snapshot {
+        vm: id.clone(),
+        name: Some("ignored".into()),
+        before: true,
+    }) {
+        Reply::Snapshot { name, .. } => name,
+        other => panic!("{other:?}"),
+    };
+    let taken: Vec<String> = (0..4).map(|_| before()).collect();
+    assert!(!taken.contains(&"ignored".to_string()));
+    // Automatic, so only the newest `keep` stay; the named one always.
+    let mut autos: Vec<String> = r
+        .snapshots(&id)
+        .into_iter()
+        .filter(|(_, auto)| *auto)
+        .map(|(name, _)| name)
+        .collect();
+    autos.sort();
+    let mut newest = taken[2..].to_vec();
+    newest.sort();
+    assert_eq!(autos, newest);
+    assert!(r.snapshots(&id).contains(&("named".to_string(), false)));
+
+    // A restore with no name goes back to the newest one, the state before
+    // the last agent run, and a second one does not just undo the first.
+    match r.restore(&id, None) {
+        Reply::Restored { name, saved, .. } => {
+            assert_eq!(name, taken[3]);
+            assert!(saved.is_some());
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(r.restore(&id, None), Reply::Restored { name, .. } if name == taken[3]));
 }
 
 #[test]

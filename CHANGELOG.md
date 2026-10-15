@@ -12,6 +12,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `CODE_OF_CONDUCT.md` (D48, decision 0021).
 
 ### Changed
+- The snapshots before each `cave agent` run and each `cave push` are automatic and count towards `[snapshots] keep`, so they no longer pile up (D51, decision 0024). `cave restore` with no name still goes back to the snapshot before the last agent run.
 - `CONTRIBUTING.md` no longer says unsigned commits fail a DCO check, since none runs; reviewers ask for the sign-off.
 - The pull request template and `CONTRIBUTING.md` no longer ask contributors to mark AI assistance (D49, decision 0022).
 - The docs match the code again: stale error messages and prompts in `docs/cli.md`, `[snapshots]`, `cpus` and `disk` in `docs/config.md`, the daemon requests in `docs/protocol.md`, and smaller fixes across the safety, snapshot, contributor and SDK docs. `cave init`'s skill now lists `cave exec --fork` and `cave rm <fork>`.

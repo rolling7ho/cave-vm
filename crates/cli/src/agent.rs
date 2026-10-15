@@ -154,6 +154,7 @@ fn snapshot_before(vm: &VmId) -> Result<Option<String>> {
     match Connection::call(&Request::Snapshot {
         vm: vm.clone(),
         name: None,
+        before: true,
     })? {
         Reply::Snapshot { name, .. } => Ok(Some(name)),
         _ => Err(CliError::new(

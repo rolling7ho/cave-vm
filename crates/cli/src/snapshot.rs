@@ -18,6 +18,7 @@ pub fn snapshot(name: Option<String>, fork: Option<String>) -> Result<()> {
     let Reply::Snapshot { name, .. } = Connection::call(&Request::Snapshot {
         vm: vm_id(&project, fork),
         name,
+        before: false,
     })?
     else {
         return Err(CliError::new(

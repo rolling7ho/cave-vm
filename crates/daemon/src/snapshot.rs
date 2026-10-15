@@ -73,9 +73,12 @@ pub struct Manifest {
     pub credentials: Vec<String>,
     /// Whether `memory` and `state` were saved.
     pub has_memory: bool,
-    /// Taken automatically, such as before a restore, rather than asked
-    /// for.
+    /// Taken automatically, before a restore, an agent run or a push,
+    /// rather than asked for. These count towards `[snapshots] keep`.
     pub auto: bool,
+    /// The state a restore saved first, so it can be undone. A restore
+    /// with no name passes these over.
+    pub undo: bool,
 }
 
 /// Why a manifest cannot be read. The messages say how to fix it.
@@ -129,6 +132,7 @@ impl Manifest {
             "credentials": self.credentials,
             "has_memory": self.has_memory,
             "auto": self.auto,
+            "undo": self.undo,
         });
         let mut text = serde_json::to_string_pretty(&doc).expect("a JSON value");
         text.push('\n');
@@ -184,6 +188,7 @@ impl Manifest {
                 })
                 .ok_or_else(|| bad("credentials is not a list of names".into()))?,
         };
+        let auto = doc.get("auto").and_then(Value::as_bool).unwrap_or(false);
         Ok(Manifest {
             format,
             name: string(&doc, "name")?,
@@ -199,7 +204,9 @@ impl Manifest {
                 .get("has_memory")
                 .and_then(Value::as_bool)
                 .ok_or_else(|| bad("no has_memory".into()))?,
-            auto: doc.get("auto").and_then(Value::as_bool).unwrap_or(false),
+            auto,
+            // Before D51 the only automatic snapshots were undo points.
+            undo: doc.get("undo").and_then(Value::as_bool).unwrap_or(auto),
         })
     }
 

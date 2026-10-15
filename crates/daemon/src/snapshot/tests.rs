@@ -14,6 +14,7 @@ fn sample() -> Manifest {
         credentials: vec!["API_KEY".into()],
         has_memory: true,
         auto: false,
+        undo: false,
     }
 }
 
