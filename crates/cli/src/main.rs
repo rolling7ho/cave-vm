@@ -109,8 +109,14 @@ enum Cmd {
     Agent {
         /// The agent: claude or codex.
         name: String,
-        /// Run the agent inside the VM instead of on the Mac.
+        /// Keep the agent's permission prompts.
         #[arg(long)]
+        safe: bool,
+        /// Run the agent on the Mac through cave mcp, with prompts.
+        #[arg(long)]
+        on_mac: bool,
+        /// The default since D53; accepted so older scripts still work.
+        #[arg(long, hide = true, conflicts_with = "on_mac")]
         in_vm: bool,
         #[arg(long)]
         fork: Option<String>,
@@ -359,10 +365,12 @@ fn main() -> ExitCode {
         }
         Cmd::Agent {
             name,
-            in_vm,
+            safe,
+            on_mac,
+            in_vm: _,
             fork,
             args,
-        } => match agent::run(&name, in_vm, fork, args) {
+        } => match agent::run(&name, safe, on_mac, fork, args) {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
@@ -423,7 +431,7 @@ mod tests {
         assert!(help.contains("  run [--net <off|lan>] [-p <PORT>...] [--fork <FORK>]\n      Boot or restore this project's VM\n"), "{help}");
         assert!(help.contains("  rm [NAME] [--yes]\n"), "{help}");
         assert!(
-            help.contains("  agent <NAME> [--in-vm] [--fork <FORK>] [ARGS]...\n"),
+            help.contains("  agent <NAME> [--safe] [--on-mac] [--fork <FORK>] [ARGS]...\n"),
             "{help}"
         );
         assert!(

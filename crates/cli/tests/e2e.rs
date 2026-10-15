@@ -808,6 +808,7 @@ fn agent_on_the_mac_reaches_the_vm_only_through_mcp() {
         .command(&[
             "agent",
             "claude",
+            "--on-mac",
             "--",
             "-p",
             "Read the file marker with the cave read_file tool, then run `uname -s` with the cave exec tool. \
@@ -1040,6 +1041,7 @@ fn gate_5() {
         .command(&[
             "agent",
             "claude",
+            "--on-mac",
             "--",
             "-p",
             "Use only the cave MCP tools. First write a file hello.txt containing the line `gate five` \
@@ -1236,4 +1238,20 @@ fn first_run_signs_cave_vmm_and_shows_the_download() {
         stdout.contains("ok    cave is signed with the hypervisor entitlement"),
         "{stdout}"
     );
+}
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn agent_in_the_vm_needs_the_network() {
+    let rig = Rig::new();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    assert!(rig.cave(&["run", "--net", "off"]).status.success());
+    let out = rig.cave(&["agent", "claude"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(125), "{stderr}");
+    assert!(
+        stderr.contains("Claude Code cannot reach its model API: this VM has no network"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("Permissions skipped"), "{stderr}");
 }

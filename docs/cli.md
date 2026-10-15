@@ -138,7 +138,7 @@ The design's verb set, in its order, plus `cave stop` (D20) and `cave mcp`, adde
 | [`cave push`](#cave-push) | Bring Mac edits in (synced mode) |
 | [`cave cp`](#cave-cp) | Copy files in and out |
 | [`cave export`](#cave-export) | Copy the project's files out of the VM |
-| [`cave agent <name>`](#cave-agent) | Start an agent on the Mac against this VM through MCP |
+| [`cave agent <name>`](#cave-agent) | Start an agent inside this VM, without permission prompts |
 | [`cave images`](#cave-images) | List base images |
 | [`cave doctor`](#cave-doctor) | Check entitlements, macOS version, disk space and image state |
 | [`cave mcp`](#cave-mcp) | Run the MCP server on stdio (plumbing for agents) |
@@ -276,7 +276,7 @@ cave shell [--fork <name>]
 
 Opens an interactive shell in the VM through the guest agent, with a pseudo-terminal that follows window resizes. It boots the VM first if needed. The shell starts in the project directory inside the VM ([guest layout](#guest-layout)). Exiting the shell does not stop the VM.
 
-To leave, type `exit` or press Ctrl-D; `cave shell` says so when it starts. When a program in the VM holds the keyboard, `~.` at the start of a line leaves at once, as in ssh, and `~~` types one `~`. The escape is only in `cave shell`, not in `cave agent --in-vm`.
+To leave, type `exit` or press Ctrl-D; `cave shell` says so when it starts. When a program in the VM holds the keyboard, `~.` at the start of a line leaves at once, as in ssh, and `~~` types one `~`. The escape is only in `cave shell`, not in `cave agent`, which runs the agent inside the VM.
 
 Exit code: the shell's.
 
@@ -579,14 +579,14 @@ The copy goes through `tar` in the VM, as `cave cp` copies folders. Without a sn
 ### cave agent
 
 ```
-cave agent <name> [--in-vm] [--fork <name>] [<agent args>...]
+cave agent <name> [--safe] [--on-mac] [--fork <name>] [<agent args>...]
 ```
 
-Starts a coding agent against this project's VM (design, [decision 0002](decisions/0002-cave-agent-runs-on-the-mac.md)):
+Starts a coding agent against this project's VM (design, [decision 0026](decisions/0026-agent-runs-in-the-vm-in-full-auto.md)):
 
 1. Sets up the project and boots the VM if needed, and prints the startup policy.
 2. Takes a snapshot, because the design calls for one before each agent run. It is an automatic snapshot, so it counts towards `keep` in `cave.toml` ([D51](../ROADMAP.md#decisions)).
-3. Starts the agent on the Mac, connected to this VM through the MCP server, with host Bash denied where the agent supports it. The model API key stays on the Mac.
+3. Prints `Permissions skipped. The VM is the sandbox.` and starts the agent inside the VM with its permission prompts skipped, since its tools reach only the VM. On first use it installs the agent inside the VM with the agent's own installer, and you sign in inside the VM. The agent needs the VM's network to reach its model API.
 4. When the agent exits, in synced mode it updates the Mac mirror as `cave sync` does and prints what changed. It then prints how to undo the run:
 
 ```
@@ -594,19 +594,21 @@ Snapshot before this run: my-project-2026-10-12-debian-4
 Undo everything the agent did with: cave restore my-project-2026-10-12-debian-4
 ```
 
-`--in-vm` runs the agent inside the VM instead, which needs the VM's network to reach the model API. On first use it installs the agent inside the VM with the agent's own installer, and you sign in inside the VM.
+`--safe` keeps the agent's permission prompts.
 
-Arguments after the agent's name go to the agent unchanged, once cave's own flags (`--in-vm`, `--fork`) are read: `cave agent claude --in-vm --resume` passes `--resume`. A `--` before them still works ([D35](../ROADMAP.md#decisions)).
+`--on-mac` runs the agent on the Mac instead, connected to this VM through the MCP server, with host Bash denied where the agent supports it. The model API key stays on the Mac. Its prompts are never skipped there, and the agent's own flags that would skip them are refused. `--in-vm`, the way to run inside the VM before D53, is still accepted and changes nothing.
+
+Arguments after the agent's name go to the agent unchanged, once cave's own flags (`--safe`, `--on-mac`, `--fork`) are read: `cave agent claude --safe --resume` passes `--resume`. A `--` before them still works ([D35](../ROADMAP.md#decisions)).
 
 Denying Bash is a guardrail with limits: Claude Code keeps its other tools on the Mac, and an agent started some other way keeps its shell. [docs/safety.md](safety.md#the-agent-boundary) lists them.
 
-Agents in v1: `claude` (Claude Code) and `codex` (Codex, [D44](../ROADMAP.md#decisions)).
+Agents in v1: `claude` (Claude Code) and `codex` (Codex, [D44](../ROADMAP.md#decisions), [D54](../ROADMAP.md#decisions)).
 
-On the Mac, `cave` starts `claude` in the project folder with `--mcp-config`, naming `cave mcp` as the `cave` server (`cave mcp --fork <name>` with `--fork`), and `--disallowedTools=Bash,Read(./.env)`, which takes the Bash tool away from it and stops its Read and Grep tools from opening `.env`. Without the second rule, Claude Code on the Mac could read the credentials straight from `.env`. All of this was checked with Claude Code 2.1 on a Mac. In `--fork` runs there is no snapshot first, since forks cannot be snapshotted yet, and `cave` says so.
+With `--on-mac`, `cave` starts `claude` in the project folder with `--mcp-config`, naming `cave mcp` as the `cave` server (`cave mcp --fork <name>` with `--fork`), and `--disallowedTools=Bash,Read(./.env)`, which takes the Bash tool away from it and stops its Read and Grep tools from opening `.env`. Without the second rule, Claude Code on the Mac could read the credentials straight from `.env`. All of this was checked with Claude Code 2.1 on a Mac. In `--fork` runs there is no snapshot first, since forks cannot be snapshotted yet, and `cave` says so.
 
-`--in-vm` installs Claude Code with `curl -fsSL https://claude.ai/install.sh | bash` inside the VM if it is not there, then runs it on a pseudo-terminal like `cave shell`, so it needs a terminal.
+Inside the VM, `cave` installs Claude Code with `curl -fsSL https://claude.ai/install.sh | bash` if it is not there, then runs it with `--dangerously-skip-permissions` (left out with `--safe`) on a pseudo-terminal like `cave shell`, so it needs a terminal.
 
-For Codex, `cave` starts `codex` in the project folder with `-c` settings naming `cave mcp` as the `cave` MCP server (with `--fork <name>` for a fork), approving its tools in advance, since they act only on the VM, and giving it the text of `.cave/AGENTS.md` as `developer_instructions`, since without a shell it cannot open that file, and with `--disable shell_tool --disable unified_exec`, which takes away its shell. Without a shell, Codex has no tool that reads a file on the Mac, so `.env` is out of its reach too. This was checked with Codex 0.162 on a Mac: it ran commands in the VM through `cave` and reported no tool that could read `.env`. `--in-vm` installs Codex with `sudo npm install -g @openai/codex` inside the VM if it is not there.
+For Codex with `--on-mac`, `cave` starts `codex` in the project folder with `-c` settings naming `cave mcp` as the `cave` MCP server (with `--fork <name>` for a fork), approving its tools in advance, since they act only on the VM, and giving it the text of `.cave/AGENTS.md` as `developer_instructions`, since without a shell it cannot open that file, and with `--disable shell_tool --disable unified_exec`, which takes away its shell. Without a shell, Codex has no tool that reads a file on the Mac, so `.env` is out of its reach too. This was checked with Codex 0.162 on a Mac: it ran commands in the VM through `cave` and reported no tool that could read `.env`. Inside the VM, `cave` installs Codex with `sudo npm install -g @openai/codex` if it is not there, and runs it with `--dangerously-bypass-approvals-and-sandbox` (left out with `--safe`).
 
 Exit code: the agent's.
 
@@ -615,8 +617,10 @@ Errors:
 | Error | Fix |
 | --- | --- |
 | `unknown agent "<name>"` | Supported agents: claude, codex |
-| `claude is not installed on this Mac` | Install Claude Code, or run it inside the VM with `cave agent claude --in-vm` |
-| `codex is not installed on this Mac` | Install Codex (npm install -g @openai/codex), or run it inside the VM with `cave agent codex --in-vm` |
+| `claude is not installed on this Mac` | Install Claude Code, or run it inside the VM with `cave agent claude` |
+| `codex is not installed on this Mac` | Install Codex (npm install -g @openai/codex), or run it inside the VM with `cave agent codex` |
+| `--dangerously-skip-permissions is refused with --on-mac: the agent's own tools reach this Mac` | Run `cave agent claude` without `--on-mac`, which skips the prompts inside the VM |
+| `Claude Code cannot reach its model API: this VM has no network` | Run `cave stop`, set `mode = "nat"` under `[network]` in `cave.toml` if it says `"off"`, then run it again; or use `--on-mac` |
 
 ### cave images
 
@@ -736,7 +740,7 @@ cd my-project && cave agent claude
 1. `cave agent` finds no `cave.toml`, so it runs `cave init`, which asks whether to keep a copy of the code on the Mac. Enter keeps the default, sealed.
 2. First-run setup fetches the kernel and the Debian image with a progress bar, signs `cave` ad hoc [A5], and runs the doctor checks.
 3. The VM boots, the files in `my-project` are copied into `/workspace` ([D13](../ROADMAP.md#decisions)), and the startup policy is printed.
-4. A snapshot is taken, and Claude Code starts on the Mac with the VM as its only place to run commands.
+4. A snapshot is taken, Claude Code is installed in the VM on first use, and it starts there with its permission prompts skipped. You sign in inside the VM the first time.
 
 ### Undo a bad agent run
 
