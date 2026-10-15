@@ -31,6 +31,14 @@ A credential named in `credentials`, such as `API_KEY`, is read from the project
 
 Errors raise `CaveError`, with `message`, `fix` and the daemon's `code`.
 
+## Install
+
+The SDK is not on PyPI yet. Install it from the release tag:
+
+```sh
+pip install "cave-vm @ git+https://github.com/rolling7ho/cave-vm@v0.1.0#subdirectory=sdks/python"
+```
+
 ## Tests
 
 ```sh

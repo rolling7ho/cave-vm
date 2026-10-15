@@ -6,6 +6,8 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- The Python and TypeScript SDK READMEs say how to install them from the release tag.
+
 - An install script for Macs without Homebrew: `curl -fsSL https://github.com/rolling7ho/cave-vm/releases/latest/download/install.sh | sh`. Each release carries a copy pinned to its own binaries and their checksum; `scripts/install.sh` is the template.
 
 ## [0.1.0] - 2026-10-15

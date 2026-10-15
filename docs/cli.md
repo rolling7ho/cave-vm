@@ -1,6 +1,6 @@
 # CLI reference
 
-This is the spec for the `cave` command, written before any code (ROADMAP task P1.1). Nothing here is implemented yet.
+This is the reference for the `cave` command. It started as the spec written before any code (ROADMAP task P1.1), and every command in it is implemented as of v0.1.0.
 
 [docs/design.md](design.md) is the source of truth. Every command in its CLI table is here, and the flags it names (`--net off`, `--net lan`, `-p 3000`, `--in-vm`, the `cave rm` confirmation) are written as the design specifies them. Everything the design does not name was proposed in the phase 1 PR and approved by Ivan there. Questions the design left open were answered by Ivan as D13 to D22 ([decision 0004](decisions/0004-cli-and-config-open-items.md)), and are linked from the places they affect.
 
