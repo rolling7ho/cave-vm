@@ -1,6 +1,6 @@
 # 0002: `cave agent` runs the agent on the Mac
 
-Date: 2026-10-11 · Decided by: Ivan · Status: accepted
+Date: 2026-10-11 · Decided by: Ivan · Status: replaced by [decision 0026](0026-agent-runs-in-the-vm-in-full-auto.md)
 
 ## Context
 
