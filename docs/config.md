@@ -86,9 +86,11 @@ Changing `mode` from sealed to synced creates the mirror on the next `cave sync`
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `check` | boolean | `true` | Let the update detector look up whether a newer base image exists. The lookup carries no identifying data and never updates anything (design). `false` means cave makes no network request of its own for this project |
+| `check` | boolean | `true` | Let the update detector look up whether a newer base image or a newer cave exists, and let cave install a newer cave by itself ([D45](../ROADMAP.md#decisions)). The lookup carries no identifying data, and images are never updated by themselves. `false` means cave makes no network request of its own for this project |
 
 When a VM starts in a project with `check = true`, the daemon reads the image manifest (the same `images.json` the first run reads) in the background, at most once a day, and records the newest version of each image in `updates.json` in its data folder. A failed lookup is tried again a day later. `cave doctor` then says when a downloaded image has a newer version, and `cave images` marks it.
+
+The manifest also names the newest cave release. When it is newer than the running cave, no VM is running, and the project's `check` is not `false`, the next `cave` command starts installing it in the background and says so in one line ([D45](../ROADMAP.md#decisions)). cave installs itself the way it was installed: `brew update` and `brew upgrade rolling7ho/cave/cave-vm` for Homebrew, or the release's `install.sh` into the same folder. A copy run from a build folder or installed with `cargo install` is never touched. The install's output goes to `update.log` in the data folder, and a failed install is tried again a day later. The next command after the install uses the new version; it restarts the daemon if no VM is running.
 
 cave never moves a project to a newer image by itself. To move one, remove the `@sha256:...` part of `image` in its `cave.toml` and run `cave rm`, which deletes the VM and its disk; the next `cave run` builds a new VM from the newest image and pins it.
 

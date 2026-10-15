@@ -44,6 +44,9 @@ pub struct Entry {
 pub struct Manifest {
     /// Newest first.
     pub images: Vec<Entry>,
+    /// The version of the cave release that published it, such as
+    /// `0.1.1`, from the top-level `cave` key (D45). Absent before 0.1.1.
+    pub cave: Option<String>,
 }
 
 /// Why the manifest could not be used. The messages say how to fix it.
@@ -139,7 +142,8 @@ impl Manifest {
                 )?,
             });
         }
-        Ok(Manifest { images })
+        let cave = doc.get("cave").and_then(Value::as_str).map(str::to_string);
+        Ok(Manifest { images, cave })
     }
 
     /// The version `image` means: the one with its pinned disk digest, or

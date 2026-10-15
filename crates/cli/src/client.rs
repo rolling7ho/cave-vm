@@ -6,14 +6,19 @@ use std::io::{self, IsTerminal};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use cave_vm_proto::daemon::{Reply, Request};
+use cave_vm_proto::daemon::{Reply, Request, VmState};
 use cave_vm_proto::{FrameError, Hello, VERSIONS, read_frame, write_frame};
 
 use crate::error::{CliError, Result};
 use crate::setup;
+use crate::update;
+
+/// Whether this command has checked the daemon's version already.
+static CHECKED_DAEMON: AtomicBool = AtomicBool::new(false);
 
 /// How long a freshly started daemon gets to open its socket.
 const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(5);
@@ -50,19 +55,58 @@ fn daemon_gone(e: impl std::fmt::Display) -> CliError {
 impl Connection {
     /// Connects, starting the daemon first if it is not running, and does
     /// the handshake.
+    /// A daemon of another version, as left by an update, is replaced
+    /// first when no VM is running (D45).
     pub fn open() -> Result<Connection> {
         let dir = data_dir()?;
         let socket = dir.join("daemon.sock");
-        let stream = match UnixStream::connect(&socket) {
+        let (connection, software) = Connection::connect(&dir, &socket)?;
+        // Once per command, so a daemon that cannot be replaced is used.
+        if !update::daemon_is_stale(&software) || CHECKED_DAEMON.swap(true, Ordering::SeqCst) {
+            return Ok(connection);
+        }
+        if connection.any_running() {
+            let old = software.trim_start_matches("cave-daemon ");
+            eprintln!(
+                "The cave daemon is still {old}; it restarts as {} once no VM is running",
+                update::VERSION
+            );
+        } else {
+            update::stop_daemon(&socket);
+        }
+        Ok(Connection::connect(&dir, &socket)?.0)
+    }
+
+    /// Whether the daemon says a VM is running; `true` if it cannot tell,
+    /// so nothing is stopped. Uses up the connection.
+    fn any_running(mut self) -> bool {
+        if self.send(&Request::List { project: None }).is_err() {
+            return true;
+        }
+        loop {
+            match self.receive() {
+                Ok(Reply::Progress { .. }) => {}
+                Ok(Reply::List { entries }) => {
+                    return entries.iter().any(|e| e.state == Some(VmState::Running));
+                }
+                _ => return true,
+            }
+        }
+    }
+
+    /// Connects, starting the daemon if needed, and does the handshake.
+    /// Returns the connection and the daemon's software string.
+    fn connect(dir: &std::path::Path, socket: &std::path::Path) -> Result<(Connection, String)> {
+        let stream = match UnixStream::connect(socket) {
             Ok(stream) => stream,
-            Err(_) => start_daemon(&dir, &socket)?,
+            Err(_) => start_daemon(dir, socket)?,
         };
         let mut connection = Connection { stream };
         connection.send(&Request::Hello(Hello::client(VERSIONS, cli_software())))?;
         match connection.receive()? {
             Reply::Hello(reply) => {
                 reply.agreed(VERSIONS)?;
-                Ok(connection)
+                Ok((connection, reply.software))
             }
             Reply::Error(e) => {
                 Err(CliError::from(e).fix("Update cave so the command line and the daemon match"))

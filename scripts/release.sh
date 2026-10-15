@@ -17,7 +17,9 @@
 #      source tarball (url and sha256) and pushes it.
 #
 # images.json is copied from the latest release, so first runs keep finding
-# the same images: a release never drops older entries (decision 0010).
+# the same images: a release never drops older entries (decision 0010). Its
+# "cave" key becomes this version, which is how copies of cave learn that
+# there is a newer one and install it (decision 0018).
 # Publishing new images stays a separate step (image/manifest.sh).
 #
 # It uses your own `gh` login and signs nothing: the formula and install.sh
@@ -83,8 +85,17 @@ fi
 
 gh release download --repo "$REPO" --pattern images.json --dir "$dist" --clobber ||
     fail "cannot fetch images.json from the latest release"
-python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["images"]' "$dist/images.json" ||
-    fail "the latest release's images.json is not a manifest with images"
+python3 - "$dist/images.json" "$version" <<'PY' || fail "the latest release's images.json is not a manifest with images"
+import json, sys
+path, version = sys.argv[1], sys.argv[2]
+manifest = json.load(open(path))
+assert manifest["images"]
+manifest = {"version": manifest["version"], "cave": version,
+            **{k: v for k, v in manifest.items() if k not in ("version", "cave")}}
+with open(path, "w") as f:
+    json.dump(manifest, f, indent=2)
+    f.write("\n")
+PY
 
 # The release notes: this version's changelog section.
 awk -v v="## [$version]" '
@@ -99,7 +110,7 @@ echo
 echo "Built in $dist:"
 echo "  $tarball  sha256 $sha"
 echo "  install.sh (pinned to $version)"
-echo "  images.json (copied from the latest release)"
+echo "  images.json (copied from the latest release, naming cave $version)"
 echo "  notes.md (from CHANGELOG.md)"
 if [ "$dry_run" = yes ]; then
     echo "Dry run: nothing was published"

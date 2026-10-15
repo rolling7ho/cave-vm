@@ -641,7 +641,7 @@ debian   sha256:3f2a9c1e  yes         3 projects   (base)
 ubuntu   sha256:8b17d04a  no          -
 ```
 
-If the update detector has seen a newer image, it says so here and in `cave doctor`. It never updates anything by itself (design).
+If the update detector has seen a newer image, it says so here and in `cave doctor`. It never updates an image by itself; a newer cave, though, installs itself ([config](config.md#updates), D45).
 
 ### cave doctor
 
