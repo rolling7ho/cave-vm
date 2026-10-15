@@ -504,7 +504,7 @@ fn cave_with_stdin(s: &Scratch, args: &[&str], input: &[u8]) -> Output {
 fn exec_streams_stdin_and_output_and_exits_with_the_code() {
     let s = Scratch::new();
     let state = fake_daemon(&s);
-    let out = cave_with_stdin(&s, &["exec", "--", "cat", "-n"], b"hello\n");
+    let out = cave_with_stdin(&s, &["exec", "cat", "-n"], b"hello\n");
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert_eq!(stdout(&out), "hello\n");
     // Set up on first use and booted, then the command's own stderr.
@@ -537,6 +537,20 @@ fn exec_streams_stdin_and_output_and_exits_with_the_code() {
 }
 
 #[test]
+fn flags_after_the_command_belong_to_it() {
+    let s = Scratch::new();
+    let state = fake_daemon(&s);
+    let out = s.cave(&s.project(), &["exec", "nope", "--fork", "x", "-h"]);
+    assert_eq!(out.status.code(), Some(127), "{}", stderr(&out));
+    let requests = state.lock().unwrap().requests.clone();
+    let Some(Request::Exec { vm, exec, .. }) = requests.last() else {
+        panic!("{requests:?}");
+    };
+    assert_eq!(exec.argv, ["nope", "--fork", "x", "-h"]);
+    assert_eq!(vm.fork, None);
+}
+
+#[test]
 fn exec_exit_codes_follow_the_shell() {
     let s = Scratch::new();
     fake_daemon(&s);
@@ -552,8 +566,8 @@ fn exec_needs_a_command_after_the_separator() {
     let s = Scratch::new();
     let out = s.cave(&s.project(), &["exec"]);
     assert_eq!(out.status.code(), Some(2));
-    assert!(stderr(&out).contains("missing command after --"));
-    assert!(stderr(&out).contains("fix: cave exec -- uname -a"));
+    assert!(stderr(&out).contains("missing the command to run"));
+    assert!(stderr(&out).contains("fix: cave exec uname -a"));
 }
 
 #[test]
@@ -570,7 +584,7 @@ fn shell_without_a_terminal_points_at_exec() {
     let out = s.cave(&s.project(), &["shell"]);
     assert_eq!(out.status.code(), Some(125), "{}", stderr(&out));
     assert!(stderr(&out).contains("cave shell needs a terminal"));
-    assert!(stderr(&out).contains("cave exec -- <cmd>"));
+    assert!(stderr(&out).contains("cave exec <cmd>"));
 }
 
 #[test]
@@ -673,7 +687,7 @@ fn agent_runs_claude_on_the_mac_through_cave_mcp_after_a_snapshot() {
     let s = Scratch::new();
     let state = fake_daemon(&s);
     let bin = fake_claude(&s);
-    let out = cave_with_path(&s, &bin, &["agent", "claude", "--", "-p", "fix the tests"]);
+    let out = cave_with_path(&s, &bin, &["agent", "claude", "-p", "fix the tests"]);
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
     let err = stderr(&out);
     assert!(err.contains("started in"), "{err}");

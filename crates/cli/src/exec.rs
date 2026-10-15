@@ -23,7 +23,7 @@ pub fn run(fork: Option<String>, argv: Vec<String>) -> Result<u8> {
     if argv.is_empty() {
         return Err(CliError {
             code: EXIT_USAGE,
-            ..CliError::new("missing command after --").fix("cave exec -- uname -a")
+            ..CliError::new("missing the command to run").fix("cave exec uname -a")
         });
     }
     let failed = |e: CliError| CliError {

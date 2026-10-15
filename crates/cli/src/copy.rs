@@ -86,7 +86,7 @@ pub fn run(paths: Vec<String>) -> Result<()> {
         return Err(if to_vm {
             usage(
                 "cave cp copies between the Mac and the VM, not within the VM",
-                "Use `cave exec -- cp -r <src> <dest>`",
+                "Use `cave exec cp -r <src> <dest>`",
             )
         } else {
             usage(
@@ -411,7 +411,7 @@ fn read_file(vm: &VmId, src: &str, target: &Path) -> Result<()> {
                 return Ok(());
             }
             Reply::Error(e) => {
-                let fix = "Check the path with `cave exec -- ls <dir>`";
+                let fix = "Check the path with `cave exec ls <dir>`";
                 return Err(CliError::from(e).fix(fix));
             }
             Reply::Progress { .. } => {}

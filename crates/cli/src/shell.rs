@@ -86,8 +86,7 @@ pub fn run(fork: Option<String>) -> Result<u8> {
     };
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(failed(
-            CliError::new("cave shell needs a terminal")
-                .fix("Use `cave exec -- <cmd>` from scripts"),
+            CliError::new("cave shell needs a terminal").fix("Use `cave exec <cmd>` from scripts"),
         ));
     }
     let project = init::project_or_set_up().map_err(failed)?;
@@ -170,8 +169,7 @@ pub fn session(vm: VmId, argv: Option<Vec<String>>) -> Result<u8> {
     let sender = Arc::new(Mutex::new(connection.sender().map_err(failed)?));
     let raw = RawMode::enter().map_err(|e| {
         failed(
-            CliError::new(format!("cannot set up the terminal: {e}"))
-                .fix("Use `cave exec -- <cmd>`"),
+            CliError::new(format!("cannot set up the terminal: {e}")).fix("Use `cave exec <cmd>`"),
         )
     })?;
 
