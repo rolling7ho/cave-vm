@@ -156,7 +156,7 @@ pub fn session(vm: VmId, argv: Option<Vec<String>>, open_links: bool) -> Result<
     let mut connection = Connection::open().map_err(failed)?;
     connection
         .send(&Request::Shell {
-            vm,
+            vm: vm.clone(),
             pty: PtyOpen {
                 argv,
                 cwd: None,
@@ -239,7 +239,7 @@ pub fn session(vm: VmId, argv: Option<Vec<String>>, open_links: bool) -> Result<
                 let shown = match relay.as_mut() {
                     Some(relay) => {
                         let (shown, found) = relay.feed(&data.0);
-                        opened += found.iter().filter(|link| links::open(link)).count();
+                        opened += found.iter().filter(|link| links::open(link, &vm)).count();
                         shown
                     }
                     None => data.0,
