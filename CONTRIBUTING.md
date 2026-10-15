@@ -74,7 +74,7 @@ cave-vm uses the Developer Certificate of Origin instead of a contributor licens
 git commit -s -m "fix(daemon): wait for the VM before syncing"
 ```
 
-This adds a `Signed-off-by: Your Name <you@example.com>` line. Pull requests with unsigned commits fail the DCO check.
+This adds a `Signed-off-by: Your Name <you@example.com>` line. Reviewers look for this line, and a pull request with unsigned commits is asked to add it before it merges.
 
 ## Code standards
 
