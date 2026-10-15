@@ -740,7 +740,11 @@ fn agent_errors_say_how_to_fix_them_before_anything_boots() {
     assert!(err.contains("cave agent claude --in-vm"), "{err}");
     let out = cave_with_path(&s, &empty, &["agent", "codex"]);
     let err = stderr(&out);
-    assert!(err.contains("unknown agent \"codex\""), "{err}");
-    assert!(err.contains("Supported agents: claude"), "{err}");
+    assert!(err.contains("codex is not installed on this Mac"), "{err}");
+    assert!(err.contains("npm install -g @openai/codex"), "{err}");
+    let out = cave_with_path(&s, &empty, &["agent", "aider"]);
+    let err = stderr(&out);
+    assert!(err.contains("unknown agent \"aider\""), "{err}");
+    assert!(err.contains("Supported agents: claude, codex"), "{err}");
     assert!(state.lock().unwrap().requests.is_empty());
 }

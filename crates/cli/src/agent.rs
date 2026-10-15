@@ -22,13 +22,35 @@ use crate::mirror;
 use crate::shell;
 
 /// The agents `cave agent` knows.
-const AGENTS: [&str; 1] = ["claude"];
+const AGENTS: [&str; 2] = ["claude", "codex"];
 
 /// Installs Claude Code in the VM with its own installer, unless it is
 /// there already.
-const INSTALL_IN_VM: &str = "command -v claude >/dev/null || test -x \"$HOME/.local/bin/claude\" || \
+const INSTALL_CLAUDE_IN_VM: &str = "command -v claude >/dev/null || test -x \"$HOME/.local/bin/claude\" || \
      { echo 'Installing Claude Code in the VM with its installer'; \
      curl -fsSL https://claude.ai/install.sh | bash; }";
+
+/// Installs Codex in the VM with npm, which the image has, unless it is
+/// there already (D44).
+const INSTALL_CODEX_IN_VM: &str = "command -v codex >/dev/null || \
+     { echo 'Installing Codex in the VM with npm'; \
+     sudo npm install -g @openai/codex; }";
+
+/// The agent's product name, for messages.
+fn product(name: &str) -> &'static str {
+    match name {
+        "codex" => "Codex",
+        _ => "Claude Code",
+    }
+}
+
+/// How to install the agent on the Mac, for the error when it is missing.
+fn install_hint(name: &str) -> &'static str {
+    match name {
+        "codex" => "Install Codex (npm install -g @openai/codex)",
+        _ => "Install Claude Code",
+    }
+}
 
 /// `cave agent`. Returns the agent's exit code.
 pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> Result<u8> {
@@ -49,7 +71,8 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
         Some(find_on_path(name).ok_or_else(|| {
             failed(
                 CliError::new(format!("{name} is not installed on this Mac")).fix(format!(
-                    "Install Claude Code, or run it inside the VM with `cave agent {name} --in-vm`"
+                    "{}, or run it inside the VM with `cave agent {name} --in-vm`",
+                    install_hint(name)
                 )),
             )
         })?)
@@ -63,7 +86,7 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
         Some(program) => {
             let cave = std::env::current_exe().map_err(|e| failed(e.into()))?;
             let status = Command::new(&program)
-                .args(claude_args(&cave, fork.as_deref(), &args))
+                .args(mac_args(name, &cave, fork.as_deref(), &args))
                 .current_dir(&project)
                 .status()
                 .map_err(|e| {
@@ -75,17 +98,21 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
             exit_status_code(status)
         }
         None => {
+            let install = match name {
+                "codex" => INSTALL_CODEX_IN_VM,
+                _ => INSTALL_CLAUDE_IN_VM,
+            };
             let installed = exec::run(
                 fork.clone(),
-                vec!["bash".into(), "-c".into(), INSTALL_IN_VM.into()],
+                vec!["bash".into(), "-c".into(), install.into()],
             )?;
             if installed != 0 {
                 return Err(failed(
-                    CliError::new("could not install Claude Code in the VM")
+                    CliError::new(format!("could not install {} in the VM", product(name)))
                         .fix("Check the VM's network with `cave inspect`; the installer needs it"),
                 ));
             }
-            shell::session(vm.clone(), Some(in_vm_argv(&args)))?
+            shell::session(vm.clone(), Some(in_vm_argv(name, &args)))?
         }
     };
     // The design syncs the mirror after agent runs. A failed sync does
@@ -127,6 +154,47 @@ fn snapshot_before(vm: &VmId) -> Result<Option<String>> {
 /// the Read rule covers Grep too.
 pub const DENIED_TOOLS: [&str; 2] = ["Bash", "Read(./.env)"];
 
+/// The arguments for agent `name` on the Mac.
+fn mac_args(name: &str, cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String> {
+    match name {
+        "codex" => codex_args(cave, fork, extra),
+        _ => claude_args(cave, fork, extra),
+    }
+}
+
+/// The Codex features that would give it a shell on the Mac. Turned off,
+/// Codex has no shell and no tool that reads files on the Mac, the Codex
+/// counterpart of [`DENIED_TOOLS`]; checked with Codex 0.162 (D44).
+pub const CODEX_DISABLED: [&str; 2] = ["shell_tool", "unified_exec"];
+
+/// The arguments for Codex on the Mac: `cave mcp` as its `cave` MCP
+/// server, for the fork if one is given, with its tools approved, since
+/// they act only on the VM; [`CODEX_DISABLED`] turned off; then `extra`.
+fn codex_args(cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String> {
+    let mut mcp_args = vec!["mcp".to_string()];
+    if let Some(fork) = fork {
+        mcp_args.extend(["--fork".into(), fork.into()]);
+    }
+    // `-c` values are TOML; a JSON string or array of strings is valid TOML.
+    let toml = |v: serde_json::Value| v.to_string();
+    let mut args = vec![
+        "-c".to_string(),
+        format!(
+            "mcp_servers.cave.command={}",
+            toml(json!(cave.to_string_lossy()))
+        ),
+        "-c".into(),
+        format!("mcp_servers.cave.args={}", toml(json!(mcp_args))),
+        "-c".into(),
+        "mcp_servers.cave.default_tools_approval_mode=\"approve\"".into(),
+    ];
+    for feature in CODEX_DISABLED {
+        args.extend(["--disable".into(), feature.into()]);
+    }
+    args.extend(extra.iter().cloned());
+    args
+}
+
 /// The arguments for Claude Code on the Mac: `cave mcp` as its MCP server,
 /// for the fork if one is given, [`DENIED_TOOLS`] denied, then `extra`.
 fn claude_args(cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String> {
@@ -147,14 +215,14 @@ fn claude_args(cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String>
     args
 }
 
-/// Claude Code in the VM, found where its installer puts it, with `extra`
-/// passed through unchanged.
-fn in_vm_argv(extra: &[String]) -> Vec<String> {
+/// Agent `name` in the VM, found where its installer puts it, with
+/// `extra` passed through unchanged.
+fn in_vm_argv(name: &str, extra: &[String]) -> Vec<String> {
     let mut argv = vec![
         "bash".to_string(),
         "-lc".into(),
-        "PATH=\"$HOME/.local/bin:$PATH\" exec claude \"$@\"".into(),
-        "claude".into(),
+        format!("PATH=\"$HOME/.local/bin:$PATH\" exec {name} \"$@\""),
+        name.into(),
     ];
     argv.extend(extra.iter().cloned());
     argv
@@ -213,9 +281,34 @@ mod tests {
     }
 
     #[test]
+    fn codex_gets_cave_mcp_and_no_shell() {
+        let args = codex_args(Path::new("/opt/cave"), Some("try"), &["hi".into()]);
+        assert_eq!(
+            args,
+            [
+                "-c",
+                "mcp_servers.cave.command=\"/opt/cave\"",
+                "-c",
+                "mcp_servers.cave.args=[\"mcp\",\"--fork\",\"try\"]",
+                "-c",
+                "mcp_servers.cave.default_tools_approval_mode=\"approve\"",
+                "--disable",
+                "shell_tool",
+                "--disable",
+                "unified_exec",
+                "hi",
+            ]
+        );
+        assert_eq!(
+            in_vm_argv("codex", &[])[2],
+            "PATH=\"$HOME/.local/bin:$PATH\" exec codex \"$@\""
+        );
+    }
+
+    #[test]
     fn in_the_vm_arguments_pass_through_unquoted() {
         assert_eq!(
-            in_vm_argv(&["-p".into(), "it's \"quoted\"".into()])[3..],
+            in_vm_argv("claude", &["-p".into(), "it's \"quoted\"".into()])[3..],
             ["claude", "-p", "it's \"quoted\""]
         );
     }
