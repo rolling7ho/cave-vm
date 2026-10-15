@@ -15,6 +15,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `CODE_OF_CONDUCT.md` (D48, decision 0021).
 
 ### Changed
+- During `cave agent`, Claude Code's sign-in link in the VM opens in the Mac's default browser, through a `BROWSER` helper and the terminal `cave` relays. Only `https://` links on `claude.ai`, `claude.com` or `anthropic.com` are opened (D56, decision 0027).
 - Decision 0027 (D56): during `cave agent`, sign-in links the agent in the VM opens will open in the Mac's browser. The code follows in a later change.
 - `cave init` asks, next to the mirror question, whether plain `claude` may skip its permission prompts in the project. A yes writes `.claude/settings.local.json` with `bypassPermissions` and Read, Glob, Grep and WebFetch denied, and adds it to `.gitignore`. `.claude/settings.json` and `cave agent claude --on-mac` now also deny Edit, Write and NotebookEdit (D55, decision 0026).
 - `cave agent claude` and `cave agent codex` run the agent inside the VM with its permission prompts skipped, and print `Permissions skipped. The VM is the sandbox.` `--safe` keeps the prompts, and `--on-mac` runs it on the Mac through `cave mcp` as before, never skipping prompts there. `--in-vm` is still accepted and changes nothing. With the VM's network off, `cave agent` stops and says how to fix it (D53, D54, decision 0026).

@@ -21,6 +21,7 @@ use crate::commands::{ensure_running, vm_id};
 use crate::error::{CliError, Result};
 use crate::exec::{self, EXIT_CAVE_FAILED_RUNNING};
 use crate::init;
+use crate::links;
 use crate::mirror;
 use crate::shell;
 use crate::skill;
@@ -163,7 +164,11 @@ pub fn run(
             };
             let installed = exec::run(
                 fork.clone(),
-                vec!["bash".into(), "-c".into(), install.into()],
+                vec![
+                    "bash".into(),
+                    "-c".into(),
+                    format!("{}\n{install}", links::INSTALL_HELPER),
+                ],
             )?;
             if installed != 0 {
                 return Err(failed(
@@ -174,7 +179,7 @@ pub fn run(
             if !safe {
                 eprintln!("{SKIPPED_LINE}");
             }
-            shell::session(vm.clone(), Some(in_vm_argv(name, safe, &args)))?
+            shell::session(vm.clone(), Some(in_vm_argv(name, safe, &args)), true)?
         }
     };
     // The design syncs the mirror after agent runs. A failed sync does
@@ -294,11 +299,15 @@ fn claude_args(cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String>
 
 /// Agent `name` in the VM, found where its installer puts it, with its
 /// prompts skipped unless `safe`, then `extra` passed through unchanged.
+/// `BROWSER` is the helper that opens sign-in links on the Mac (D56).
 fn in_vm_argv(name: &str, safe: bool, extra: &[String]) -> Vec<String> {
     let mut argv = vec![
         "bash".to_string(),
         "-lc".into(),
-        format!("PATH=\"$HOME/.local/bin:$PATH\" exec {name} \"$@\""),
+        format!(
+            "PATH=\"$HOME/.local/bin:$PATH\" BROWSER=\"{}\" exec {name} \"$@\"",
+            links::HELPER_PATH
+        ),
         name.into(),
     ];
     if !safe {
@@ -387,7 +396,7 @@ mod tests {
         );
         assert_eq!(
             in_vm_argv("codex", true, &[])[2],
-            "PATH=\"$HOME/.local/bin:$PATH\" exec codex \"$@\""
+            "PATH=\"$HOME/.local/bin:$PATH\" BROWSER=\"$HOME/.local/bin/cave-open\" exec codex \"$@\""
         );
     }
 
