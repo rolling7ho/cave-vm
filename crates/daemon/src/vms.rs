@@ -942,6 +942,88 @@ impl Vms {
         checks
     }
 
+    /// Stops every running VM at once without saving anything (D43): each
+    /// VMM gets SIGTERM, and SIGKILL if it has not exited after `grace`.
+    /// A VM another request is starting or stopping is killed through its
+    /// PID file. Returns the VMs stopped.
+    pub fn force_stop_all(&self, grace: Duration) -> Vec<VmId> {
+        let vms: Vec<Arc<Vm>> = self
+            .vms
+            .lock()
+            .expect("vms lock")
+            .values()
+            .cloned()
+            .collect();
+        let mut taken = Vec::new();
+        let mut busy = Vec::new();
+        for vm in vms {
+            let mut slot = vm.slot.lock().expect("vm lock");
+            match std::mem::replace(&mut *slot, Slot::Busy) {
+                Slot::Running(running) => {
+                    drop(slot);
+                    running.stop_requested.store(true, Ordering::Release);
+                    taken.push((vm, running));
+                }
+                Slot::Busy => {
+                    drop(slot);
+                    busy.push(vm);
+                }
+                Slot::Stopped => vm.set(slot, Slot::Stopped),
+            }
+        }
+        let program = self.launcher.program_name();
+        let busy_pids: Vec<(Arc<Vm>, u32)> = busy
+            .into_iter()
+            .filter_map(|vm| {
+                let pid = fs::read_to_string(vm.dir.join(PID_FILE)).ok()?;
+                let pid = pid.trim().parse::<u32>().ok()?;
+                let name = process_name(pid)?;
+                (Some(&name) == program.as_ref()).then_some((vm, pid))
+            })
+            .collect();
+        for (_, running) in &taken {
+            signal("-TERM", running.child.lock().expect("child lock").id());
+        }
+        for (_, pid) in &busy_pids {
+            signal("-TERM", *pid);
+        }
+        let deadline = Instant::now() + grace;
+        loop {
+            let left = taken
+                .iter()
+                .any(|(_, r)| matches!(r.child.lock().expect("child lock").try_wait(), Ok(None)))
+                || busy_pids
+                    .iter()
+                    .any(|(_, pid)| process_name(*pid).is_some());
+            if !left || Instant::now() >= deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        let mut stopped = Vec::new();
+        for (vm, running) in taken {
+            {
+                let mut child = running.child.lock().expect("child lock");
+                if matches!(child.try_wait(), Ok(None)) {
+                    let _ = child.kill();
+                }
+                let _ = child.wait();
+            }
+            drop(running);
+            let _ = fs::remove_file(vm.dir.join(PID_FILE));
+            stopped.push(vm.id.clone());
+            let slot = vm.slot.lock().expect("vm lock");
+            vm.set(slot, Slot::Stopped);
+        }
+        for (vm, pid) in busy_pids {
+            if process_name(pid).is_some() {
+                signal("-KILL", pid);
+            }
+            stopped.push(vm.id.clone());
+        }
+        stopped
+    }
+
     /// Stops every running VM, when the daemon exits.
     pub fn stop_all(&self) {
         let ids: Vec<VmId> = self
@@ -1171,8 +1253,13 @@ fn process_name(pid: u32) -> Option<String> {
 }
 
 fn kill(pid: u32) -> bool {
+    signal("-KILL", pid)
+}
+
+/// Sends `signal`, such as `-TERM`, to process `pid` with kill(1).
+fn signal(signal: &str, pid: u32) -> bool {
     Command::new("/bin/kill")
-        .args(["-KILL", &pid.to_string()])
+        .args([signal, &pid.to_string()])
         .status()
         .is_ok_and(|s| s.success())
 }
