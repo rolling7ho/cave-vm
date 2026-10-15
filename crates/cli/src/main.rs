@@ -23,6 +23,7 @@ mod shell;
 mod skill;
 mod snapshot;
 mod ssh;
+mod view;
 
 use std::process::ExitCode;
 
@@ -212,6 +213,12 @@ enum Cmd {
         #[arg(long, conflicts_with = "fork")]
         force: bool,
     },
+    /// Follow what happens in the VM live: commands, file writes and
+    /// connections.
+    View {
+        #[arg(long)]
+        fork: Option<String>,
+    },
     /// List project VMs.
     Ls {
         /// Every project on this Mac.
@@ -368,6 +375,7 @@ fn main() -> ExitCode {
         Cmd::Stop { fork, .. } => commands::stop(fork),
         Cmd::Sync { watch } => mirror::sync(watch),
         Cmd::Ls { all, json } => commands::ls(all, json),
+        Cmd::View { fork } => view::run(fork),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
