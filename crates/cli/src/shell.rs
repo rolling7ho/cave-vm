@@ -5,6 +5,9 @@
 //! Ctrl-C reach the shell in the VM as bytes, and the window size is read
 //! the same way. This crate has no `unsafe` (D24), so it cannot call
 //! `ioctl` or catch `SIGWINCH`; the size is polled instead.
+//!
+//! `exit` or Ctrl-D ends the shell. `~.` at the start of a line leaves at
+//! once, as in ssh, for when a program in the VM holds the keyboard.
 
 use std::io::{self, IsTerminal, Read, Write};
 use std::process::{Command, Stdio};
@@ -90,12 +93,55 @@ pub fn run(fork: Option<String>) -> Result<u8> {
     let project = init::project_or_set_up().map_err(failed)?;
     let vm = vm_id(&project, fork);
     ensure_running(&vm, None, Vec::new(), false).map_err(failed)?;
+    eprintln!(
+        "Type exit or press Ctrl-D to leave the shell, or ~. at the start of a line to leave at once. The VM keeps running"
+    );
     session(vm, None)
+}
+
+/// What the keyboard thread does with the bytes it reads: ssh's escape,
+/// `~.` at the start of a line, leaves; `~~` sends one `~`.
+#[derive(Default)]
+struct Escape {
+    /// The last byte sent ended a line, or nothing was sent yet.
+    mid_line: bool,
+    /// A `~` at the start of a line is held until the next byte.
+    tilde: bool,
+}
+
+impl Escape {
+    /// Returns the bytes to send, and whether to leave.
+    fn feed(&mut self, input: &[u8]) -> (Vec<u8>, bool) {
+        let mut out = Vec::with_capacity(input.len());
+        for &b in input {
+            if self.tilde {
+                self.tilde = false;
+                match b {
+                    b'.' => return (out, true),
+                    b'~' => {
+                        out.push(b'~');
+                        self.mid_line = true;
+                        continue;
+                    }
+                    _ => out.push(b'~'),
+                }
+            } else if b == b'~' && !self.mid_line {
+                self.tilde = true;
+                continue;
+            }
+            out.push(b);
+            self.mid_line = !matches!(b, b'\r' | b'\n');
+        }
+        (out, false)
+    }
 }
 
 /// Runs `argv`, or the guest user's login shell, on a pseudo-terminal in
 /// running VM `vm`, connected to this terminal. Returns its exit code.
+/// The `~.` escape works for the login shell only, so an agent gets every
+/// key it is sent.
 pub fn session(vm: VmId, argv: Option<Vec<String>>) -> Result<u8> {
+    let escapes = argv.is_none();
     let failed = |e: CliError| CliError {
         code: EXIT_CAVE_FAILED_RUNNING,
         ..e
@@ -130,14 +176,32 @@ pub fn session(vm: VmId, argv: Option<Vec<String>>) -> Result<u8> {
     })?;
 
     let keys = Arc::clone(&sender);
+    let saved = raw.saved.clone();
     thread::spawn(move || {
         let mut buf = vec![0u8; INPUT_CHUNK];
         let mut stdin = io::stdin().lock();
+        let mut escape = Escape::default();
         loop {
             match stdin.read(&mut buf) {
                 Ok(0) | Err(_) => return,
                 Ok(n) => {
-                    let data = buf[..n].to_vec().into();
+                    let (bytes, leave) = if escapes {
+                        escape.feed(&buf[..n])
+                    } else {
+                        (buf[..n].to_vec(), false)
+                    };
+                    if leave {
+                        // The main thread is waiting on the daemon, so leave
+                        // from here: the terminal back to normal, then exit.
+                        // The daemon ends the shell when the connection goes.
+                        let _ = stty(&[&saved]);
+                        eprintln!("\nLeft the shell. The VM keeps running");
+                        std::process::exit(0);
+                    }
+                    if bytes.is_empty() {
+                        continue;
+                    }
+                    let data = bytes.into();
                     let sent = keys
                         .lock()
                         .expect("sender lock")
@@ -194,6 +258,23 @@ pub fn session(vm: VmId, argv: Option<Vec<String>>) -> Result<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tilde_dot_at_the_start_of_a_line_leaves() {
+        assert_eq!(Escape::default().feed(b"~."), (vec![], true));
+        assert_eq!(Escape::default().feed(b"ls\r~."), (b"ls\r".to_vec(), true));
+        let mut e = Escape::default();
+        assert_eq!(e.feed(b"echo a~."), (b"echo a~.".to_vec(), false));
+        assert_eq!(e.feed(b"\r~"), (b"\r".to_vec(), false));
+        assert_eq!(e.feed(b"."), (vec![], true));
+    }
+
+    #[test]
+    fn other_tildes_go_through() {
+        let mut e = Escape::default();
+        assert_eq!(e.feed(b"~~"), (b"~".to_vec(), false));
+        assert_eq!(e.feed(b"/x\n~/"), (b"/x\n~/".to_vec(), false));
+    }
 
     #[test]
     fn stty_size_is_rows_then_cols() {

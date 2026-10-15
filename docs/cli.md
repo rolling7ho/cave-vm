@@ -246,6 +246,8 @@ cave shell [--fork <name>]
 
 Opens an interactive shell in the VM through the guest agent, with a pseudo-terminal that follows window resizes. It boots the VM first if needed. The shell starts in the project directory inside the VM ([guest layout](#guest-layout)). Exiting the shell does not stop the VM.
 
+To leave, type `exit` or press Ctrl-D; `cave shell` says so when it starts. When a program in the VM holds the keyboard, `~.` at the start of a line leaves at once, as in ssh, and `~~` types one `~`. The escape is only in `cave shell`, not in `cave agent --in-vm`.
+
 Exit code: the shell's.
 
 Errors:
