@@ -9,12 +9,15 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - Credentials given to an earlier command, or held in a restored snapshot or fork, are now redacted from every later command's output and from files read out of the VM, not only from the command that named them.
 - `cave run --net off` or `--net lan` on a VM already running with another network mode was ignored, so the VM kept its network. It is now an error that says to `cave stop` first.
 
-### Removed
+### Removed- `scripts/spike/`, the spike's probe scripts. The spike reports link to them in the git history.
+
 - The repository's own `.claude/settings.json`; `.claude/` is now in `.gitignore` (D50, decision 0023).
 - `CODE_OF_CONDUCT.md` (D48, decision 0021).
 
 ### Changed
 - `cave agent claude` and `cave agent codex` run the agent inside the VM with its permission prompts skipped, and print `Permissions skipped. The VM is the sandbox.` `--safe` keeps the prompts, and `--on-mac` runs it on the Mac through `cave mcp` as before, never skipping prompts there. `--in-vm` is still accepted and changes nothing. With the VM's network off, `cave agent` stops and says how to fix it (D53, D54, decision 0026).
+- More errors say how to fix the problem: file errors in the CLI (permissions, a full disk, a missing path), an unexpected reply from an older daemon, failed snapshots and syncs, `cave export` of a path that is not a folder, `-p` ports that cannot be bound, `.env` that cannot be read, and `cave ssh` key setup.
+- `docs/safety.md` lists the known limits accepted for v1: the Mac's addresses are read once per VM start, `check = false` is per project and read by a simple line reader, and downloads honour `~/.curlrc`.
 - The design and decision 0026 (D53 to D55) move `cave agent` into the VM with permission prompts skipped, `--safe` and `--on-mac` as the ways back, Claude Code and Codex for v1, and an opt-in for plain `claude`. Decision 0002 is replaced. The code follows in later changes.
 - `cave export` runs even on a copy of cave 2 or more releases behind, after asking, so the work can always be copied out (D52).
 - A copy of cave 2 or more stable releases behind asks to update every time it runs in a terminal, says only the 3 newest releases get security fixes, and stops the command on a no. Without a terminal it warns. `SECURITY.md` names the 3 newest stable releases as supported, and release `images.json` lists every stable release (D52, decision 0025).

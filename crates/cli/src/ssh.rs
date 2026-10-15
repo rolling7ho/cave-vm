@@ -53,7 +53,10 @@ fn ensure_key(dir: &Path) -> Result<PathBuf> {
         .args(["-q", "-t", "ed25519", "-N", "", "-C", "cave", "-f"])
         .arg(&key)
         .status()
-        .map_err(|e| CliError::new(format!("cannot run ssh-keygen: {e}")))?;
+        .map_err(|e| {
+            CliError::new(format!("cannot run ssh-keygen: {e}"))
+                .fix("macOS includes /usr/bin/ssh-keygen; run `cave doctor` to check the Mac")
+        })?;
     if !status.success() {
         return Err(
             CliError::new("ssh-keygen could not make a key for remote editing")
@@ -214,9 +217,7 @@ fn open_ssh(vm: &VmId) -> Result<UnixStream> {
                     .fix("Check that sshd runs in the VM: cave exec systemctl status ssh"));
             }
             other => {
-                return Err(CliError::new(format!(
-                    "the daemon sent an unexpected reply to ssh: {other:?}"
-                )));
+                return Err(CliError::unexpected(&format!("ssh: {other:?}")));
             }
         }
     }
@@ -252,7 +253,10 @@ pub fn proxy(project: &Path, fork: Option<String>) -> Result<()> {
             return Err(CliError::new(format!(
                 "cannot add the remote editing key in the VM: {}",
                 String::from_utf8_lossy(&out.stderr).trim()
-            )));
+            ))
+            .fix(
+                "Check the `cave` user's ~/.ssh folder in the VM with `cave shell`, then try again",
+            ));
         }
     }
 

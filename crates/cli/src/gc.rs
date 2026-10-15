@@ -16,7 +16,7 @@ fn gigabytes(bytes: u64) -> String {
 fn call(apply: bool) -> Result<Usage> {
     match Connection::call(&Request::Gc { apply })? {
         Reply::Usage(usage) => Ok(usage),
-        _ => Err(CliError::new("the daemon sent an unexpected reply to gc")),
+        _ => Err(CliError::unexpected("gc")),
     }
 }
 

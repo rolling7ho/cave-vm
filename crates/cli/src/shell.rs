@@ -241,9 +241,7 @@ pub fn session(vm: VmId, argv: Option<Vec<String>>) -> Result<u8> {
             Ok(Reply::Error(e)) => break Err(failed(e.into())),
             Ok(Reply::Progress { .. }) => {}
             Ok(other) => {
-                break Err(failed(CliError::new(format!(
-                    "the daemon sent an unexpected reply to shell: {other:?}"
-                ))));
+                break Err(failed(CliError::unexpected(&format!("shell: {other:?}"))));
             }
             Err(e) => break Err(failed(e)),
         }

@@ -82,9 +82,7 @@ pub fn run(fork: Option<String>, argv: Vec<String>) -> Result<u8> {
             Reply::Progress { message, .. } => eprintln!("{message}"),
             Reply::Error(e) => return Err(failed(e.into())),
             other => {
-                return Err(failed(CliError::new(format!(
-                    "the daemon sent an unexpected reply to exec: {other:?}"
-                ))));
+                return Err(failed(CliError::unexpected(&format!("exec: {other:?}"))));
             }
         }
     }

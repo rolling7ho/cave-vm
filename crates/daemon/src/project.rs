@@ -140,6 +140,10 @@ fn pin(project: &Path, image: &ImageRef) -> Result<(), ErrorMessage> {
             ErrorCode::Io,
             format!("cannot pin the image in {}: {e}", file.display()),
         )
+        .with_fix(format!(
+            "Check that you can write to {}, then try again",
+            file.display()
+        ))
     };
     let text = fs::read_to_string(&file).map_err(io_error)?;
     let pinned = config::pin_image(&text, &image.to_string()).map_err(config_error)?;
@@ -161,6 +165,7 @@ fn project_disk(base: &Path, state: &Path, size: u64) -> Result<PathBuf, ErrorMe
                     ErrorCode::Io,
                     format!("cannot create {}: {e}", state.display()),
                 )
+                .with_fix("Check that you can write to the project folder, then try again")
             })?;
             disk::create(base, state, size).map_err(disk_error)?;
             // A new disk is a first boot: the folder's files go in once.
@@ -169,6 +174,7 @@ fn project_disk(base: &Path, state: &Path, size: u64) -> Result<PathBuf, ErrorMe
                     ErrorCode::Io,
                     format!("cannot write to {}: {e}", state.display()),
                 )
+                .with_fix("Check that you can write to the project folder, then try again")
             })?;
         }
         Err(e) => {

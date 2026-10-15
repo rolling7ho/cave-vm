@@ -158,10 +158,10 @@ fn to_vm_one(vm: &VmId, src: &Path, dest: &str, into: bool) -> Result<()> {
         let status = tar.wait()?;
         result?;
         if !status.success() {
-            return Err(CliError::new(format!(
-                "tar could not read {}",
-                src.display()
-            )));
+            return Err(
+                CliError::new(format!("tar could not read {}", src.display()))
+                    .fix("Check that you can read every file in it, then try again"),
+            );
         }
         return Ok(());
     }
@@ -177,7 +177,8 @@ fn to_vm_one(vm: &VmId, src: &Path, dest: &str, into: bool) -> Result<()> {
 /// creating it, for `cave export`.
 pub fn from_vm_folder(vm: &VmId, src: &str, dest: &Path) -> Result<()> {
     if !is_vm_dir(vm, src)? {
-        return Err(CliError::new(format!("{src} is not a folder in the VM")));
+        return Err(CliError::new(format!("{src} is not a folder in the VM"))
+            .fix("Name a folder in the VM, such as /workspace, or copy one file with `cave cp`"));
     }
     from_vm_one(vm, src, dest, false)
 }
@@ -199,10 +200,10 @@ fn from_vm_one(vm: &VmId, src: &str, dest: &Path, into: bool) -> Result<()> {
         let status = tar.wait()?;
         result?;
         if !status.success() {
-            return Err(CliError::new(format!(
-                "tar could not write into {}",
-                target.display()
-            )));
+            return Err(
+                CliError::new(format!("tar could not write into {}", target.display()))
+                    .fix("Check that you can write there and the disk has space, then try again"),
+            );
         }
         return Ok(());
     }
@@ -255,7 +256,8 @@ fn vm_ok(
             format!("{} failed in the VM with exit code {code}", argv[0])
         } else {
             format!("{} failed in the VM: {why}", argv[0])
-        }));
+        })
+        .fix("Check the path and its permissions in the VM, for example with `cave exec -- ls -la /workspace`"));
     }
     Ok(())
 }
@@ -310,9 +312,7 @@ fn exec_in_vm(
             Reply::Error(e) => return Err(e.into()),
             Reply::Progress { .. } => {}
             other => {
-                return Err(CliError::new(format!(
-                    "the daemon sent an unexpected reply to exec: {other:?}"
-                )));
+                return Err(CliError::unexpected(&format!("exec: {other:?}")));
             }
         }
     }
@@ -356,9 +356,7 @@ fn write_file(vm: &VmId, src: &Path, target: &str, mode: u32) -> Result<()> {
     match connection.receive()? {
         Reply::FileWritten { .. } => Ok(()),
         Reply::Error(e) => Err(e.into()),
-        other => Err(CliError::new(format!(
-            "the daemon sent an unexpected reply to file_write: {other:?}"
-        ))),
+        other => Err(CliError::unexpected(&format!("file_write: {other:?}"))),
     }
 }
 
@@ -416,9 +414,7 @@ fn read_file(vm: &VmId, src: &str, target: &Path) -> Result<()> {
             }
             Reply::Progress { .. } => {}
             other => {
-                return Err(CliError::new(format!(
-                    "the daemon sent an unexpected reply to file_read: {other:?}"
-                )));
+                return Err(CliError::unexpected(&format!("file_read: {other:?}")));
             }
         }
     }

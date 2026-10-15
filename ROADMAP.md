@@ -2,7 +2,7 @@
 
 This is the implementation plan for cave-vm v1. It breaks the six phases in [docs/design.md](docs/design.md) into tasks that agents and contributors pick up one at a time.
 
-**The design wins.** This file only orders and sizes the work. If this plan and `docs/design.md` disagree, the design is right and this file is the bug. Nothing here changes a decided item. Anything the design leaves open goes under [Needs Ivan's decision](#needs-ivans-decision) with a recommendation, and stays open until Ivan answers. Do not build on an open decision; pick another task. Answered items move to [Decisions](#decisions).
+**The design wins.** This file only orders and sizes the work. If this plan and `docs/design.md` disagree, the design is right and this file is the bug. Nothing here changes a decided item. Questions the design left open were answered by Ivan and are listed under [Decisions](#decisions).
 
 ## How to use this file
 
@@ -11,7 +11,6 @@ This is the implementation plan for cave-vm v1. It breaks the six phases in [doc
 - Each phase becomes a GitHub milestone, and its gate is the closing criterion (design, "How Claude Code works in this repo", item 6).
 - `[A3]` marks a claim that depends on an assumption from the [assumptions register](#assumptions-to-verify). Treat these as unverified until the phase that checks them records the result.
 - `[D4]` marks a task shaped by a decision in the [Decisions](#decisions) table.
-- Before starting a task: read the design section it names, write a short plan, and write tests first where practical (AGENTS.md workflow).
 
 ## Phases and gates
 
@@ -203,7 +202,6 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 - **Testing.** Device models are tested against the mock backend, with no network in any test. Hardware and end-to-end tests run on the self-hosted Mac and are kept out of the default `cargo test` run.
 - **unsafe.** Only in `hvf`, the guest-memory code, the `vmm` `host` module and the `agent` `sys` module (D24), each block with a `// SAFETY:` comment. Every other crate or module has `#![deny(unsafe_code)]`.
 - **Dependencies.** None added without asking first, with the reason. [D4] lists the ones this plan expects to request, asked for once per phase.
-- **Off limits to agents.** Signing, release and CI secrets, branch protection, and publishing images or releases.
 - **Changelog.** Every user-visible change adds a line under Unreleased in `CHANGELOG.md`.
 
 ## Assumptions to verify
@@ -223,13 +221,6 @@ None of these are established. Each is checked in the task listed, and the resul
 | A9 | The project folder is on APFS, so `clonefile` works; other file systems get a clear error. | P3.4 |
 | A10 | The daemon can get Mac sleep and wake notifications in time to suspend VMs. | P4.7 |
 | A11 | macOS 26 is the right minimum: everything above is available there, and nothing the plan needs requires a later release. | P2.11 |
-
-## Needs Ivan's decision
-
-When a task hits something the design and the decisions below do not cover, add it here with a recommendation and stop work that depends on it.
-
-| ID | Question | Recommendation |
-| --- | --- | --- |
 
 ## Decisions
 

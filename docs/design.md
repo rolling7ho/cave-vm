@@ -2,6 +2,8 @@
 
 Oct 11, 2026 · @Ivan
 
+> This is the design written before cave was built, kept in its planning voice: "decided" marks what was settled then, and targets such as "in milliseconds" were measured later in the spike. Changes since then have a decision record in [`decisions/`](decisions/) and are folded in here. For cave as it ships, read [cli.md](cli.md), [config.md](config.md) and [protocol.md](protocol.md).
+
 ## Pitch
 
 CAVE is a microVM runtime for macOS that gives each coding-agent project its own fast, disposable Linux machine, with one-command install and no setup.

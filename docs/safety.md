@@ -44,7 +44,7 @@ Inside the VM, by default, the agent has a full shell, but only in the VM. Its m
 
 ## Credentials
 
-A credential named in an `exec` call is read from `.env` on the Mac and injected into that one command's environment. Its value is replaced with `[NAME]` in the output returned to the agent, and the audit log records the name only. `.env` is never copied into the VM or synced ([D33](../ROADMAP.md#decisions)).
+A credential named in an `exec` call is read from `.env` on the Mac and injected into that one command's environment. Its value is replaced with `[NAME]` in the output returned to the agent, then and in every later command and file read while the VM's memory may still hold it, and the audit log records the name only. `.env` is never copied into the VM or synced ([D33](../ROADMAP.md#decisions)).
 
 What this does not cover:
 
@@ -67,6 +67,15 @@ macOS has no jailer like Firecracker's. Each VM's VMM process runs under a macOS
 ## The audit log
 
 Each VM records exec calls, file writes and network connections, allowed or denied, in `.cave/`: the newest in `audit-latest.log`, older ones in files named for the date and time they were moved aside, once the latest passes 10 MB. `cave inspect` shows the last 20 entries (`--log` for all of them), and `cave view` follows them live. The log is a record of what happened, not a block, and it is removed with the VM.
+
+## Known limits
+
+These are known and accepted for v1:
+
+- **The Mac's addresses are read once.** The VM is denied every address the Mac has when the VM starts. If the Mac joins another network or gets a new address while the VM runs, the VM can reach that new address until it is stopped and started again.
+- **Turning off update checks is per project.** `[updates] check = false` in a project's `cave.toml` stops cave's own lookups only for commands run in that project. Commands run anywhere else still look for a newer cave.
+- **That setting is read by a small parser.** To stay fast before every command, cave reads `check` with a simple line reader, not a full TOML parser. It understands `check = false` on its own line under `[updates]`. Other ways of writing it, such as an inline table, are not seen, and checks stay on.
+- **Downloads use the Mac's curl.** Update lookups and installs run `/usr/bin/curl`, which reads your `~/.curlrc`. Settings there, such as a proxy, apply to these requests as well.
 
 ## Reporting a problem
 
