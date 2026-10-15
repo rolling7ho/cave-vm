@@ -11,6 +11,12 @@ brew install rolling7ho/cave/cave-vm
 cd my-project && cave agent claude
 ```
 
+Without Homebrew, the release's install script puts the same binaries in `~/.local/bin`, or in `$CAVE_PREFIX/bin` when that is set. It checks the download against the checksum pinned in the script and signs `cave-vmm` ad hoc:
+
+```sh
+curl -fsSL https://github.com/rolling7ho/cave-vm/releases/latest/download/install.sh | sh
+```
+
 ## Conventions
 
 ### The project

@@ -16,4 +16,4 @@ The design's install command is `brew install cave-vm`, which assumes a formula 
 ## Consequences
 
 - `docs/design.md` still shows `brew install cave-vm`; it becomes true if the formula later moves to homebrew/core.
-- Releasing means tagging, uploading the images with a manifest of their release URLs, and updating the formula's `url` and `sha256` in the tap.
+- Releasing means tagging, uploading the images with a manifest of their release URLs, updating the formula's `url` and `sha256` in the tap, and uploading `cave-vm-<version>-aarch64-apple-darwin.tar.gz` (`cave`, `cave-daemon`, `cave-vmm`, `LICENSE` and `scripts/hypervisor.entitlements` in a `cave-vm-<version>` folder) with a copy of `scripts/install.sh` whose `@VERSION@` and `@SHA256@` are filled in, for people without Homebrew.

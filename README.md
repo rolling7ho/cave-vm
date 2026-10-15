@@ -24,6 +24,8 @@ brew install rolling7ho/cave/cave-vm
 cd my-project && cave agent claude
 ```
 
+Without Homebrew, `curl -fsSL https://github.com/rolling7ho/cave-vm/releases/latest/download/install.sh | sh` installs the release binaries in `~/.local/bin` (set `CAVE_PREFIX` to change that) after checking their checksum.
+
 The first run downloads the kernel and a Debian image, signs the binary for Hypervisor.framework, and checks your setup. If something is wrong, the error says how to fix it, and `cave doctor` re-runs the checks.
 
 Commands:
