@@ -1,7 +1,8 @@
 //! The agent skill files (design, "Agent integration"; P5.6, P5.7). One
 //! source, `skill/cave/SKILL.md` in the repository, is both what `cave init`
 //! writes into a project and the bootstrap skill on the website. `cave init`
-//! writes it as a Claude Code skill and as a section of `AGENTS.md`, and
+//! writes it as a Claude Code skill and as `.cave/AGENTS.md`, with a line
+//! in the project's `AGENTS.md` pointing there (D37), and
 //! sets Claude Code up to use `cave mcp` with host Bash and reading `.env`
 //! denied: the skill is guidance and the config is the guardrail.
 
@@ -20,8 +21,15 @@ pub const SKILL: &str = include_str!("../../../skill/cave/SKILL.md");
 /// Where Claude Code looks for the skill in a project.
 pub const CLAUDE_SKILL: &str = ".claude/skills/cave/SKILL.md";
 
-/// The file of agent instructions that the section goes into.
+/// The file of agent instructions that the pointer goes into.
 pub const AGENTS_FILE: &str = "AGENTS.md";
+
+/// Where the skill's text goes for agents that read `AGENTS.md` (D37).
+pub const CAVE_AGENTS_FILE: &str = ".cave/AGENTS.md";
+
+/// The line in the project's `AGENTS.md`, between the markers, that sends
+/// agents to [`CAVE_AGENTS_FILE`].
+const POINTER: &str = "This project runs in a cave VM. Before doing anything, read .cave/AGENTS.md: it says how to work inside the VM.\n";
 
 /// The marker comments around the cave section of `AGENTS.md`.
 const SECTION_START: &str = "<!-- cave:start -->";
@@ -34,8 +42,8 @@ pub const CLAUDE_SETTINGS: &str = ".claude/settings.json";
 /// Claude Code's project MCP servers, where `cave mcp` is registered.
 pub const MCP_CONFIG: &str = ".mcp.json";
 
-/// The skill without its frontmatter, for `AGENTS.md`.
-fn body() -> &'static str {
+/// The skill without its frontmatter, for `.cave/AGENTS.md`.
+pub fn body() -> &'static str {
     SKILL
         .strip_prefix("---\n")
         .and_then(|rest| rest.split_once("\n---\n"))
@@ -62,17 +70,21 @@ pub fn write_claude_skill(dir: &Path) -> io::Result<()> {
     fs::write(path, SKILL)
 }
 
-/// Puts the skill into `AGENTS.md` between the marker comments, keeping
-/// everything else. A section already there is replaced; otherwise the
-/// section goes at the end.
+/// Writes the skill's text to `.cave/AGENTS.md`, and the line pointing
+/// there into `AGENTS.md` between the marker comments, keeping everything
+/// else. A section already there, such as the whole text an older cave
+/// wrote, is replaced; otherwise the line goes at the end, and a project
+/// with no `AGENTS.md` gets one with just the line, since agents read only
+/// that file on their own (D37).
 pub fn write_agents_section(dir: &Path) -> io::Result<()> {
+    write_cave_agents(dir)?;
     let path = dir.join(AGENTS_FILE);
     let existing = match fs::read_to_string(&path) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
-    let section = format!("{SECTION_START}\n{}{SECTION_END}", body());
+    let section = format!("{SECTION_START}\n{POINTER}{SECTION_END}");
     let start = existing.find(SECTION_START);
     let end = start.and_then(|s| existing[s..].find(SECTION_END).map(|e| s + e));
     let text = match (start, end) {
@@ -85,6 +97,15 @@ pub fn write_agents_section(dir: &Path) -> io::Result<()> {
         _ => format!("{}\n\n{section}\n", existing.trim_end()),
     };
     fs::write(path, text)
+}
+
+/// Writes the skill's text to `.cave/AGENTS.md` in project `dir`.
+pub fn write_cave_agents(dir: &Path) -> io::Result<()> {
+    let path = dir.join(CAVE_AGENTS_FILE);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, body())
 }
 
 /// Adds [`agent::DENIED_TOOLS`] to Claude Code's denied tools, so the
@@ -246,15 +267,21 @@ mod tests {
     }
 
     #[test]
-    fn agents_md_gets_the_skill_between_markers_and_keeps_the_rest() {
+    fn agents_md_points_at_the_skill_between_markers_and_keeps_the_rest() {
         let dir = temp("agents");
-        let section = format!("{SECTION_START}\n{}{SECTION_END}", body());
+        let section = format!(
+            "{SECTION_START}\nThis project runs in a cave VM. Before doing anything, read .cave/AGENTS.md: it says how to work inside the VM.\n{SECTION_END}"
+        );
         assert!(body().starts_with("# cave: work inside the project's VM\n"));
 
-        // A new file holds just the section.
+        // A new file holds just the pointer, and the text is in .cave/.
         write_agents_section(&dir).unwrap();
         let path = dir.join(AGENTS_FILE);
         assert_eq!(fs::read_to_string(&path).unwrap(), format!("{section}\n"));
+        assert_eq!(
+            fs::read_to_string(dir.join(CAVE_AGENTS_FILE)).unwrap(),
+            body()
+        );
 
         // Existing content is kept and the section goes at the end.
         fs::write(&path, "# My project\n\nUse tabs.\n").unwrap();
@@ -262,10 +289,14 @@ mod tests {
         let text = fs::read_to_string(&path).unwrap();
         assert_eq!(text, format!("# My project\n\nUse tabs.\n\n{section}\n"));
 
-        // An old section is replaced in place, and text after it is kept.
+        // An old section, such as the whole text, is replaced in place by
+        // the pointer, and text after it is kept.
         fs::write(
             &path,
-            format!("# Mine\n\n{SECTION_START}\nold text\n{SECTION_END}\n\n## After\n"),
+            format!(
+                "# Mine\n\n{SECTION_START}\n{}{SECTION_END}\n\n## After\n",
+                body()
+            ),
         )
         .unwrap();
         write_agents_section(&dir).unwrap();

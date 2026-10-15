@@ -6,6 +6,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Changed
 
+- `cave init` writes the agent instructions to `.cave/AGENTS.md` and puts only a line pointing there in the project's `AGENTS.md`, replacing the whole section older versions wrote. `cave agent codex` passes the text to Codex directly, since it has no shell to open the file (D37).
 - The audit log's newest entries are in `audit-latest.log`. Past 10 MB it is renamed `audit-<date>-<time>.log` and a new one starts, so no file grows without limit; `cave inspect --log` reads them all. An existing `audit.log` becomes `audit-latest.log` on the next write (D36).
 - `cave exec <cmd>` and `cave agent <name> <args>` no longer need `--` before the command or the agent's arguments; everything from there on belongs to them, so cave's flags go first. `--` still works (D35).
 - `cave shell` says how to leave when it starts: `exit` or Ctrl-D, or `~.` at the start of a line to leave at once, as in ssh, when a program in the VM holds the keyboard.
