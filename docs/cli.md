@@ -36,7 +36,7 @@ The first time `cave` runs on a Mac it also does the first-run setup from the de
 
 ### Forks
 
-A fork is a VM that lives inside its parent project at `.cave/forks/<name>`. Every command that acts on a VM takes `--fork <name>` to act on that fork instead of the project's own VM, for example `cave exec --fork try-2 npm test` ([D18](../ROADMAP.md#decisions)).
+A fork is a VM that lives inside its parent project at `.cave/forks/<name>`, and forks are how a project has more than one VM ([D40](../ROADMAP.md#decisions)): they are picked by name, never by number. Every command that acts on a VM takes `--fork <name>` to act on that fork instead of the project's own VM, for example `cave exec --fork try-2 npm test` or `cave stop --fork try-2` ([D18](../ROADMAP.md#decisions)), and `cave rm try-2` removes one. `cave ls` lists them.
 
 ### Names
 
@@ -204,7 +204,15 @@ Errors:
 cave run [--net off|lan] [-p <port>]... [--fork <name>]
 ```
 
-Boots this project's VM, or restores it if it is suspended, and returns once the guest agent answers. It prints the startup policy. If the VM is already running it says so and prints the policy again, so `cave run` is also the way to look at what a running VM can reach.
+Boots this project's VM, or restores it if it is suspended, and returns once the guest agent answers. It prints the startup policy.
+
+If the VM is already running and `cave run` is given no flags in a terminal, it offers to start another VM for the project ([D40](../ROADMAP.md#decisions)):
+
+```
+my-project is already running. Start another VM, a fork of it? [y/N]
+```
+
+Yes runs `cave fork`, so the new VM is a fork of the running one's current state, named `fork-1`, `fork-2` and so on. Enter cancels and changes nothing. With flags, or without a terminal, it says the VM is already running and prints the policy again, so `cave run --fork <name>` or `cave inspect` is the way to look at what a running VM can reach.
 
 `cave shell`, `cave exec` and `cave agent` boot the VM themselves, so `cave run` is needed only to pass flags or to start a VM ahead of time.
 

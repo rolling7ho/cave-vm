@@ -120,10 +120,23 @@ fn first_copy_line(storage: Storage) -> &'static str {
     }
 }
 
-/// `cave run`.
+/// `cave run`. On a VM that is already running, in a terminal and with no
+/// flags, it offers to start another VM as a fork of it (D40).
 pub fn run(net: Option<NetMode>, ports: Vec<PortMap>, fork: Option<String>) -> Result<()> {
     let project = init::project_or_set_up()?;
-    ensure_running(&vm_id(&project, fork), net, ports, true).map(drop)
+    let vm = vm_id(&project, fork);
+    let plain = net.is_none() && ports.is_empty() && vm.fork.is_none();
+    if plain && std::io::stdin().is_terminal() && is_running(&vm)? {
+        let question = format!(
+            "{} is already running. Start another VM, a fork of it? [y/N] ",
+            folder_name(&project)
+        );
+        if crate::remove::confirmed(&question)? {
+            return crate::snapshot::fork(None, None);
+        }
+        return Ok(());
+    }
+    ensure_running(&vm, net, ports, true).map(drop)
 }
 
 /// `cave stop`.
