@@ -4,6 +4,9 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+- `scripts/release.sh <version> --prerelease <label>` publishes a GitHub pre-release, such as an internal release candidate, and leaves the Homebrew formula and the latest release alone.
+
 ## [0.1.2] - 2026-10-15
 
 ### Removed
