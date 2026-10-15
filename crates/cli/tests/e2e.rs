@@ -40,10 +40,9 @@ impl Rig {
             .unwrap()
             .to_path_buf();
         // Short, so the daemon socket path fits in sun_path.
-        let root = std::env::temp_dir()
-            .canonicalize()
-            .unwrap()
-            .join(format!("cve{}", std::process::id()));
+        let tmp = std::env::temp_dir().canonicalize().unwrap();
+        remove_stale(&tmp);
+        let root = tmp.join(format!("cve{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let bin = root.join("bin");
         for dir in ["bin", "home/proj", "data"] {
@@ -75,11 +74,16 @@ impl Rig {
         self.root.join("home/proj")
     }
 
-    fn image_dir() -> PathBuf {
-        let dir = std::env::var_os("CAVE_E2E_IMAGE_DIR").map_or_else(
+    /// The image folder, which may not hold an image.
+    fn image_path() -> PathBuf {
+        std::env::var_os("CAVE_E2E_IMAGE_DIR").map_or_else(
             || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/image"),
             PathBuf::from,
-        );
+        )
+    }
+
+    fn image_dir() -> PathBuf {
+        let dir = Rig::image_path();
         assert!(
             dir.join("images.json").is_file(),
             "no image in {}; build one with image/debian/build.sh && image/manifest.sh",
@@ -139,7 +143,11 @@ impl Rig {
 
 impl Drop for Rig {
     fn drop(&mut self) {
-        let _ = self.cave(&["stop"]);
+        // Without an image `cave` never ran, and asking for the image here
+        // would panic again and abort before the folder is removed.
+        if Rig::image_path().join("images.json").is_file() {
+            let _ = self.cave(&["stop"]);
+        }
         let _ = Command::new("/usr/bin/pkill")
             .arg("-f")
             .arg(self.bin.join("cave-daemon"))
@@ -150,6 +158,39 @@ impl Drop for Rig {
         } else {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+}
+
+/// Removes the folders of earlier runs that were killed before [`Rig`]'s
+/// drop could: `cve<pid>` whose test process is gone. Each holds a copy of
+/// the image and VM disks. A daemon or VMM such a run left behind is
+/// stopped first.
+fn remove_stale(tmp: &Path) {
+    let Ok(entries) = fs::read_dir(tmp) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix("cve"))
+            .and_then(|p| p.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let running = Command::new("/bin/ps")
+            .args(["-p", &pid.to_string()])
+            .stdout(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if pid == std::process::id() || running {
+            continue;
+        }
+        let _ = Command::new("/usr/bin/pkill")
+            .arg("-f")
+            .arg(entry.path().join("bin/"))
+            .status();
+        let _ = fs::remove_dir_all(entry.path());
     }
 }
 
