@@ -111,8 +111,12 @@ enum Cmd {
         in_vm: bool,
         #[arg(long)]
         fork: Option<String>,
-        /// Arguments for the agent, after `--`.
-        #[arg(last = true, value_name = "ARGS")]
+        /// Arguments for the agent; cave's own flags go before them.
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            value_name = "ARGS"
+        )]
         args: Vec<String>,
     },
     /// Copy files in and out; a path starting with `:` is in the VM.
@@ -124,8 +128,12 @@ enum Cmd {
     Exec {
         #[arg(long)]
         fork: Option<String>,
-        /// The command and its arguments, after `--`.
-        #[arg(last = true, value_name = "CMD")]
+        /// The command and its arguments; cave's own flags go before it.
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            value_name = "CMD"
+        )]
         argv: Vec<String>,
     },
     /// Copy the project out of the VM, or a snapshot, into a folder.
@@ -364,7 +372,7 @@ mod tests {
         assert!(help.contains("  run [--net <off|lan>] [-p <PORT>...] [--fork <FORK>]\n      Boot or restore this project's VM\n"), "{help}");
         assert!(help.contains("  rm [NAME] [--yes]\n"), "{help}");
         assert!(
-            help.contains("  agent <NAME> [--in-vm] [--fork <FORK>] -- [ARGS]...\n"),
+            help.contains("  agent <NAME> [--in-vm] [--fork <FORK>] [ARGS]...\n"),
             "{help}"
         );
         assert!(

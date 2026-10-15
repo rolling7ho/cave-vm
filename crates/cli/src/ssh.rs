@@ -211,7 +211,7 @@ fn open_ssh(vm: &VmId) -> Result<UnixStream> {
             }
             Reply::Error(e) => {
                 return Err(CliError::from(e)
-                    .fix("Check that sshd runs in the VM: cave exec -- systemctl status ssh"));
+                    .fix("Check that sshd runs in the VM: cave exec systemctl status ssh"));
             }
             other => {
                 return Err(CliError::new(format!(

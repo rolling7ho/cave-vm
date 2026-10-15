@@ -36,7 +36,7 @@ The first time `cave` runs on a Mac it also does the first-run setup from the de
 
 ### Forks
 
-A fork is a VM that lives inside its parent project at `.cave/forks/<name>`. Every command that acts on a VM takes `--fork <name>` to act on that fork instead of the project's own VM, for example `cave exec --fork try-2 -- npm test` ([D18](../ROADMAP.md#decisions)).
+A fork is a VM that lives inside its parent project at `.cave/forks/<name>`. Every command that acts on a VM takes `--fork <name>` to act on that fork instead of the project's own VM, for example `cave exec --fork try-2 npm test` ([D18](../ROADMAP.md#decisions)).
 
 ### Names
 
@@ -115,7 +115,7 @@ The design's verb set, in its order, plus `cave stop` (D20) and `cave mcp`, adde
 | [`cave run`](#cave-run) | Boot or restore this project's VM |
 | [`cave stop`](#cave-stop) | Suspend this project's VM now |
 | [`cave shell`](#cave-shell) | Interactive shell in the VM |
-| [`cave exec -- <cmd>`](#cave-exec) | Run a command in the VM |
+| [`cave exec <cmd>`](#cave-exec) | Run a command in the VM |
 | [`cave snapshot [name]`](#cave-snapshot) | Save VM state |
 | [`cave restore [name]`](#cave-restore) | Roll back to a snapshot |
 | [`cave fork [name]`](#cave-fork) | Create a new VM from a snapshot, copy-on-write |
@@ -260,12 +260,12 @@ Errors:
 ### cave exec
 
 ```
-cave exec [--fork <name>] -- <cmd> [args...]
+cave exec [--fork <name>] <cmd> [args...]
 ```
 
-Runs one command in the VM and streams its stdout and stderr back, keeping them separate. Stdin is passed through. It boots the VM first if needed. The command runs in the project directory inside the VM, without a shell, so `cave exec -- sh -c 'cd sub && make'` is the way to use shell syntax. There is no pseudo-terminal; use `cave shell` for interactive programs. no `-t` flag.
+Runs one command in the VM and streams its stdout and stderr back, keeping them separate. Stdin is passed through. It boots the VM first if needed. The command runs in the project directory inside the VM, without a shell, so `cave exec sh -c 'cd sub && make'` is the way to use shell syntax. There is no pseudo-terminal; use `cave shell` for interactive programs. no `-t` flag.
 
-The `--` is required, so cave's flags and the command's flags never mix.
+Everything from the command on belongs to the command, so cave's own flags go before it: in `cave exec --fork try-2 npm test --fork x`, the second `--fork x` goes to `npm`. A `--` before the command still works, as in `cave exec -- uname -a` ([D35](../ROADMAP.md#decisions)).
 
 Exit code: the command's, or 125, 126 or 127 as described under [exit codes](#exit-codes).
 
@@ -273,7 +273,7 @@ Errors:
 
 | Error | Fix |
 | --- | --- |
-| `missing command after --` | `cave exec -- uname -a` |
+| `missing the command to run` | `cave exec uname -a` |
 | `command not found in the VM: <cmd>` (exit 127) | Install it in the VM, for example `cave exec -- sudo apt-get install -y <pkg>` |
 
 ### cave snapshot
@@ -526,7 +526,7 @@ The copy goes through `tar` in the VM, as `cave cp` copies folders. Without a sn
 ### cave agent
 
 ```
-cave agent <name> [--in-vm] [--fork <name>] [-- <agent args>...]
+cave agent <name> [--in-vm] [--fork <name>] [<agent args>...]
 ```
 
 Starts a coding agent against this project's VM (design, [decision 0002](decisions/0002-cave-agent-runs-on-the-mac.md)):
@@ -543,7 +543,7 @@ Undo everything the agent did with: cave restore my-project-2026-10-12-debian-4
 
 `--in-vm` runs the agent inside the VM instead, which needs the VM's network to reach the model API. On first use it installs the agent inside the VM with the agent's own installer, and you sign in inside the VM.
 
-Arguments after `--` go to the agent unchanged.
+Arguments after the agent's name go to the agent unchanged, once cave's own flags (`--in-vm`, `--fork`) are read: `cave agent claude --in-vm --resume` passes `--resume`. A `--` before them still works ([D35](../ROADMAP.md#decisions)).
 
 Denying Bash is a guardrail with limits: Claude Code keeps its other tools on the Mac, and an agent started some other way keeps its shell. [docs/safety.md](safety.md#the-agent-boundary) lists them.
 
