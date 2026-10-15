@@ -9,7 +9,8 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - Credentials given to an earlier command, or held in a restored snapshot or fork, are now redacted from every later command's output and from files read out of the VM, not only from the command that named them.
 - `cave run --net off` or `--net lan` on a VM already running with another network mode was ignored, so the VM kept its network. It is now an error that says to `cave stop` first.
 
-### Removed
+### Removed- `scripts/spike/`, the spike's probe scripts. The spike reports link to them in the git history.
+
 - The repository's own `.claude/settings.json`; `.claude/` is now in `.gitignore` (D50, decision 0023).
 - `CODE_OF_CONDUCT.md` (D48, decision 0021).
 
