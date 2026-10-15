@@ -328,6 +328,13 @@ fn arg_usage(arg: &clap::Arg) -> String {
 }
 
 fn main() -> ExitCode {
+    // clap would print `cave 0.1.2`; this also names RCs and Betas and the
+    // latest stable release.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if matches!(args.as_slice(), [flag] if flag == "--version" || flag == "-V") {
+        println!("{}", update::version_text());
+        return ExitCode::SUCCESS;
+    }
     let cli = match Cli::from_arg_matches(&command().get_matches()) {
         Ok(cli) => cli,
         Err(e) => e.exit(),
