@@ -39,6 +39,15 @@ const SECTION_END: &str = "<!-- cave:end -->";
 /// denied.
 pub const CLAUDE_SETTINGS: &str = ".claude/settings.json";
 
+/// Claude Code's personal settings for the project, where a yes to
+/// skipping its permission prompts goes, so it is not shared (D55).
+pub const CLAUDE_LOCAL_SETTINGS: &str = ".claude/settings.local.json";
+
+/// Claude Code's tools that read the Mac or fetch from it, denied as well
+/// once its prompts are skipped, so that unasked it can act only through
+/// the `cave` tools, inside the VM (D55).
+pub const SKIPPED_PROMPTS_DENIED: [&str; 4] = ["Read", "Glob", "Grep", "WebFetch"];
+
 /// Claude Code's project MCP servers, where `cave mcp` is registered.
 pub const MCP_CONFIG: &str = ".mcp.json";
 
@@ -109,13 +118,32 @@ pub fn write_cave_agents(dir: &Path) -> io::Result<()> {
 }
 
 /// Adds [`agent::DENIED_TOOLS`] to Claude Code's denied tools, so the
-/// agent has no shell on the Mac and cannot read `.env`. Claude Code asks
+/// agent has no shell on the Mac, cannot read `.env` and cannot edit Mac
+/// files. Claude Code asks
 /// the user once to approve the `cave` server from `.mcp.json`; a
 /// project's own settings do not approve it.
 fn deny_host_tools(settings: &mut Map<String, Value>) -> std::result::Result<(), String> {
     let permissions = object(settings, "permissions")?;
     agent::DENIED_TOOLS
         .iter()
+        .try_for_each(|tool| push_unique(permissions, "deny", tool))
+}
+
+/// Lets Claude Code skip its permission prompts in project `dir`, with
+/// every tool that reaches the Mac denied (D55).
+pub fn skip_prompts(dir: &Path) -> Result<()> {
+    update_json(dir, CLAUDE_LOCAL_SETTINGS, skip_prompts_settings)
+}
+
+/// `bypassPermissions`, with [`agent::DENIED_TOOLS`] and
+/// [`SKIPPED_PROMPTS_DENIED`] denied. The shared list is repeated here, so
+/// the file is safe on its own.
+fn skip_prompts_settings(settings: &mut Map<String, Value>) -> std::result::Result<(), String> {
+    let permissions = object(settings, "permissions")?;
+    permissions.insert("defaultMode".into(), "bypassPermissions".into());
+    agent::DENIED_TOOLS
+        .iter()
+        .chain(&SKIPPED_PROMPTS_DENIED)
         .try_for_each(|tool| push_unique(permissions, "deny", tool))
 }
 
@@ -312,7 +340,7 @@ mod tests {
         write_all(&dir).unwrap();
         assert_eq!(
             read_json(&dir.join(CLAUDE_SETTINGS)),
-            json!({"permissions": {"deny": ["Bash", "Read(./.env)"]}})
+            json!({"permissions": {"deny": ["Bash", "Read(./.env)", "Edit", "Write", "NotebookEdit"]}})
         );
         assert_eq!(
             read_json(&dir.join(MCP_CONFIG)),
@@ -320,6 +348,30 @@ mod tests {
         );
         assert!(dir.join(CLAUDE_SKILL).is_file());
         assert!(dir.join(AGENTS_FILE).is_file());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn skipping_prompts_denies_every_tool_that_reaches_the_mac() {
+        let dir = temp("skip");
+        fs::create_dir_all(dir.join(".claude")).unwrap();
+        fs::write(
+            dir.join(CLAUDE_LOCAL_SETTINGS),
+            r#"{"permissions": {"allow": ["mcp__cave"]}}"#,
+        )
+        .unwrap();
+        skip_prompts(&dir).unwrap();
+        assert_eq!(
+            read_json(&dir.join(CLAUDE_LOCAL_SETTINGS)),
+            json!({"permissions": {
+                "allow": ["mcp__cave"],
+                "defaultMode": "bypassPermissions",
+                "deny": [
+                    "Bash", "Read(./.env)", "Edit", "Write", "NotebookEdit",
+                    "Read", "Glob", "Grep", "WebFetch"
+                ]
+            }})
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -342,7 +394,10 @@ mod tests {
             read_json(&dir.join(CLAUDE_SETTINGS)),
             json!({
                 "model": "x",
-                "permissions": {"allow": ["Read"], "deny": ["WebFetch", "Bash", "Read(./.env)"]}
+                "permissions": {
+                    "allow": ["Read"],
+                    "deny": ["WebFetch", "Bash", "Read(./.env)", "Edit", "Write", "NotebookEdit"]
+                }
             })
         );
         let servers = read_json(&dir.join(MCP_CONFIG))["mcpServers"].clone();
@@ -350,7 +405,7 @@ mod tests {
         assert_eq!(servers["cave"]["args"], json!(["mcp"]));
 
         // Complete already: the file is left byte for byte.
-        let complete = "{\"permissions\":{\"deny\":[\"Bash\",\"Read(./.env)\"]}}";
+        let complete = "{\"permissions\":{\"deny\":[\"Bash\",\"Read(./.env)\",\"Edit\",\"Write\",\"NotebookEdit\"]}}";
         fs::write(dir.join(CLAUDE_SETTINGS), complete).unwrap();
         write_all(&dir).unwrap();
         assert_eq!(

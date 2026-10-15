@@ -102,6 +102,39 @@ fn ask_storage() -> Result<Storage> {
     })
 }
 
+/// The question next to [`ask_storage`] (D55).
+const SKIP_PROMPTS_QUESTION: &str = "Let Claude Code skip its permission prompts in this project? Its own tools on the Mac are turned off, so it can act only inside the VM, which is its sandbox. [y/N] ";
+
+fn ask_skip_prompts() -> Result<bool> {
+    eprint!("{SKIP_PROMPTS_QUESTION}");
+    let mut answer = String::new();
+    io::stdin().lock().read_line(&mut answer)?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "Yes"))
+}
+
+/// Adds `entry` to `.gitignore` unless a line already names it. Returns
+/// whether it changed anything.
+fn ignore(dir: &Path, entry: &str) -> io::Result<bool> {
+    let path = dir.join(".gitignore");
+    let existing = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+    if existing
+        .lines()
+        .any(|l| l.trim().trim_start_matches('/') == entry)
+    {
+        return Ok(false);
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+    if !existing.is_empty() && !existing.ends_with('\n') {
+        file.write_all(b"\n")?;
+    }
+    file.write_all(format!("{entry}\n").as_bytes())?;
+    Ok(true)
+}
+
 /// `cave init`.
 pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
     let dir = project::current_dir()?;
@@ -111,6 +144,7 @@ pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
             .fix("Run `cave images` to see the image names"));
     };
     let config_path = dir.join(CONFIG_FILE);
+    let mut skip_prompts = false;
     if config_path.exists() {
         println!("cave.toml already exists; left it unchanged");
     } else {
@@ -124,6 +158,7 @@ pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
             println!("No terminal to ask, so the project is sealed: code lives only in the VM");
             Storage::Sealed
         };
+        skip_prompts = io::stdin().is_terminal() && ask_skip_prompts()?;
         write_project(&dir, storage, image)?;
         let mode = if storage == Storage::Sealed {
             "sealed"
@@ -139,8 +174,17 @@ pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
     skill::write_all(&dir)?;
     println!("Wrote .cave/AGENTS.md, a line pointing to it in AGENTS.md, and .claude/skills/cave");
     println!(
-        "Set up Claude Code to use cave mcp, with host Bash and reading .env denied (.mcp.json, .claude/settings.json)"
+        "Set up Claude Code to use cave mcp, with host Bash, Mac edits and reading .env denied (.mcp.json, .claude/settings.json)"
     );
+    if skip_prompts {
+        skill::skip_prompts(&dir)?;
+        println!(
+            "Claude Code skips its prompts here, with every tool that reaches the Mac denied (.claude/settings.local.json)"
+        );
+        if ignore(&dir, skill::CLAUDE_LOCAL_SETTINGS)? {
+            println!("Added {} to .gitignore", skill::CLAUDE_LOCAL_SETTINGS);
+        }
+    }
     let (host, included) = ssh::set_up(&dir)?;
     if included {
         println!("Added an Include line to ~/.ssh/config for cave's SSH hosts");
@@ -183,6 +227,24 @@ pub fn project_or_set_up() -> Result<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ignore_adds_an_entry_once() {
+        let dir = std::env::temp_dir().join(format!("cave-ignore-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(".gitignore"), ".cave/").unwrap();
+        assert!(ignore(&dir, ".claude/settings.local.json").unwrap());
+        assert!(!ignore(&dir, ".claude/settings.local.json").unwrap());
+        fs::write(dir.join(".gitignore"), "/.claude/settings.local.json\n").unwrap();
+        assert!(!ignore(&dir, ".claude/settings.local.json").unwrap());
+        fs::write(dir.join(".gitignore"), ".cave/").unwrap();
+        ignore(&dir, ".claude/settings.local.json").unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join(".gitignore")).unwrap(),
+            ".cave/\n.claude/settings.local.json\n"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_written_config_is_the_documented_minimal_file() {
