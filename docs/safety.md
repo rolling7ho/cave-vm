@@ -64,7 +64,7 @@ macOS has no jailer like Firecracker's. Each VM's VMM process runs under a macOS
 
 ## The audit log
 
-Each VM records exec calls, file writes and network connections, allowed or denied, in `audit.log` in `.cave/`. `cave inspect` shows the latest entries. The log is a record of what happened, not a block, and it is removed with the VM.
+Each VM records exec calls, file writes and network connections, allowed or denied, in `.cave/`: the newest in `audit-latest.log`, older ones in files named for the date and time they were moved aside, once the latest passes 10 MB. `cave inspect` shows the latest entries. The log is a record of what happened, not a block, and it is removed with the VM.
 
 ## Reporting a problem
 

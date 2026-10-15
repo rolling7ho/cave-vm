@@ -27,11 +27,11 @@ fn each_vm_has_its_own_log_in_its_folder() {
     let project = Path::new("/p/app");
     assert_eq!(
         path(&vm(project, None)),
-        Some(PathBuf::from("/p/app/.cave/audit.log"))
+        Some(PathBuf::from("/p/app/.cave/audit-latest.log"))
     );
     assert_eq!(
         path(&vm(project, Some("fork-1"))),
-        Some(PathBuf::from("/p/app/.cave/forks/fork-1/audit.log"))
+        Some(PathBuf::from("/p/app/.cave/forks/fork-1/audit-latest.log"))
     );
     assert_eq!(path(&vm(project, Some("../escape"))), None);
 }
@@ -116,4 +116,49 @@ fn a_log_that_cannot_be_written_does_not_panic() {
         1,
         exec(&["true"], &[], Some(0)),
     );
+}
+
+fn entry(n: u64) -> AuditEntry {
+    AuditEntry {
+        time_unix_ms: n,
+        event: exec(&["step", &n.to_string()], &[], Some(0)),
+    }
+}
+
+#[test]
+fn a_full_log_moves_aside_and_reads_back_whole() {
+    let dir = temp("rotate").join(STATE_DIR);
+    let latest = dir.join(AUDIT_FILE);
+    for n in 0..10 {
+        append_rotating(&latest, &[entry(n)], 200).unwrap();
+    }
+    let rotated: Vec<String> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n != AUDIT_FILE)
+        .collect();
+    assert!(!rotated.is_empty(), "nothing moved aside");
+    for name in &rotated {
+        assert!(
+            name.starts_with("audit-20") && name.ends_with(".log"),
+            "{name}"
+        );
+    }
+    let (all, total) = read(&latest, None).unwrap();
+    assert_eq!(total, 10);
+    assert_eq!(all, (0..10).map(entry).collect::<Vec<_>>());
+    let (last, total) = read(&latest, Some(3)).unwrap();
+    assert_eq!(total, 10);
+    assert_eq!(last, (7..10).map(entry).collect::<Vec<_>>());
+}
+
+#[test]
+fn an_old_single_log_becomes_the_latest() {
+    let dir = temp("old").join(STATE_DIR);
+    append_rotating(&dir.join(OLD_FILE), &[entry(1)], ROTATE_BYTES).unwrap();
+    let latest = dir.join(AUDIT_FILE);
+    assert_eq!(read(&latest, None).unwrap().0, [entry(1)]);
+    append(&latest, &[entry(2)]).unwrap();
+    assert!(!dir.join(OLD_FILE).exists());
+    assert_eq!(read(&latest, None).unwrap().0, [entry(1), entry(2)]);
 }

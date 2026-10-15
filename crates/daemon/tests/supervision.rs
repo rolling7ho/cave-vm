@@ -584,7 +584,7 @@ fn connection_attempts_reach_the_audit_log_while_running_and_on_stop() {
     assert!(matches!(r.start(), Reply::Policy(_)));
     let state = PathBuf::from(vm().project).join(".cave");
     fs::create_dir_all(&state).unwrap();
-    let log = state.join("audit.log");
+    let log = state.join("audit-latest.log");
     r.vms.collect_connects();
     let lines = || {
         fs::read_to_string(&log)
