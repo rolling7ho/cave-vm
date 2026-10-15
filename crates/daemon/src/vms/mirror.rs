@@ -65,7 +65,9 @@ pub struct Pulled {
 }
 
 fn io_error(what: &str, e: impl std::fmt::Display) -> ErrorMessage {
-    error(ErrorCode::Io, format!("cannot {what}: {e}"))
+    error(ErrorCode::Io, format!("cannot {what}: {e}")).with_fix(
+        "Check that you can write to the project folder and the disk has space, then try again",
+    )
 }
 
 impl Vms {

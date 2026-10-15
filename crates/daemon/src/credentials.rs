@@ -96,7 +96,8 @@ pub fn resolve(project: &Path, names: &[String]) -> Result<Vec<(String, String)>
             return Err(ErrorMessage::new(
                 ErrorCode::Io,
                 format!("cannot read {}: {e}", path.display()),
-            ));
+            )
+            .with_fix(format!("Check that you can read {}", path.display())));
         }
     };
     let vars = parse_env(&text);

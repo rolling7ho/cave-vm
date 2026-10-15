@@ -25,9 +25,7 @@ pub fn run(fork: Option<String>, log: bool, json: bool) -> Result<()> {
         log_limit: (!log).then_some(RECENT),
     })?;
     if !matches!(reply, Reply::Inspect { .. }) {
-        return Err(CliError::new(
-            "the daemon sent an unexpected reply to inspect",
-        ));
+        return Err(CliError::unexpected("inspect"));
     }
     if json {
         let mut doc = serde_json::to_value(&reply).map_err(|e| CliError::new(e.to_string()))?;

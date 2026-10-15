@@ -92,10 +92,10 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
                 .current_dir(&project)
                 .status()
                 .map_err(|e| {
-                    failed(CliError::new(format!(
-                        "cannot start {}: {e}",
-                        program.display()
-                    )))
+                    failed(
+                        CliError::new(format!("cannot start {}: {e}", program.display()))
+                            .fix("Check that it runs on its own in a terminal, then try again"),
+                    )
                 })?;
             exit_status_code(status)
         }
@@ -157,9 +157,7 @@ fn snapshot_before(vm: &VmId) -> Result<Option<String>> {
         before: true,
     })? {
         Reply::Snapshot { name, .. } => Ok(Some(name)),
-        _ => Err(CliError::new(
-            "the daemon sent an unexpected reply to snapshot",
-        )),
+        _ => Err(CliError::unexpected("snapshot")),
     }
 }
 

@@ -184,6 +184,7 @@ impl Vms {
         };
         let failed = |what: &str, e: &dyn std::fmt::Display| {
             error(ErrorCode::Io, format!("cannot {what}: {e}"))
+                .with_fix("If the disk is full, free space with `cave gc`, then try again")
         };
         // An unfinished snapshot of the same name, left by a crash, goes.
         let _ = fs::remove_dir_all(&dir);
