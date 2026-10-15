@@ -123,6 +123,7 @@ The design's verb set, in its order, plus `cave stop` (D20) and `cave mcp`, adde
 | [`cave rm [name]`](#cave-rm) | Remove a VM, fork or snapshot |
 | [`cave gc`](#cave-gc) | Show and reclaim disk |
 | [`cave inspect`](#cave-inspect) | Show the policy, resources and audit log |
+| [`cave view`](#cave-view) | Follow what happens in the VM live |
 | [`cave sync`](#cave-sync) | Update the Mac mirror (synced mode) |
 | [`cave push`](#cave-push) | Bring Mac edits in (synced mode) |
 | [`cave cp`](#cave-cp) | Copy files in and out |
@@ -453,6 +454,23 @@ Audit log (last 20 of 412, cave inspect --log for all)
   11:05:03  connect  192.168.1.10:445                  denied (LAN)
   11:06:20  exec     ./deploy.sh   credentials: API_KEY   exit 0
 ```
+
+### cave view
+
+```
+cave view [--fork <name>]
+```
+
+Added by [D39](../ROADMAP.md#decisions). Follows the VM's audit log as it is written, so you can watch what an agent does: each command with its exit code, each file written through cave, and each connection, allowed or denied. It starts with the last 10 entries, then prints new ones as they happen, in the same rows as `cave inspect`, until Ctrl-C. It reads the log from the VM's folder, so it works whether or not the VM is running, and follows it when an old part is moved aside ([D36](../ROADMAP.md#decisions)).
+
+```
+Following what happens in my-project: commands, file writes and connections. Ctrl-C stops
+  11:04:12  exec     npm test                          exit 0
+  11:04:40  write    /workspace/src/app.ts             1.2 KB
+  11:05:03  connect  192.168.1.10:445                  denied (LAN)
+```
+
+Connections show up within about a second, since the daemon collects them from the VM every second.
 
 ### cave sync
 

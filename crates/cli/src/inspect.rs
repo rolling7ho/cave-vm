@@ -89,7 +89,7 @@ fn render(reply: &Reply, offset: i64) -> String {
 }
 
 /// One audit entry as a row: time, event, what, and how it went.
-fn audit_line(entry: &AuditEntry, offset: i64) -> String {
+pub fn audit_line(entry: &AuditEntry, offset: i64) -> String {
     let time = clock((entry.time_unix_ms / 1000) as i64 + offset);
     let (kind, detail, result) = match &entry.event {
         AuditEvent::Exec {
@@ -142,7 +142,7 @@ fn bytes(n: u64) -> String {
 
 /// The local time zone's offset from UTC in seconds, through date(1),
 /// since std has no time zones. UTC if it cannot be read.
-fn local_offset() -> i64 {
+pub fn local_offset() -> i64 {
     Command::new("/bin/date")
         .arg("+%z")
         .output()
