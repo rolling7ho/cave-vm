@@ -32,7 +32,7 @@ The first time `cave` runs on a Mac it also does the first-run setup from the de
 - Before anything else, it checks the Mac as `cave doctor` does: Apple Silicon, Hypervisor.framework and macOS 26 or later. A failed check stops here with its fix. Less than 5 GB free is a warning.
 - It creates the data directory.
 - It signs `cave-vmm` ad hoc with the hypervisor entitlement (`codesign -s -`, on this Mac, with no Apple account, keys or certificates), and says so. It checks this every time it starts the daemon, so a reinstalled `cave-vmm` is signed again. That ad hoc signing is enough was checked in the spike [A5].
-- The first VM start downloads the kernel and the base image, verified against their digests, and shows the download's progress.
+- The first VM start downloads the kernel and the base image, verified against their digests, and shows the download's percentage, updated live on one line as each percent arrives. When stderr is not a terminal, it prints a line at every tenth instead.
 
 ### Forks
 
