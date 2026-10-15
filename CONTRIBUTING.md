@@ -7,7 +7,6 @@ Thanks for helping. cave-vm is an open-source (Apache 2.0) microVM runtime for m
 - Read `docs/design.md`. It is the source of truth for what cave-vm does and why. Decisions marked as decided there are not changed in a pull request.
 - For anything larger than a small fix, open an issue with a short design note first. Say what you want to change, why, and which part of the design it touches.
 - Found a security problem? Do not open a public issue. Follow `SECURITY.md` instead.
-- Everyone taking part is expected to follow `CODE_OF_CONDUCT.md`.
 
 ## Requirements
 

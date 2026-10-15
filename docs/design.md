@@ -304,7 +304,7 @@ cave-vm/
   sdks/python/  sdks/typescript/
   image/                    # kernel config, Debian and Ubuntu image builds
   docs/                     # design.md (this doc), decisions/
-  AGENTS.md  CONTRIBUTING.md  SECURITY.md  CODE_OF_CONDUCT.md
+  AGENTS.md  CONTRIBUTING.md  SECURITY.md
 ```
 
 **How Claude Code works in this repo**

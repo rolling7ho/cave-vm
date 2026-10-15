@@ -284,3 +284,4 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D45 | Ivan asked for copies of cave to update themselves. | cave installs a newer release the way it was installed (asked first since D47); `[updates] check = false` turns it off. Images still never update by themselves (decision 0018). |
 | D46 | Ivan found `cave mirror` only repeats the agent's own screen. | `cave mirror` and the agent terminal recording are removed; `cave view` stays (decision 0019). |
 | D47 | Ivan asked for cave to ask before updating, and to look when it opens rather than daily. | In a terminal, cave looks up the newest stable release in the background and asks `Update now? [Y/n]` when one is newer; no background installs (decision 0020). |
+| D48 | Ivan found the code of conduct not really necessary. | `CODE_OF_CONDUCT.md` is removed, and the design and `CONTRIBUTING.md` no longer name it (decision 0021). |
