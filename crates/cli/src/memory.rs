@@ -10,6 +10,7 @@ use cave_vm_proto::daemon::{Reply, Request, VmState};
 
 use crate::client::Connection;
 use crate::doctor::sysctl;
+use crate::style::Paint;
 
 const GB: f64 = (1u64 << 30) as f64;
 
@@ -68,7 +69,7 @@ pub fn warn_if_tight(vm_memory: u64) {
         .filter(|e| e.state == Some(VmState::Running))
         .count();
     if let Some(text) = warning(running, &host, vm_memory) {
-        eprintln!("warning: {text}");
+        eprintln!("{} {text}", Paint::stderr().notice("warning:"));
     }
 }
 

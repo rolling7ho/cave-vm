@@ -15,6 +15,7 @@ use crate::copy;
 use crate::error::{CliError, Result};
 use crate::project;
 use crate::snapshot::credential_warning;
+use crate::style::Paint;
 
 /// The project directory inside the VM (docs/cli.md, "Guest layout").
 const WORKSPACE: &str = "/workspace";
@@ -161,7 +162,7 @@ pub fn run(folder: Option<PathBuf>, snapshot: Option<String>) -> Result<()> {
             if !credentials.is_empty() {
                 let source = format!("snapshot {snapshot}");
                 let warning = credential_warning(&source, &credentials, "the exported files");
-                eprintln!("{warning}");
+                eprintln!("{}", Paint::stderr().warning(&warning));
             }
             let fork = TempFork {
                 project: main,

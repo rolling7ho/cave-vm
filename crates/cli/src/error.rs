@@ -5,6 +5,8 @@ use std::io;
 
 use cave_vm_proto::ErrorMessage;
 
+use crate::style::Paint;
+
 /// Exit code for cave's own failures (docs/cli.md, "Exit codes").
 pub const EXIT_FAILED: u8 = 1;
 /// Exit code for a usage error, as clap uses.
@@ -32,13 +34,20 @@ impl CliError {
     }
 }
 
+impl CliError {
+    /// The error as printed, with `error:` and `fix:` styled by `paint`.
+    pub fn render(&self, paint: Paint) -> String {
+        let mut out = format!("{} {}", paint.bad("error:"), self.message);
+        if let Some(fix) = &self.fix {
+            out.push_str(&format!("\n  {} {fix}", paint.fix("fix:")));
+        }
+        out
+    }
+}
+
 impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "error: {}", self.message)?;
-        if let Some(fix) = &self.fix {
-            write!(f, "\n  fix: {fix}")?;
-        }
-        Ok(())
+        f.write_str(&self.render(Paint::OFF))
     }
 }
 
