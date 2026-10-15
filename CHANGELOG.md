@@ -4,6 +4,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.1.2-rc.2] - 2026-10-15
+
+The second release candidate for 0.1.2: cave asks before updating.
+
 ### Changed
 - cave asks before updating (D47, decision 0020). When it runs in a terminal it looks up the newest stable release in the background, at most every 10 minutes, and when one is newer it asks `Update now? [Y/n]` before the command. Yes installs it the way cave was installed; no skips that version for a day. Scripts are never asked, and nothing installs in the background any more.
 
