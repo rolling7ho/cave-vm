@@ -104,7 +104,7 @@ enum Cmd {
     },
     /// Start a coding agent against this project's VM.
     Agent {
-        /// The agent: claude.
+        /// The agent: claude or codex.
         name: String,
         /// Run the agent inside the VM instead of on the Mac.
         #[arg(long)]

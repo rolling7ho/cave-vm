@@ -28,12 +28,13 @@ Widening always takes an explicit flag or config change, and `cave run` echoes i
 cave ships guidance and a guardrail.
 
 - **Guidance:** the skill that `cave init` writes into `AGENTS.md` and `.claude/skills/cave/` tells the agent to work only inside the VM. A skill is guidance, not enforcement. An agent can ignore it.
-- **Guardrail:** the MCP server, `cave mcp`, gives the agent `exec`, `read_file`, `write_file`, `snapshot`, `restore`, `fork` and `destroy`, all inside the VM. `cave agent claude` starts Claude Code with that server and with Bash denied, and `cave init` writes the same denial into `.claude/settings.json`. Claude Code is also denied reading `.env`, so it cannot see the credentials there.
+- **Guardrail:** the MCP server, `cave mcp`, gives the agent `exec`, `read_file`, `write_file`, `snapshot`, `restore`, `fork` and `destroy`, all inside the VM. `cave agent claude` starts Claude Code with that server and with Bash denied, and `cave init` writes the same denial into `.claude/settings.json`. Claude Code is also denied reading `.env`, so it cannot see the credentials there. `cave agent codex` starts Codex with the same server and its shell tools turned off; Codex then has no tool that reads a file on the Mac, so it cannot read `.env` either ([D44](../ROADMAP.md#decisions)). Codex's calls to the `cave` server are approved in advance, since they act only on the VM.
 
 The limit, stated plainly: **a confused or prompt-injected agent that still has a host shell can step outside the VM.** The VM contains only what runs inside it. In particular:
 
 - An agent you start yourself, without `cave agent` and without the settings `cave init` writes, keeps its host shell. The skill alone does not stop it.
-- Agents other than Claude Code get the skill and the MCP server, but cave does not deny their shell. It denies only where the agent supports it, and today that is Claude Code.
+- Agents other than Claude Code and Codex get the skill and the MCP server, but cave does not deny their shell. It denies only where the agent supports it. `cave init` writes the denial for Claude Code only; Codex has it only when started with `cave agent codex`.
+- Codex on the Mac keeps its other tools, including `apply_patch`, which edits files on the Mac, web search and any MCP servers you configured for it. Like Claude Code's edits, these do not reach the VM.
 - Claude Code on the Mac keeps its own tools other than Bash. It can read and edit files on the Mac with its Read, Edit and Write tools. It asks first outside the project folder, and the project folder holds the Mac files and, in synced mode, the mirror. It can also fetch web pages and use any other MCP servers you configured. Edits it makes to the Mac files do not reach the VM: in sealed mode those files are no longer used, and in synced mode they wait for you to run `cave pull`.
 - Approving a tool when Claude Code asks, or running it with permissions skipped, removes the guardrail for that tool.
 

@@ -557,11 +557,13 @@ Arguments after the agent's name go to the agent unchanged, once cave's own flag
 
 Denying Bash is a guardrail with limits: Claude Code keeps its other tools on the Mac, and an agent started some other way keeps its shell. [docs/safety.md](safety.md#the-agent-boundary) lists them.
 
-Agents in v1: `claude` (Claude Code). The README also lists Codex; it is added once its MCP and permission settings are checked.
+Agents in v1: `claude` (Claude Code) and `codex` (Codex, [D44](../ROADMAP.md#decisions)).
 
 On the Mac, `cave` starts `claude` in the project folder with `--mcp-config`, naming `cave mcp` as the `cave` server (`cave mcp --fork <name>` with `--fork`), and `--disallowedTools=Bash,Read(./.env)`, which takes the Bash tool away from it and stops its Read and Grep tools from opening `.env`. Without the second rule, Claude Code on the Mac could read the credentials straight from `.env`. All of this was checked with Claude Code 2.1 on a Mac. In `--fork` runs there is no snapshot first, since forks cannot be snapshotted yet, and `cave` says so.
 
 `--in-vm` installs Claude Code with `curl -fsSL https://claude.ai/install.sh | bash` inside the VM if it is not there, then runs it on a pseudo-terminal like `cave shell`, so it needs a terminal.
+
+For Codex, `cave` starts `codex` in the project folder with `-c` settings naming `cave mcp` as the `cave` MCP server (with `--fork <name>` for a fork) and approving its tools in advance, since they act only on the VM, and with `--disable shell_tool --disable unified_exec`, which takes away its shell. Without a shell, Codex has no tool that reads a file on the Mac, so `.env` is out of its reach too. This was checked with Codex 0.162 on a Mac: it ran commands in the VM through `cave` and reported no tool that could read `.env`. `--in-vm` installs Codex with `sudo npm install -g @openai/codex` inside the VM if it is not there.
 
 Exit code: the agent's.
 
@@ -569,8 +571,9 @@ Errors:
 
 | Error | Fix |
 | --- | --- |
-| `unknown agent "<name>"` | Supported agents: claude |
+| `unknown agent "<name>"` | Supported agents: claude, codex |
 | `claude is not installed on this Mac` | Install Claude Code, or run it inside the VM with `cave agent claude --in-vm` |
+| `codex is not installed on this Mac` | Install Codex (npm install -g @openai/codex), or run it inside the VM with `cave agent codex --in-vm` |
 
 ### cave images
 
