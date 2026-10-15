@@ -4,6 +4,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-10-15
+
+The second release candidate for 1.0.0: signing in to Claude Code inside the VM now finishes by itself after you approve in the browser.
+
 ### Fixed
 - Signing in to Claude Code inside the VM through the browser ended on "Safari can't connect to the server": the sign-in returns to `localhost` on the Mac, while Claude Code waits for it inside the VM. During `cave agent`, `cave` now listens on that port on the Mac's loopback until the browser comes back and passes the request into the VM (D56, decision 0027).
 

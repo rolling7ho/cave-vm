@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, openSync, realpathSync, statSync } from "node:fs
 import { connect as netConnect } from "node:net";
 import { dirname, join, resolve } from "node:path";
 
-export const VERSION = "1.0.0-rc.1";
+export const VERSION = "1.0.0-rc.2";
 
 /** The project folder in the VM, where commands start and relative paths point. */
 export const WORKSPACE = "/workspace";
