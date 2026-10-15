@@ -4,6 +4,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-15
+
+CLI changes from feedback on 0.1.0, and cave now updates itself: from this version on, copies install new releases by themselves. Copies on 0.1.0 need one `brew upgrade cave-vm` (or the install script again).
+
 ### Changed
 - The CLI uses colour, bold and underline on a terminal: red errors with green fixes, yellow warnings, bold or underlined headings and labels in `cave help`, `cave ls`, `cave inspect` and the startup policy, and green, yellow or red results in the audit rows. `NO_COLOR`, `TERM=dumb` or a pipe keeps the output plain.
 - `cave pull` is now `cave push`, since it sends Mac edits to the VM. `cave pull` still works, hidden from help and with a note, until the next minor release (D42).

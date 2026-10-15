@@ -75,7 +75,7 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cave-vm-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cave-vm-proto",
  "libc",
@@ -84,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "cave-vm-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cave-vm-mcp",
  "cave-vm-proto",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "cave-vm-daemon"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cave-vm-proto",
  "cave-vm-vmm",
@@ -106,11 +106,11 @@ dependencies = [
 
 [[package]]
 name = "cave-vm-hvf"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "cave-vm-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cave-vm-proto",
  "cave-vm-sdk",
@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "cave-vm-proto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -127,14 +127,14 @@ dependencies = [
 
 [[package]]
 name = "cave-vm-sdk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cave-vm-proto",
 ]
 
 [[package]]
 name = "cave-vm-vmm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cave-vm-hvf",
  "cave-vm-proto",
