@@ -219,7 +219,7 @@ The approach is Firecracker's, ported to macOS: a minimal virtio-mmio device mod
 | Preinstalled | git, node, npm, python, curl, vim, openssh-server. |
 | Image hosting | Hosted in the project's GitHub releases. |
 | Image updates | A small update detector looks up the latest version number with a plain request that carries no identifying data, and tells the user if a newer image exists. It never updates an image by itself, and it can be turned off in cave.toml. |
-| cave updates | The same lookup finds the newest cave release, and cave installs it in the background the way it was installed (Homebrew or the install script) when no VM is running ([D45](../ROADMAP.md#decisions)). Turning the detector off turns this off too. |
+| cave updates | When cave runs in a terminal it looks up the newest stable release in the background, with the same plain request, and when one is newer it asks whether to update before the command runs. Yes installs it the way cave was installed (Homebrew or the install script) ([D47](../ROADMAP.md#decisions)). Turning the detector off turns this off too. |
 | Kernel | Our own minimal kernel, pinned and published with the image. It includes container support (namespaces, cgroups, overlayfs, netfilter) so Docker works inside the VM. |
 | Snapshot contents | Disk state, VM config and metadata, and memory state. |
 | Upgrades | Snapshots survive a `cave` upgrade, so the snapshot format is versioned. If a memory snapshot cannot be loaded, restore falls back to the disk state and a normal boot. |
@@ -246,7 +246,7 @@ Interfaces, defaults and process:
 | Disk | Raw sparse image, so APFS cloning works. 20 GB default, growable. |
 | Defaults | 2 CPUs and 2 GB memory. No hard cap on the number of VMs, with a warning when memory gets tight. |
 | Success targets | Headline target: a fork in well under a second. Exact boot, restore and fork times and idle memory per VM are set after the spike measures a baseline. |
-| Telemetry | None. The only network request is the optional version lookup, and the downloads of a cave update it finds. |
+| Telemetry | None. The only network requests are the optional version lookups and the downloads of an update the user accepts. |
 | Security | The VMM process runs under a macOS sandbox profile with access only to `.cave/` and the shared image cache. |
 | Testing | A self-hosted Mac for end-to-end tests, and a mock backend for device-model tests. |
 | Repo and process | One Cargo workspace, and a DCO sign-off for contributions. |
