@@ -282,7 +282,7 @@ Phases are ordered, not dated. Gate 2 can change the plan: if saving and restori
 
 - The folder and GitHub repo are both `cave-vm`, under a personal account for now. The repo stays private until release. Links to releases go through one setting, so moving to an organization later is a one-line change.
 - Apache 2.0, DCO sign-off (`git commit -s`), and Conventional Commits (`feat:`, `fix:`) so changelogs can be generated.
-- AI-assisted contributions are allowed, with disclosure in the PR.
+- AI-assisted contributions are allowed (D49).
 - `main` is protected: one required CI check, squash merges, no direct pushes. PRs are small, and a large feature starts with a design note in an issue.
 - `SECURITY.md` with private vulnerability reporting, the Contributor Covenant, and issue and PR templates.
 - Every `unsafe` block has a `// SAFETY:` comment, and `unsafe` is allowed only in the Hypervisor.framework wrapper, the guest-memory code and two system-call modules ([decision 0007](decisions/0007-unsafe-host-calls-and-pr-flow.md)). CI runs `cargo-deny` and `cargo-audit`, new dependencies need a stated reason, and the toolchain is pinned in `rust-toolchain.toml`.
