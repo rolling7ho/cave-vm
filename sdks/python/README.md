@@ -36,7 +36,7 @@ Errors raise `CaveError`, with `message`, `fix` and the daemon's `code`.
 The SDK is not on PyPI yet. Install it from the release tag:
 
 ```sh
-pip install "cave-vm @ git+https://github.com/rolling7ho/cave-vm@v1.0.0-rc.1#subdirectory=sdks/python"
+pip install "cave-vm @ git+https://github.com/rolling7ho/cave-vm@v1.0.0-rc.2#subdirectory=sdks/python"
 ```
 
 ## Tests
