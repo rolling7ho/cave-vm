@@ -4,13 +4,15 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.1.2-rc.1] - 2026-10-15
+
+The first release candidate for 0.1.2.
+
 ### Added
 - Release candidates and betas: a version such as `0.1.2-rc.1` or `0.1.3-beta.1` is published by `scripts/release.sh` as a GitHub pre-release titled "cave-vm 0.1.2 RC 1" or "cave-vm 0.1.3 Beta 1", leaving the Homebrew formula and the latest release alone. Self-updates order them beta, RC, stable, and never move a copy to an older stable release.
 
 ### Changed
 - `cave --version` prints the version as people say it, such as `v0.1.2`, `v0.1.2 RC 1` or `v0.1.3 Beta 1`, and on a second line the newest stable release the update detector has seen, such as `Latest Stable: v0.1.1`.
-
-## [0.1.2] - 2026-10-15
 
 ### Removed
 - `cave mirror`, and `cave agent`'s recording of the agent's terminal (D46). It only repeated the agent's own screen; `cave view` stays. `cave agent` deletes a recording an earlier version left in `.cave/agent.term`.
