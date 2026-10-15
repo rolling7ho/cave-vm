@@ -275,10 +275,11 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D36 | Where the audit log goes when it grows large. | Newest entries in `.cave/audit-latest.log`; past 10 MB it moves to `audit-<date>-<time>.log` and a new one starts (decision 0017). |
 | D37 | Ivan asked for the agent text to live in `.cave/AGENTS.md`. | The text goes in `.cave/AGENTS.md`; the root `AGENTS.md` gets a one-line pointer, created if missing (decision 0017). |
 | D38 | Ivan asked for `cave export [folder]`. | `cave export [folder] [--from <snapshot>]`; a missing folder is created after a question (decision 0017). |
-| D39 | Ivan asked for a way to watch what happens in the VM. | `cave view` follows the audit log live; `cave mirror` shows the agent's terminal live (decision 0017). |
+| D39 | Ivan asked for a way to watch what happens in the VM. | `cave view` follows the audit log live (decision 0017). `cave mirror` was removed by D46. |
 | D40 | Ivan asked for more than one VM per project and a way to pick one. | The other VMs are named forks picked with `--fork`; `cave run` on a running VM offers to fork it (decision 0017). |
 | D41 | Ivan asked for a live sync mode. | `cave sync --watch`, one-way from the VM, every 2 seconds; two-way stays a non-goal (decision 0017). |
 | D42 | Ivan asked for `cave push`. | `cave pull` is renamed `cave push`; `pull` stays as a hidden alias until the next minor release (decision 0017). |
 | D43 | Ivan asked for an emergency stop. | `cave stop --force` asks, then stops every VM with SIGTERM and SIGKILL 5 seconds later, saving nothing (decision 0017). |
 | D44 | Ivan asked for Codex in v1. | `cave agent codex`: Codex on the Mac with `cave mcp` and its shell tools turned off (decision 0017). |
 | D45 | Ivan asked for copies of cave to update themselves. | cave installs a newer release in the background, the way it was installed, when no VM is running; `[updates] check = false` turns it off. Images still never update by themselves (decision 0018). |
+| D46 | Ivan found `cave mirror` only repeats the agent's own screen. | `cave mirror` and the agent terminal recording are removed; `cave view` stays (decision 0019). |

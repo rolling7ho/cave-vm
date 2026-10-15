@@ -79,6 +79,7 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
         })?)
     };
     let project = init::project_or_set_up().map_err(failed)?;
+    forget_terminal_recording(&project, fork.as_deref());
     let vm = vm_id(&project, fork.clone());
     let policy = ensure_running(&vm, None, Vec::new(), true).map_err(failed)?;
     let snapshot = snapshot_before(&vm).map_err(failed)?;
@@ -86,31 +87,16 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
     let code = match on_mac {
         Some(program) => {
             let cave = std::env::current_exe().map_err(|e| failed(e.into()))?;
-            let agent_args = mac_args(name, &cave, fork.as_deref(), &args);
-            // In a terminal the agent runs under script(1), which records
-            // what it shows for `cave mirror` (D39).
-            let mut command = match terminal_record(&project, fork.as_deref()) {
-                Some(record) => {
-                    let mut c = Command::new("/usr/bin/script");
-                    c.arg("-q")
-                        .arg("-F")
-                        .arg(record)
-                        .arg(&program)
-                        .args(&agent_args);
-                    c
-                }
-                None => {
-                    let mut c = Command::new(&program);
-                    c.args(&agent_args);
-                    c
-                }
-            };
-            let status = command.current_dir(&project).status().map_err(|e| {
-                failed(CliError::new(format!(
-                    "cannot start {}: {e}",
-                    program.display()
-                )))
-            })?;
+            let status = Command::new(&program)
+                .args(mac_args(name, &cave, fork.as_deref(), &args))
+                .current_dir(&project)
+                .status()
+                .map_err(|e| {
+                    failed(CliError::new(format!(
+                        "cannot start {}: {e}",
+                        program.display()
+                    )))
+                })?;
             exit_status_code(status)
         }
         None => {
@@ -128,8 +114,7 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
                         .fix("Check the VM's network with `cave inspect`; the installer needs it"),
                 ));
             }
-            let record = terminal_record(&project, fork.as_deref());
-            shell::session_recorded(vm.clone(), Some(in_vm_argv(name, &args)), record)?
+            shell::session(vm.clone(), Some(in_vm_argv(name, &args)))?
         }
     };
     // The design syncs the mirror after agent runs. A failed sync does
@@ -148,37 +133,15 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
     Ok(code)
 }
 
-/// The file `cave agent` records the agent's terminal to, for `cave
-/// mirror` (D39): `agent.term` in the VM's folder.
-pub fn record_path(project: &Path, fork: Option<&str>) -> PathBuf {
+/// Deletes the agent's terminal output that `cave agent` 0.1.1 recorded
+/// for the removed `cave mirror` (D46), so it does not linger.
+fn forget_terminal_recording(project: &Path, fork: Option<&str>) {
     let state = project.join(".cave");
-    match fork {
-        None => state.join(RECORD_FILE),
-        Some(name) => state.join("forks").join(name).join(RECORD_FILE),
-    }
-}
-
-/// See [`record_path`].
-const RECORD_FILE: &str = "agent.term";
-
-/// The recording, emptied and readable only by this user, when the agent
-/// gets a terminal; `None` otherwise, as in scripts, where the agent's
-/// output is left as it is.
-fn terminal_record(project: &Path, fork: Option<&str>) -> Option<PathBuf> {
-    use std::io::IsTerminal;
-    use std::os::unix::fs::OpenOptionsExt;
-    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-        return None;
-    }
-    let path = record_path(project, fork);
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&path)
-        .ok()?;
-    Some(path)
+    let dir = match fork {
+        None => state,
+        Some(name) => state.join("forks").join(name),
+    };
+    let _ = std::fs::remove_file(dir.join("agent.term"));
 }
 
 /// Takes the snapshot before the run, as the design asks. Forks cannot be
@@ -311,16 +274,6 @@ fn exit_status_code(status: std::process::ExitStatus) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_recording_is_in_the_vms_folder() {
-        let project = Path::new("/p");
-        assert_eq!(record_path(project, None), Path::new("/p/.cave/agent.term"));
-        assert_eq!(
-            record_path(project, Some("f1")),
-            Path::new("/p/.cave/forks/f1/agent.term")
-        );
-    }
 
     #[test]
     fn claude_gets_cave_mcp_and_no_bash_or_env() {

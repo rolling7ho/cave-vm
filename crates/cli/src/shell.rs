@@ -35,7 +35,7 @@ const FALLBACK_SIZE: (u16, u16) = (80, 24);
 
 /// Runs `/bin/stty` on the terminal (standard input) and returns what it
 /// prints.
-pub fn stty(args: &[&str]) -> io::Result<String> {
+fn stty(args: &[&str]) -> io::Result<String> {
     let out = Command::new("/bin/stty")
         .args(args)
         .stdin(Stdio::inherit())
@@ -60,12 +60,12 @@ fn window_size() -> Option<(u16, u16)> {
 }
 
 /// Raw mode on the terminal until dropped.
-pub struct RawMode {
-    pub saved: String,
+struct RawMode {
+    saved: String,
 }
 
 impl RawMode {
-    pub fn enter() -> io::Result<RawMode> {
+    fn enter() -> io::Result<RawMode> {
         let saved = stty(&["-g"])?;
         stty(&["raw", "-echo"])?;
         Ok(RawMode { saved })
@@ -140,18 +140,6 @@ impl Escape {
 /// The `~.` escape works for the login shell only, so an agent gets every
 /// key it is sent.
 pub fn session(vm: VmId, argv: Option<Vec<String>>) -> Result<u8> {
-    session_recorded(vm, argv, None)
-}
-
-/// [`session`], also appending what it shows to `record`, if given, for
-/// `cave mirror` (D39).
-pub fn session_recorded(
-    vm: VmId,
-    argv: Option<Vec<String>>,
-    record: Option<std::path::PathBuf>,
-) -> Result<u8> {
-    let mut record =
-        record.and_then(|path| std::fs::OpenOptions::new().append(true).open(path).ok());
     let escapes = argv.is_none();
     let failed = |e: CliError| CliError {
         code: EXIT_CAVE_FAILED_RUNNING,
@@ -244,11 +232,6 @@ pub fn session_recorded(
     let result = loop {
         match connection.receive() {
             Ok(Reply::PtyData { data }) => {
-                if let Some(file) = &mut record
-                    && file.write_all(&data.0).is_err()
-                {
-                    record = None;
-                }
                 let mut out = io::stdout().lock();
                 if out.write_all(&data.0).and_then(|()| out.flush()).is_err() {
                     break Ok(EXIT_CAVE_FAILED_RUNNING);
