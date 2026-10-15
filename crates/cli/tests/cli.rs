@@ -683,11 +683,15 @@ fn cave_with_path(s: &Scratch, path: &Path, args: &[&str]) -> Output {
 }
 
 #[test]
-fn agent_runs_claude_on_the_mac_through_cave_mcp_after_a_snapshot() {
+fn agent_on_mac_runs_claude_through_cave_mcp_after_a_snapshot() {
     let s = Scratch::new();
     let state = fake_daemon(&s);
     let bin = fake_claude(&s);
-    let out = cave_with_path(&s, &bin, &["agent", "claude", "-p", "fix the tests"]);
+    let out = cave_with_path(
+        &s,
+        &bin,
+        &["agent", "claude", "--on-mac", "-p", "fix the tests"],
+    );
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
     let err = stderr(&out);
     assert!(err.contains("started in"), "{err}");
@@ -733,12 +737,33 @@ fn agent_errors_say_how_to_fix_them_before_anything_boots() {
     let state = fake_daemon(&s);
     let empty = s.root.join("empty");
     fs::create_dir_all(&empty).unwrap();
-    let out = cave_with_path(&s, &empty, &["agent", "claude"]);
+    let out = cave_with_path(&s, &empty, &["agent", "claude", "--on-mac"]);
     assert_eq!(out.status.code(), Some(125));
     let err = stderr(&out);
     assert!(err.contains("claude is not installed on this Mac"), "{err}");
-    assert!(err.contains("cave agent claude --in-vm"), "{err}");
-    let out = cave_with_path(&s, &empty, &["agent", "codex"]);
+    assert!(
+        err.contains("run it inside the VM with `cave agent claude`"),
+        "{err}"
+    );
+    let out = cave_with_path(
+        &s,
+        &empty,
+        &[
+            "agent",
+            "claude",
+            "--on-mac",
+            "--dangerously-skip-permissions",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(125));
+    let err = stderr(&out);
+    assert!(
+        err.contains("--dangerously-skip-permissions is refused with --on-mac"),
+        "{err}"
+    );
+    let out = cave_with_path(&s, &empty, &["agent", "codex", "--on-mac", "--yolo"]);
+    assert!(stderr(&out).contains("--yolo is refused with --on-mac"));
+    let out = cave_with_path(&s, &empty, &["agent", "codex", "--on-mac"]);
     let err = stderr(&out);
     assert!(err.contains("codex is not installed on this Mac"), "{err}");
     assert!(err.contains("npm install -g @openai/codex"), "{err}");

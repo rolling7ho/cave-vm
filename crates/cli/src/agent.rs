@@ -1,16 +1,19 @@
 //! `cave agent <name>`: a coding agent against this project's VM
-//! (docs/cli.md, "cave agent"; decision 0002).
+//! (docs/cli.md, "cave agent"; decision 0026).
 //!
-//! By default the agent runs on the Mac and reaches the VM only through
-//! `cave mcp`, with host Bash and reading `.env` denied, so the model API key stays on the
-//! Mac. `--in-vm` runs it inside the VM on a pseudo-terminal instead,
-//! installing it there with its own installer on first use. Either way a
-//! snapshot is taken first, and the way back to it is printed at the end.
+//! By default the agent runs inside the VM on a pseudo-terminal, installed
+//! there with its own installer on first use, with its permission prompts
+//! skipped, since its tools reach only the VM (D53). `--safe` keeps the
+//! prompts. `--on-mac` runs it on the Mac instead, reaching the VM only
+//! through `cave mcp`, with host Bash and reading `.env` denied, so the
+//! model API key stays on the Mac; there the prompts are never skipped.
+//! Either way a snapshot is taken first, and the way back to it is printed
+//! at the end.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use cave_vm_proto::daemon::{Reply, Request, Storage, VmId};
+use cave_vm_proto::daemon::{NetMode, Reply, Request, Storage, VmId};
 use serde_json::json;
 
 use crate::client::Connection;
@@ -37,6 +40,33 @@ const INSTALL_CODEX_IN_VM: &str = "command -v codex >/dev/null || \
      { echo 'Installing Codex in the VM with npm'; \
      sudo npm install -g @openai/codex; }";
 
+/// The line printed before an agent starts with its prompts skipped.
+const SKIPPED_LINE: &str = "Permissions skipped. The VM is the sandbox.";
+
+/// The flag that skips agent `name`'s permission prompts. Checked with
+/// Claude Code 2.1 and Codex 0.162.
+fn skip_flag(name: &str) -> &'static str {
+    match name {
+        "codex" => "--dangerously-bypass-approvals-and-sandbox",
+        _ => "--dangerously-skip-permissions",
+    }
+}
+
+/// The agent arguments that would skip its prompts, refused on the Mac,
+/// where its own tools reach the Mac (D53).
+fn skips_prompts(name: &str, arg: &str) -> bool {
+    let arg = arg.split('=').next().unwrap_or(arg);
+    match name {
+        "codex" => matches!(arg, "--dangerously-bypass-approvals-and-sandbox" | "--yolo"),
+        _ => {
+            matches!(
+                arg,
+                "--dangerously-skip-permissions" | "--allow-dangerously-skip-permissions"
+            )
+        }
+    }
+}
+
 /// The agent's product name, for messages.
 fn product(name: &str) -> &'static str {
     match name {
@@ -54,7 +84,13 @@ fn install_hint(name: &str) -> &'static str {
 }
 
 /// `cave agent`. Returns the agent's exit code.
-pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> Result<u8> {
+pub fn run(
+    name: &str,
+    safe: bool,
+    on_mac: bool,
+    fork: Option<String>,
+    args: Vec<String>,
+) -> Result<u8> {
     let failed = |e: CliError| CliError {
         code: EXIT_CAVE_FAILED_RUNNING,
         ..e
@@ -66,22 +102,43 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
         ));
     }
     // Checked first, so nothing boots for an agent that cannot start.
-    let on_mac = if in_vm {
-        None
-    } else {
+    let on_mac = if on_mac {
+        if let Some(arg) = args.iter().find(|a| skips_prompts(name, a)) {
+            return Err(failed(
+                CliError::new(format!(
+                    "{arg} is refused with --on-mac: the agent's own tools reach this Mac"
+                ))
+                .fix(format!(
+                    "Run `cave agent {name}` without --on-mac, which skips the prompts inside the VM"
+                )),
+            ));
+        }
         Some(find_on_path(name).ok_or_else(|| {
             failed(
                 CliError::new(format!("{name} is not installed on this Mac")).fix(format!(
-                    "{}, or run it inside the VM with `cave agent {name} --in-vm`",
+                    "{}, or run it inside the VM with `cave agent {name}`",
                     install_hint(name)
                 )),
             )
         })?)
+    } else {
+        None
     };
     let project = init::project_or_set_up().map_err(failed)?;
     forget_terminal_recording(&project, fork.as_deref());
     let vm = vm_id(&project, fork.clone());
     let policy = ensure_running(&vm, None, Vec::new(), true).map_err(failed)?;
+    if on_mac.is_none() && policy.net == NetMode::Off {
+        return Err(failed(
+            CliError::new(format!(
+                "{} cannot reach its model API: this VM has no network",
+                product(name)
+            ))
+            .fix(format!(
+                "Run `cave stop`, set mode = \"nat\" under [network] in cave.toml if it says \"off\", then run it again; or use `cave agent {name} --on-mac`"
+            )),
+        ));
+    }
     let snapshot = snapshot_before(&vm).map_err(failed)?;
 
     let code = match on_mac {
@@ -114,7 +171,10 @@ pub fn run(name: &str, in_vm: bool, fork: Option<String>, args: Vec<String>) -> 
                         .fix("Check the VM's network with `cave inspect`; the installer needs it"),
                 ));
             }
-            shell::session(vm.clone(), Some(in_vm_argv(name, &args)))?
+            if !safe {
+                eprintln!("{SKIPPED_LINE}");
+            }
+            shell::session(vm.clone(), Some(in_vm_argv(name, safe, &args)))?
         }
     };
     // The design syncs the mirror after agent runs. A failed sync does
@@ -233,15 +293,18 @@ fn claude_args(cave: &Path, fork: Option<&str>, extra: &[String]) -> Vec<String>
     args
 }
 
-/// Agent `name` in the VM, found where its installer puts it, with
-/// `extra` passed through unchanged.
-fn in_vm_argv(name: &str, extra: &[String]) -> Vec<String> {
+/// Agent `name` in the VM, found where its installer puts it, with its
+/// prompts skipped unless `safe`, then `extra` passed through unchanged.
+fn in_vm_argv(name: &str, safe: bool, extra: &[String]) -> Vec<String> {
     let mut argv = vec![
         "bash".to_string(),
         "-lc".into(),
         format!("PATH=\"$HOME/.local/bin:$PATH\" exec {name} \"$@\""),
         name.into(),
     ];
+    if !safe {
+        argv.push(skip_flag(name).into());
+    }
     argv.extend(extra.iter().cloned());
     argv
 }
@@ -320,7 +383,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            in_vm_argv("codex", &[])[2],
+            in_vm_argv("codex", true, &[])[2],
             "PATH=\"$HOME/.local/bin:$PATH\" exec codex \"$@\""
         );
     }
@@ -328,9 +391,38 @@ mod tests {
     #[test]
     fn in_the_vm_arguments_pass_through_unquoted() {
         assert_eq!(
-            in_vm_argv("claude", &["-p".into(), "it's \"quoted\"".into()])[3..],
+            in_vm_argv("claude", true, &["-p".into(), "it's \"quoted\"".into()])[3..],
             ["claude", "-p", "it's \"quoted\""]
         );
+    }
+
+    #[test]
+    fn in_the_vm_prompts_are_skipped_unless_safe() {
+        assert_eq!(
+            in_vm_argv("claude", false, &["-p".into(), "hi".into()])[3..],
+            ["claude", "--dangerously-skip-permissions", "-p", "hi"]
+        );
+        assert_eq!(
+            in_vm_argv("codex", false, &[])[3..],
+            ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+        );
+        assert_eq!(in_vm_argv("codex", true, &[])[3..], ["codex"]);
+    }
+
+    #[test]
+    fn flags_that_skip_prompts_are_recognised() {
+        assert!(skips_prompts("claude", "--dangerously-skip-permissions"));
+        assert!(skips_prompts(
+            "claude",
+            "--allow-dangerously-skip-permissions"
+        ));
+        assert!(skips_prompts("codex", "--yolo"));
+        assert!(skips_prompts(
+            "codex",
+            "--dangerously-bypass-approvals-and-sandbox"
+        ));
+        assert!(!skips_prompts("claude", "--resume"));
+        assert!(!skips_prompts("codex", "--dangerously-skip-permissions"));
     }
 
     #[test]

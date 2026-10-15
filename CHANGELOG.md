@@ -14,6 +14,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - `CODE_OF_CONDUCT.md` (D48, decision 0021).
 
 ### Changed
+- `cave agent claude` and `cave agent codex` run the agent inside the VM with its permission prompts skipped, and print `Permissions skipped. The VM is the sandbox.` `--safe` keeps the prompts, and `--on-mac` runs it on the Mac through `cave mcp` as before, never skipping prompts there. `--in-vm` is still accepted and changes nothing. With the VM's network off, `cave agent` stops and says how to fix it (D53, D54, decision 0026).
 - The design and decision 0026 (D53 to D55) move `cave agent` into the VM with permission prompts skipped, `--safe` and `--on-mac` as the ways back, Claude Code and Codex for v1, and an opt-in for plain `claude`. Decision 0002 is replaced. The code follows in later changes.
 - `cave export` runs even on a copy of cave 2 or more releases behind, after asking, so the work can always be copied out (D52).
 - A copy of cave 2 or more stable releases behind asks to update every time it runs in a terminal, says only the 3 newest releases get security fixes, and stops the command on a no. Without a terminal it warns. `SECURITY.md` names the 3 newest stable releases as supported, and release `images.json` lists every stable release (D52, decision 0025).
