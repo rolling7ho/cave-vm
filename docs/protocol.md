@@ -189,7 +189,7 @@ This object is written `vm` below.
 | Request | Fields | Reply |
 | --- | --- | --- |
 | `init` | reserved | `cave init` writes its files itself, and the daemon answers `init` with `bad_request` |
-| `start` | `vm`, `net` (optional: `"off"`, `"nat"` or `"lan"`, from `--net`; the mode in `cave.toml` when left out), `ports` (list of `{mac, vm}`) | `policy` |
+| `start` | `vm`, `net` (optional: `"off"`, `"nat"` or `"lan"`, from `--net`; the mode in `cave.toml` when left out), `ports` (list of `{mac, vm}`) | `policy`. On a running VM, `ports` are added, and a `net` other than the one it booted with is refused with `bad_request` |
 | `stop` | `vm` | `ok` once the VM is suspended, its memory saved |
 | `stop_all` | none | `stopped_all`. Every running VM on the Mac stops at once without being saved, for `cave stop --force` ([D43](../ROADMAP.md#decisions)): each VMM gets SIGTERM, and SIGKILL 5 seconds later if it is still running |
 | `exec` | `vm`, the agent's `exec` fields, `credentials` (list of names) | the agent's stream, ending in `exit` |

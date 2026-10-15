@@ -235,12 +235,13 @@ Yes runs `cave fork`, so the new VM is a fork of the running one's current state
 
 Without `--net`, the mode comes from `cave.toml`, which is `nat` by default. Flags apply to this boot only; there is no way to make `--net lan` or a port forward permanent in `cave.toml`, so a cloned repository cannot widen access on its own ([config.md](config.md#network)).
 
-On a running VM, `-p` adds a forward without a restart, because forwarding goes through the guest agent. `--net` takes effect only when the VM boots: on a running VM it is ignored, and the policy printed shows the mode the VM is still running with. Run `cave stop` first to change it.
+On a running VM, `-p` adds a forward without a restart, because forwarding goes through the guest agent. `--net` takes effect only when the VM boots, so on a running VM a different mode is an error that says to `cave stop` first.
 
 Errors:
 
 | Error | Fix |
 | --- | --- |
+| `my-project is running with network "nat"; --net lan needs a restart` | `cave stop`, then `cave run --net lan` |
 | `port 3000 on this Mac is already in use` | Pick another Mac port: `cave run -p 3001:3000` |
 | `cannot clone the base image into <folder>: the folder must be on an APFS volume, the same one as your home folder` [A9] | Move the project to a folder on your Mac's main disk |
 | `the VM did not boot: <reason>` | See `vmm.log` in the VM's folder for the VMM's output |

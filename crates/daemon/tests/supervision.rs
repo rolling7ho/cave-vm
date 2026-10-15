@@ -414,6 +414,29 @@ fn start_list_and_stop() {
     assert!(matches!(r.start(), Reply::Policy(_)));
     assert_eq!(r.source.prepared.load(Ordering::SeqCst), 1);
 
+    // Its own network mode is fine; another one is refused, not ignored.
+    let start_with = |net| {
+        r.request(Request::Start {
+            vm: vm(),
+            net: Some(net),
+            ports: Vec::new(),
+        })
+    };
+    assert!(matches!(start_with(NetMode::Nat), Reply::Policy(_)));
+    for (net, flag) in [(NetMode::Off, "off"), (NetMode::Lan, "lan")] {
+        let e = error_of(start_with(net));
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        assert_eq!(
+            e.message,
+            format!("app is running with network \"nat\"; --net {flag} needs a restart")
+        );
+        assert_eq!(
+            e.fix.as_deref(),
+            Some(format!("Run `cave stop`, then `cave run --net {flag}`").as_str())
+        );
+    }
+    assert_eq!(r.source.prepared.load(Ordering::SeqCst), 1);
+
     // `stop` suspends it (D20), and the next start resumes it.
     assert_eq!(r.request(Request::Stop { vm: vm() }), Reply::Ok);
     assert_eq!(r.state(), Some(VmState::Suspended));
