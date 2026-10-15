@@ -15,6 +15,7 @@ mod init;
 mod inspect;
 mod memory;
 mod mirror;
+mod mirror_term;
 mod policy;
 mod project;
 mod remove;
@@ -213,6 +214,12 @@ enum Cmd {
         #[arg(long, conflicts_with = "fork")]
         force: bool,
     },
+    /// Show the terminal of the agent running for this VM, live and
+    /// read-only.
+    Mirror {
+        #[arg(long)]
+        fork: Option<String>,
+    },
     /// Follow what happens in the VM live: commands, file writes and
     /// connections.
     View {
@@ -353,6 +360,7 @@ fn main() -> ExitCode {
         Cmd::Gc { yes, json } => gc::run(yes, json),
         Cmd::Images { json } => commands::images(json),
         Cmd::Inspect { fork, log, json } => inspect::run(fork, log, json),
+        Cmd::Mirror { fork } => mirror_term::run(fork),
         Cmd::Mcp { fork } => project::current_dir().and_then(|dir| {
             let tools = cave_vm_mcp::Tools::new(dir).on_fork(fork);
             cave_vm_mcp::serve(std::io::stdin().lock(), std::io::stdout().lock(), &tools)

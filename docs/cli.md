@@ -124,6 +124,7 @@ The design's verb set, in its order, plus `cave stop` (D20) and `cave mcp`, adde
 | [`cave gc`](#cave-gc) | Show and reclaim disk |
 | [`cave inspect`](#cave-inspect) | Show the policy, resources and audit log |
 | [`cave view`](#cave-view) | Follow what happens in the VM live |
+| [`cave mirror`](#cave-mirror) | Watch the agent's terminal live |
 | [`cave sync`](#cave-sync) | Update the Mac mirror (synced mode) |
 | [`cave push`](#cave-push) | Bring Mac edits in (synced mode) |
 | [`cave cp`](#cave-cp) | Copy files in and out |
@@ -471,6 +472,23 @@ Following what happens in my-project: commands, file writes and connections. Ctr
 ```
 
 Connections show up within about a second, since the daemon collects them from the VM every second.
+
+### cave mirror
+
+```
+cave mirror [--fork <name>]
+```
+
+Added by [D39](../ROADMAP.md#decisions). Shows the terminal of the agent that `cave agent` is running for this VM, live and read-only, so you can watch it from another window or tab. When `cave agent` runs in a terminal it records what the agent shows to `.cave/agent.term` (`.cave/forks/<name>/agent.term` for a fork), readable only by you; `cave mirror` replays that, so the screen starts as it looks now, then follows it. Keys do not reach the agent: `q` or Ctrl-C stops mirroring and leaves the agent running. Each `cave agent` run starts a new recording, and the last one stays until the next, so `cave mirror` after a run shows how it ended.
+
+Use a window the same size as the agent's for the clearest picture: the recording is the agent's output as drawn for its own window.
+
+```
+$ cave mirror
+Showing the agent's terminal for my-project, read-only. Press q or Ctrl-C to stop
+```
+
+If no agent has run in a terminal yet, it says so and suggests `cave agent claude`. For a plain feed of commands, file writes and connections, use [`cave view`](#cave-view).
 
 ### cave sync
 

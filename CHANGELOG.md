@@ -19,6 +19,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Added
 
+- `cave mirror [--fork <name>]` shows the terminal of the agent `cave agent` runs, live and read-only; `cave agent` records it to `.cave/agent.term` when it runs in a terminal (D39).
 - `cave view [--fork <name>]` follows what happens in the VM live: each command, file write and connection, as the audit log records it, until Ctrl-C (D39).
 - `cave sync --watch`: a live mode that updates the Mac mirror from the VM every 2 seconds until Ctrl-C, one way, with the same rules as `cave sync` (D41).
 - `cave agent codex` starts Codex on the Mac against the project's VM, with `cave mcp` as its `cave` server and its shell turned off, so it works in the VM and cannot read `.env`. `cave agent codex --in-vm` installs it in the VM with npm (D44).
