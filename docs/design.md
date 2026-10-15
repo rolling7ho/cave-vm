@@ -155,7 +155,7 @@ Safety is visible: every VM has an explicit, inspectable policy. `cave run` prin
 The README quickstart is the design target: two commands from install to a working agent sandbox.
 
 ```sh
-brew install cave-vm     # or: curl -fsSL <install-url> | sh
+brew install rolling7ho/cave/cave-vm     # or: curl -fsSL https://github.com/rolling7ho/cave-vm/releases/latest/download/install.sh | sh
 cd my-project && cave agent claude
 ```
 

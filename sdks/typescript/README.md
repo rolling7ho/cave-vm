@@ -30,6 +30,15 @@ A credential named in `credentials`, such as `API_KEY`, is read from the project
 
 Errors reject with `CaveError`, with `detail`, `fix` and the daemon's `code`.
 
+## Install
+
+The SDK is not on npm yet. Install it from a checkout of the release tag:
+
+```sh
+git clone --depth 1 --branch v0.1.0 https://github.com/rolling7ho/cave-vm
+npm install ./cave-vm/sdks/typescript
+```
+
 ## Tests
 
 ```sh
