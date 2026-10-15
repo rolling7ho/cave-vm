@@ -1,6 +1,6 @@
 # 0003: Roadmap open items D4 to D12
 
-Date: 2026-10-11 · Decided by: Ivan · Status: accepted
+Date: 2026-10-11 · Decided by: Ivan · Status: accepted; D5 widened by [decision 0007](0007-unsafe-host-calls-and-pr-flow.md) (D24), which also allows `unsafe` in the `vmm` `host` module and the `agent` `sys` module
 
 ## Context
 

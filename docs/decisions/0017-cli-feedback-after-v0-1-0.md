@@ -1,6 +1,6 @@
 # 0017: CLI changes from Ivan's feedback on v0.1.0, D35 to D44
 
-Date: 2026-10-15 · Decided by: Ivan (choices), with defaults picked while building (marked) · Status: accepted
+Date: 2026-10-15 · Decided by: Ivan (choices), with defaults picked while building (marked) · Status: accepted; D39's `cave mirror` removed by [decision 0019](0019-remove-cave-mirror.md) (D46), and D44's Codex on the Mac replaced by [decision 0026](0026-agent-runs-in-the-vm-in-full-auto.md) (D53)
 
 ## Context
 
