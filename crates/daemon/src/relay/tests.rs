@@ -297,3 +297,57 @@ fn injected_values_are_redacted_even_across_chunks() {
     agent.join().unwrap();
     assert!(daemon.join().unwrap().result.is_ok());
 }
+
+#[test]
+fn files_read_out_have_injected_values_redacted() {
+    let sha = |data: &[u8]| hex(Sha256::new_with_prefix(data));
+    let file = b"TOKEN=snednao_#m34nr\n";
+    for (agent_sha, ok) in [(sha(file), true), (sha(b"other"), false)] {
+        let (mut client, mut daemon_side) = UnixStream::pair().unwrap();
+        let (daemon_agent, agent) = UnixStream::pair().unwrap();
+        let agent = fake_agent(agent, move |agent| {
+            read_msg(agent).unwrap();
+            write_frame(
+                agent,
+                &Message::FileInfo {
+                    size: 21,
+                    mode: 0o600,
+                },
+            )
+            .unwrap();
+            for chunk in [&file[..10], &file[10..]] {
+                let data = chunk.to_vec().into();
+                write_frame(agent, &Message::FileData { data }).unwrap();
+            }
+            write_frame(agent, &Message::FileEnd { sha256: agent_sha }).unwrap();
+        });
+        let redactor = Redactor::new(&[("API_KEY".into(), "snednao_#m34nr".into())]);
+        let request = Message::FileRead {
+            path: "/proc/1/environ".into(),
+        };
+        let daemon = thread::spawn(move || {
+            run_redacted(&mut daemon_side, daemon_agent, &request, &redactor)
+        });
+        let mut contents = Vec::new();
+        let end = loop {
+            match read_reply(&mut client).unwrap() {
+                Reply::FileInfo { .. } => {}
+                Reply::FileData { data } => contents.extend(data.0),
+                other => break other,
+            }
+        };
+        assert_eq!(contents, b"TOKEN=[API_KEY]\n");
+        if ok {
+            assert_eq!(
+                end,
+                Reply::FileEnd {
+                    sha256: sha(&contents)
+                }
+            );
+        } else {
+            assert!(matches!(end, Reply::Error(_)), "{end:?}");
+        }
+        agent.join().unwrap();
+        daemon.join().unwrap();
+    }
+}

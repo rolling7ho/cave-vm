@@ -2,8 +2,10 @@
 //! the daemon resolves its value from the project's `.env`, and the value
 //! goes into the command's environment on the agent link only. It never
 //! goes back to the client: output that prints it has the exact value
-//! replaced with the name in brackets, `[API_KEY]` [D9]. Redaction is best
-//! effort, since a command can still leak a value through files or the
+//! replaced with the name in brackets, `[API_KEY]` [D9]. Every credential
+//! the VM's memory may hold is redacted, from any later command's output
+//! and from files read out of the VM, not only those the call named.
+//! Redaction is best effort, since a command can still leak a value through files or the
 //! network.
 
 use std::collections::BTreeMap;
@@ -111,6 +113,20 @@ pub fn resolve(project: &Path, names: &[String]) -> Result<Vec<(String, String)>
         .collect()
 }
 
+/// The values of those of `names` that `project`'s `.env` has now, for
+/// redacting credentials the VM was given earlier. A name no longer in
+/// the file, or a file that cannot be read, gives nothing to redact.
+pub fn values_of(project: &Path, names: &[String]) -> Vec<(String, String)> {
+    let Ok(text) = fs::read_to_string(project.join(ENV_FILE)) else {
+        return Vec::new();
+    };
+    let vars = parse_env(&text);
+    names
+        .iter()
+        .filter_map(|name| Some((name.clone(), vars.get(name)?.clone())))
+        .collect()
+}
+
 /// Replaces credential values in a stream of output chunks with their
 /// names in brackets, including a value split across chunks: the end of a
 /// chunk that could be the start of a value is held back until the next
@@ -138,6 +154,11 @@ impl Redactor {
             secrets,
             held: Vec::new(),
         }
+    }
+
+    /// Whether there is nothing to redact.
+    pub fn is_empty(&self) -> bool {
+        self.secrets.is_empty()
     }
 
     /// The redacted output for `chunk`, which may hold back its end.

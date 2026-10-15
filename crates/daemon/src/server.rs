@@ -105,15 +105,18 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                 Ok(values) => values,
                 Err(e) => return send_error(&mut stream, e),
             };
-            let redactor = Redactor::new(&values);
-            exec.env.extend(values);
             let started = audit::now_ms();
             let argv = exec.argv.clone();
             let connection = vms.agent_connection_with(&vm, &credentials);
             // Recorded once it reached the VM, even if the client went away
             // before it ended.
             let last = match connection {
-                Ok((agent, _in_use)) => {
+                Ok((agent, _in_use, held)) => {
+                    // Credentials from earlier calls may be in the VM too.
+                    let mut known = credentials::values_of(Path::new(&vm.project), &held);
+                    known.extend(values.iter().cloned());
+                    let redactor = Redactor::new(&known);
+                    exec.env.extend(values);
                     relay::run_redacted(&mut stream, agent, &Message::Exec(exec), &redactor).last
                 }
                 Err(e) => return send_error(&mut stream, e),
@@ -131,7 +134,14 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
             return Ok(());
         }
         Request::FileRead { vm, path } => {
-            return relay(stream, vms, &vm, &Message::FileRead { path }).map(drop);
+            let (agent, _in_use, held) = match vms.agent_connection_with(&vm, &[]) {
+                Ok(connection) => connection,
+                Err(e) => return send_error(&mut stream, e),
+            };
+            let redactor = Redactor::new(&credentials::values_of(Path::new(&vm.project), &held));
+            let request = Message::FileRead { path };
+            relay::run_redacted(&mut stream, agent, &request, &redactor);
+            return Ok(());
         }
         Request::FileWrite {
             vm,

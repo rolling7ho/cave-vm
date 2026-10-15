@@ -501,13 +501,21 @@ impl Vms {
 
     /// [`Vms::agent_connection`] for a command that is given
     /// `credentials`. Their names are kept with the running VM, for the
-    /// metadata of snapshots taken from now on.
+    /// metadata of snapshots taken from now on. Also returns the names of
+    /// every credential the VM's memory may hold, these included, so that
+    /// all of them are redacted from what comes back.
     pub fn agent_connection_with(
         &self,
         id: &VmId,
         credentials: &[String],
-    ) -> Result<(UnixStream, InUse), ErrorMessage> {
-        agent_connection(&*self.vm(id)?, credentials)
+    ) -> Result<(UnixStream, InUse, Vec<String>), ErrorMessage> {
+        let vm = self.vm(id)?;
+        let (stream, in_use) = agent_connection(&vm, credentials)?;
+        let held = match &*vm.slot.lock().expect("vm lock") {
+            Slot::Running(running) => running.credentials.iter().cloned().collect(),
+            _ => credentials.to_vec(),
+        };
+        Ok((stream, in_use, held))
     }
 
     /// Suspends every running VM left unused for its `idle_suspend` time,

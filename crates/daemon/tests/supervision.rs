@@ -1536,10 +1536,13 @@ fn snapshots_record_the_credentials_injected_since_the_memory_began() {
         Reply::Restored { credentials, .. } => assert_eq!(credentials, names),
         other => panic!("{other:?}"),
     }
+    // Later calls that name no credential still redact them.
+    assert_eq!(r.vms.agent_connection_with(&id, &[]).unwrap().2, names);
     match r.restore(&id, Some("clean")) {
         Reply::Restored { credentials, .. } => assert!(credentials.is_empty()),
         other => panic!("{other:?}"),
     }
+    assert!(r.vms.agent_connection_with(&id, &[]).unwrap().2.is_empty());
     let Reply::Forked { credentials, .. } = r.fork(&id, Some("f"), Some("after")) else {
         panic!("not forked")
     };

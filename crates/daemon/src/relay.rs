@@ -17,6 +17,7 @@ use cave_vm_proto::agent::{Message, Stream};
 use cave_vm_proto::daemon::{Reply, Request};
 use cave_vm_proto::handshake::Hello;
 use cave_vm_proto::{Data, ErrorCode, ErrorMessage, VERSIONS, read_frame, write_frame};
+use sha2::{Digest, Sha256};
 
 use crate::credentials::Redactor;
 use crate::link::daemon_software;
@@ -116,8 +117,10 @@ pub fn run(client: &mut UnixStream, agent: UnixStream, request: &Message) -> End
     run_redacted(client, agent, request, &Redactor::default())
 }
 
-/// [`run`], with `output` passed through a copy of `redactor` for each
-/// stream, so injected credentials do not reach the client.
+/// [`run`], with `output` and file data passed through a copy of
+/// `redactor` for each stream, so injected credentials do not reach the
+/// client. A file read that had something to redact ends with the SHA-256
+/// of what the client got, once the agent's SHA-256 of the file checks.
 pub fn run_redacted(
     client: &mut UnixStream,
     mut agent: UnixStream,
@@ -166,9 +169,34 @@ pub fn run_redacted(
 
     let mut stdout = redactor.clone();
     let mut stderr = redactor.clone();
+    let mut file = redactor.clone();
+    let (mut read, mut sent) = (Sha256::new(), Sha256::new());
     let ended = loop {
         let message = read_agent(&mut agent);
         let (reply, last) = match message {
+            Ok(Message::FileData { data }) if !file.is_empty() => {
+                read.update(&data.0);
+                let data = file.push(&data.0);
+                if data.is_empty() {
+                    continue;
+                }
+                sent.update(&data);
+                (Reply::FileData { data: Data(data) }, false)
+            }
+            Ok(Message::FileEnd { sha256 }) if !file.is_empty() => {
+                let data = file.finish();
+                if !data.is_empty() {
+                    sent.update(&data);
+                    let _ = write_frame(client, &Reply::FileData { data: Data(data) });
+                }
+                if hex(read.clone()) == sha256 {
+                    let sha256 = hex(sent.clone());
+                    (Reply::FileEnd { sha256 }, true)
+                } else {
+                    let e = agent_failed("the file's SHA-256 does not match what it sent");
+                    (Reply::Error(e), true)
+                }
+            }
             Ok(Message::Output { stream, data }) => {
                 let redactor = match stream {
                     Stream::Stdout => &mut stdout,
@@ -221,6 +249,10 @@ pub fn run_redacted(
     let _ = client.shutdown(Shutdown::Read);
     let _ = upstream.join();
     ended
+}
+
+fn hex(hash: Sha256) -> String {
+    hash.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]
