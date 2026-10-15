@@ -87,7 +87,7 @@ When `cave` runs in a terminal, it looks up the newest stable release in the bac
 update: cave v0.1.3 is out; you have v0.1.2 RC 2. Update now? [Y/n]
 ```
 
-Yes installs it the way this copy was installed, with Homebrew or the install script, then exits so you run the command again. No skips that version for a day. A copy built from source is never offered an update. It never asks without a terminal, nor for `cave mcp` and `cave ssh-proxy`, and `check = false` under `[updates]` in `cave.toml` turns it off ([config](config.md#updates)). Pre-releases are never offered. A copy 2 or more stable releases behind is asked every time, with a note that only the 3 newest releases get security fixes, and a no stops the command; without a terminal it only warns, and a copy cave cannot update only warns ([D52](../ROADMAP.md#decisions)).
+Yes installs it the way this copy was installed, with Homebrew or the install script, then exits so you run the command again. No skips that version for a day. A copy built from source is never offered an update. It never asks without a terminal, nor for `cave mcp` and `cave ssh-proxy`, and `check = false` under `[updates]` in `cave.toml` turns it off ([config](config.md#updates)). Pre-releases are never offered. A copy 2 or more stable releases behind is asked every time, with a note that only the 3 newest releases get security fixes, and a no stops the command, except `cave export`, so the work can always be copied out; without a terminal it only warns, and a copy cave cannot update only warns ([D52](../ROADMAP.md#decisions)).
 
 ### The daemon and the data directory
 
