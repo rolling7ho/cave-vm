@@ -49,7 +49,7 @@ pub fn sync(watch: bool) -> Result<()> {
 pub fn sync_vm(vm: &VmId) -> Result<Reply> {
     match Connection::call(&Request::Sync { vm: vm.clone() })? {
         reply @ Reply::Synced { .. } => Ok(reply),
-        _ => Err(CliError::new("the daemon sent an unexpected reply to sync")),
+        _ => Err(CliError::unexpected("sync")),
     }
 }
 
@@ -62,7 +62,7 @@ pub fn push() -> Result<()> {
         deleted,
     } = Connection::call(&Request::Pull { vm })?
     else {
-        return Err(CliError::new("the daemon sent an unexpected reply to pull"));
+        return Err(CliError::unexpected("pull"));
     };
     if let Some(snapshot) = snapshot {
         println!("Saved snapshot {snapshot} before pushing");

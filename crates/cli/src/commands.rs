@@ -51,7 +51,7 @@ fn entry(vm: &VmId) -> Result<Option<ListEntry>> {
         project: Some(vm.project.clone()),
     })?
     else {
-        return Err(CliError::new("the daemon sent an unexpected reply to list"));
+        return Err(CliError::unexpected("list"));
     };
     let kind = if vm.fork.is_some() {
         EntryKind::Fork
@@ -86,9 +86,7 @@ pub fn ensure_running(
         ports,
     })?
     else {
-        return Err(CliError::new(
-            "the daemon sent an unexpected reply to start",
-        ));
+        return Err(CliError::unexpected("start"));
     };
     if was_running {
         if always_print {
@@ -165,7 +163,7 @@ pub fn stop(fork: Option<String>) -> Result<()> {
 /// without saving, after asking (D43).
 pub fn force_stop() -> Result<()> {
     let Reply::List { entries } = Connection::call(&Request::List { project: None })? else {
-        return Err(CliError::new("the daemon sent an unexpected reply to list"));
+        return Err(CliError::unexpected("list"));
     };
     let running: Vec<String> = entries
         .iter()
@@ -193,9 +191,7 @@ pub fn force_stop() -> Result<()> {
         return Err(CliError::new("nothing was stopped"));
     }
     let Reply::StoppedAll { vms } = Connection::call(&Request::StopAll)? else {
-        return Err(CliError::new(
-            "the daemon sent an unexpected reply to stop_all",
-        ));
+        return Err(CliError::unexpected("stop_all"));
     };
     let names: Vec<String> = vms
         .iter()
@@ -267,7 +263,7 @@ pub fn ls(all: bool, json: bool) -> Result<()> {
         project: project.as_deref().map(project::wire_path),
     })?
     else {
-        return Err(CliError::new("the daemon sent an unexpected reply to list"));
+        return Err(CliError::unexpected("list"));
     };
     if json {
         let doc = serde_json::json!({ "entries": entries });
@@ -376,9 +372,7 @@ fn images_table(images: &[ImageInfo]) -> String {
 /// `cave images`.
 pub fn images(json: bool) -> Result<()> {
     let Reply::Images { images } = Connection::call(&Request::Images)? else {
-        return Err(CliError::new(
-            "the daemon sent an unexpected reply to images",
-        ));
+        return Err(CliError::unexpected("images"));
     };
     if json {
         let doc = serde_json::json!({ "images": images });

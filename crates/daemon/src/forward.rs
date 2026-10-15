@@ -74,6 +74,11 @@ pub fn bind(map: PortMap) -> Result<Bound, ErrorMessage> {
                 ErrorCode::Io,
                 format!("cannot listen on port {} on this Mac: {e}", map.mac),
             )
+            .with_fix(format!(
+                "Pick another Mac port: cave run -p {}:{}",
+                map.mac.saturating_add(1),
+                map.vm
+            ))
         }
     })?;
     listener

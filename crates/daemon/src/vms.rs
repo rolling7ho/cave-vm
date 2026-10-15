@@ -1205,7 +1205,8 @@ fn serve_all(vm: &Arc<Vm>, bound: Vec<Bound>) -> Vec<Forward> {
     let connect: forward::Connect = Arc::new(move || match weak.upgrade() {
         Some(vm) => agent_connection(&vm, &[])
             .map(|(stream, in_use)| (stream, Box::new(in_use) as forward::Held)),
-        None => Err(error(ErrorCode::NotRunning, "the VM is gone")),
+        None => Err(error(ErrorCode::NotRunning, "the VM is gone")
+            .with_fix("Start it again with `cave run`")),
     });
     bound
         .into_iter()

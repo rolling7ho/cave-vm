@@ -157,7 +157,7 @@ pub fn run(folder: Option<PathBuf>, snapshot: Option<String>) -> Result<()> {
                 from: Some(snapshot.clone()),
             })?
             else {
-                return Err(CliError::new("the daemon sent an unexpected reply to fork"));
+                return Err(CliError::unexpected("fork"));
             };
             if !credentials.is_empty() {
                 let source = format!("snapshot {snapshot}");

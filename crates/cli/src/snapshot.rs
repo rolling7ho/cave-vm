@@ -21,9 +21,7 @@ pub fn snapshot(name: Option<String>, fork: Option<String>) -> Result<()> {
         before: false,
     })?
     else {
-        return Err(CliError::new(
-            "the daemon sent an unexpected reply to snapshot",
-        ));
+        return Err(CliError::unexpected("snapshot"));
     };
     println!(
         "Saved snapshot {name} ({})",
@@ -47,9 +45,7 @@ pub fn restore(name: Option<String>, fork: Option<String>) -> Result<()> {
         name,
     })?
     else {
-        return Err(CliError::new(
-            "the daemon sent an unexpected reply to restore",
-        ));
+        return Err(CliError::unexpected("restore"));
     };
     if let Some(reason) = &reason {
         eprintln!(
@@ -88,7 +84,7 @@ pub fn fork(name: Option<String>, from: Option<String>) -> Result<()> {
         from,
     })?
     else {
-        return Err(CliError::new("the daemon sent an unexpected reply to fork"));
+        return Err(CliError::unexpected("fork"));
     };
     if let Some(reason) = &reason {
         eprintln!("{}", fallback_warning(&from, reason));
