@@ -16,7 +16,8 @@ Coding agents are most useful when you stop approving every command, and most ri
 
 ```sh
 brew install rolling7ho/cave/cave-vm
-cd [my-project] && cave agent [claude/codex]
+cd [project-dir]
+cave agent [claude/codex]
 ```
 
 Without Homebrew, `curl -fsSL https://github.com/rolling7ho/cave-vm/releases/latest/download/install.sh | sh` installs the release binaries in `~/.local/bin` (set `CAVE_PREFIX` to change that) after checking their checksum.
