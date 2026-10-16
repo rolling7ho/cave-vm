@@ -1,6 +1,6 @@
 # 0026: `cave agent` runs the agent in the VM, without permission prompts, D53 to D55
 
-Date: 2026-10-15 · Decided by: Ivan (choices), with defaults picked while building (marked) · Status: accepted. Replaces decision 0002.
+Date: 2026-10-15 · Decided by: Ivan (choices), with defaults picked while building (marked) · Status: accepted, D55 amended on 2026-10-16 (see below). Replaces decision 0002.
 
 ## Context
 

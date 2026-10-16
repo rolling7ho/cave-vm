@@ -1,6 +1,6 @@
 # 0018: cave updates itself, D45
 
-Date: 2026-10-15 · Decided by: Ivan (choices), with defaults picked while building (marked) · Status: accepted
+Date: 2026-10-15 · Decided by: Ivan (choices), with defaults picked while building (marked) · Status: accepted; installs without asking replaced by [decision 0020](0020-ask-before-updating.md) (D47)
 
 ## Context
 

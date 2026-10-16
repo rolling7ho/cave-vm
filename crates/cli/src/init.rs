@@ -202,7 +202,9 @@ pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
         println!("Added an Include line to ~/.ssh/config for cave's SSH hosts");
     }
     println!("Edit in the VM: connect VS Code Remote-SSH or Zed to {host}");
-    println!("Next: cave shell, or cave agent claude");
+    println!(
+        "Next: cave agent claude or cave agent codex; any other agent or command runs in the VM with cave shell or cave exec"
+    );
     Ok(())
 }
 

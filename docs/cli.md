@@ -1,8 +1,8 @@
 # CLI reference
 
-This is the reference for the `cave` command. It started as the spec written before any code (ROADMAP task P1.1), and every command in it is implemented as of v0.1.0.
+This is the reference for the `cave` command. It started as the spec written before any code (ROADMAP task P1.1), and now describes what `cave` does.
 
-[docs/design.md](design.md) is the source of truth. Every command in its CLI table is here, and the flags it names (`--net off`, `--net lan`, `-p 3000`, `--in-vm`, the `cave rm` confirmation) are written as the design specifies them. Everything the design does not name was proposed in the phase 1 PR and approved by Ivan there. Questions the design left open were answered by Ivan as D13 to D22 ([decision 0004](decisions/0004-cli-and-config-open-items.md)), and are linked from the places they affect.
+[docs/design.md](design.md) is the source of truth. Every command in its CLI table is here, and the flags it names (`--net off`, `--net lan`, `-p 3000`, `--safe`, `--on-mac`, the `cave rm` confirmation) are written as the design specifies them. Everything the design does not name was proposed in the phase 1 PR and approved by Ivan there, or added later by a decision in ROADMAP.md, linked where it applies. Questions the design left open were answered by Ivan as D13 to D22 ([decision 0004](decisions/0004-cli-and-config-open-items.md)), and are linked from the places they affect.
 
 The quickstart stays at two commands:
 
@@ -10,6 +10,8 @@ The quickstart stays at two commands:
 brew install rolling7ho/cave/cave-vm
 cd my-project && cave agent claude
 ```
+
+`cave agent` starts Claude Code or Codex in the VM. cave is not tied to them: any agent or command runs in the VM with `cave shell` or `cave exec`, and agents on the Mac can use it through `cave mcp`.
 
 Without Homebrew, the release's install script puts the same binaries in `~/.local/bin`, or in `$CAVE_PREFIX/bin` when that is set. It checks the download against the checksum pinned in the script and signs `cave-vmm` ad hoc:
 
@@ -36,7 +38,7 @@ The first time `cave` runs on a Mac it also does the first-run setup from the de
 
 ### Forks
 
-A fork is a VM that lives inside its parent project at `.cave/forks/<name>`, and forks are how a project has more than one VM ([D40](../ROADMAP.md#decisions)): they are picked by name, never by number. The commands that act on one VM (`run`, `stop`, `shell`, `exec`, `snapshot`, `restore`, `inspect`, `view`, `agent` and `mcp`) take `--fork <name>` to act on that fork instead of the project's own VM, for example `cave exec --fork try-2 npm test` or `cave stop --fork try-2` ([D18](../ROADMAP.md#decisions)), and `cave rm try-2` removes one. `cave ls` lists them.
+A fork is a VM that lives inside its parent project at `.cave/forks/<name>`, and forks are how a project has more than one VM ([D40](../ROADMAP.md#decisions)): they are picked by name, never by number. The commands that act on one VM (`run`, `stop`, `shell`, `exec`, `inspect`, `view`, `agent` and `mcp`) take `--fork <name>` to act on that fork instead of the project's own VM, for example `cave exec --fork try-2 npm test` or `cave stop --fork try-2` ([D18](../ROADMAP.md#decisions)), and `cave rm try-2` removes one. `cave ls` lists them. Forks cannot be snapshotted or restored yet.
 
 ### Names
 
@@ -75,7 +77,7 @@ Warnings use the same shape with `warning:` and do not change the exit code.
 | Flag | Meaning |
 | --- | --- |
 | `-h`, `--help` | Show help for `cave` or a command |
-| `-V`, `--version` | Print the version, such as `v0.1.2`, `v0.1.2 RC 1` or `v0.1.3 Beta 1`, and on a second line the newest stable release cave has seen: `Latest Stable: v0.1.1`, or `not looked up yet` before the first lookup |
+| `-V`, `--version` | Print the version, such as `v0.1.2`, `v0.1.2 RC 1` or `v0.1.3 Beta 1`, and on a second line the newest stable release cave has seen: `Latest Stable: v0.1.1`, or `not looked up yet; cave looks when you run it in a terminal` before the first lookup |
 
 There are no other global flags. `cave --help` lists every command with its flags and arguments, and `cave <command> --help` explains each flag.
 
@@ -97,14 +99,14 @@ Shared state (kernels, base images, the daemon socket and the list of known proj
 
 ### The startup policy
 
-The design says `cave run` prints the policy at startup and echoes widening flags back. Every command that boots a VM (`run`, `shell`, `exec`, `agent`) prints it to stderr when it boots or restores one, and prints nothing if the VM was already running, except `cave run` and `cave agent`, which print it again:
+The design says `cave run` prints the policy at startup and echoes widening flags back. Every command that boots a VM (`run`, `shell`, `exec`, `agent`, `cp`, `pull`) prints it to stderr when it boots or restores one, and prints nothing if the VM was already running, except `cave run` and `cave agent`, which print it again:
 
 ```
-my-project: started in 0.4s (debian, sha256:3f2a9c1e)
+my-project: started in 0.4s (base, sha256:3f2a9c1e)
   files     sealed: nothing on your Mac is reachable from the VM
   network   nat: outbound only; LAN ranges and this Mac are blocked
   ports     none
-  resources 2 CPUs, 2 GB memory, 20 GB disk
+  resources 2 CPUs, 2 GB memory
   lifetime  no TTL
 ```
 
@@ -112,12 +114,12 @@ A widened item is marked with the flag that widened it:
 
 ```
   network   lan: outbound, and LAN ranges are reachable   [--net lan]
-  ports     localhost:3000 -> 3000                         [-p 3000]
+  ports     localhost:3000 -> 3000                        [-p 3000]
 ```
 
 ## Commands
 
-The design's verb set, in its order, plus `cave stop` (D20) and `cave mcp`, added in phase 1.
+The design's verb set, in its order, plus `cave stop` (D20) and `cave mcp`, added in phase 1, and `cave view` (D39).
 
 | Command | What it does |
 | --- | --- |
@@ -204,7 +206,7 @@ Wrote .cave/AGENTS.md, a line pointing to it in AGENTS.md, and .claude/skills/ca
 Set up Claude Code to use cave mcp, with host Bash, Mac edits and reading .env denied (.mcp.json, .claude/settings.json)
 Added an Include line to ~/.ssh/config for cave's SSH hosts
 Edit in the VM: connect VS Code Remote-SSH or Zed to my-project.cave
-Next: cave shell, or cave agent claude
+Next: cave agent claude or cave agent codex; any other agent or command runs in the VM with cave shell or cave exec
 ```
 
 Errors:
@@ -328,6 +330,7 @@ Errors:
 | Error | Fix |
 | --- | --- |
 | `a snapshot or fork named "<name>" already exists` | Pick another name, or remove it with `cave rm <name>` |
+| `this build of cave cannot snapshot, restore or fork a fork yet` | Use the project's own VM, without --fork |
 
 ### cave restore
 
@@ -366,6 +369,7 @@ Errors:
 | --- | --- |
 | `no snapshot named <name>` | Run `cave ls` to see this project's snapshots |
 | `this project has no snapshots yet` | Take one with `cave snapshot` |
+| `this build of cave cannot snapshot, restore or fork a fork yet` | Use the project's own VM, without --fork |
 
 ### cave fork
 
@@ -456,7 +460,7 @@ cave inspect [--fork <name>] [--log] [--json]
 Shows the policy (the same lines as the startup policy), resources, and the most recent 20 audit-log entries: exec calls, file writes and network connections. `--log` prints the whole log. Credentials appear by name only. The log is in the VM's folder (`.cave/`, or `.cave/forks/<name>/` for a fork), one JSON object per line, and is removed with the VM. The newest entries are in `audit-latest.log`. When it passes 10 MB it is renamed `audit-<YYYY-MM-DD>-<HHMMSS>.log`, for the time it was renamed, and a new `audit-latest.log` starts ([D36](../ROADMAP.md#decisions)). `--log` and the entry count cover every file. A VM's `audit.log` from cave 0.1.0 becomes its `audit-latest.log` on the next write.
 
 ```
-my-project: running since 09:14 (debian, sha256:3f2a9c1e)
+my-project: running since 09:14 (base, sha256:3f2a9c1e)
   files     sealed: nothing on your Mac is reachable from the VM
   network   nat: outbound only; LAN ranges and this Mac are blocked
   ports     localhost:3000 -> 3000
@@ -496,7 +500,7 @@ cave sync [--watch]
 
 Synced mode only. Updates the Mac mirror from the VM now; the daemon also does it after agent runs and on snapshot (design). If the VM is not running, the sync waits until it is, and the command says so: it blocks and prints "waiting for the VM" rather than returning.
 
-The VM is authoritative, so a file changed only in the VM is written to the mirror, and one deleted in the VM is deleted there. A file you changed on the Mac is never written over: it waits for `cave push`, and one changed on both sides is left alone and listed. The same folders as `cave push` are excluded, as are `.git`, `.cave` and the top-level `.env`. The hashes both sides agreed on are kept in `.cave/sync.json`. Writes go through a temporary file, so an editor never sees half a file.
+The VM is authoritative, so a file changed only in the VM is written to the mirror, and one deleted in the VM is deleted there. A file you changed on the Mac is never written over: it waits for `cave push`, and one changed on both sides is left alone and listed. The same files as `cave push` are excluded. The hashes both sides agreed on are kept in `.cave/sync.json`. Writes go through a temporary file, so an editor never sees half a file.
 
 ```
 Wrote 2 files to your Mac: src/app.ts, src/util.ts
@@ -510,14 +514,13 @@ Wrote 2 files to your Mac: src/app.ts, src/util.ts
 12:04:09  Deleted 1 file on your Mac to match the VM: src/old.ts
 ```
 
-The mirror backs up source only: it lacks dependencies, build output, `.git` and running processes, so snapshots remain the safety net ([docs/safety.md](safety.md#the-mac-mirror-backs-up-source-only)). When nothing changed in the VM it prints `The Mac mirror is up to date`. After `cave snapshot` and at the end of `cave agent`, the sync runs on its own; a failed one is reported and does not change the command's result.
+The mirror backs up source only: it lacks dependencies, build output, `.git` and running processes, so snapshots remain the safety net ([docs/safety.md](safety.md#the-mac-mirror-backs-up-source-only)). When nothing changed in the VM it prints `The Mac mirror is up to date`. After `cave snapshot` and at the end of `cave agent`, the sync runs on its own; it does not change the command's result. `cave agent` prints a failed one; after `cave snapshot` it goes to the daemon's log, `daemon.log` in the data directory.
 
 Errors:
 
 | Error | Fix |
 | --- | --- |
 | `this project is sealed, so it has no Mac mirror` | Set `mode = "synced"` under `[storage]` in cave.toml to keep a copy on your Mac |
-| `forks have no Mac mirror` | Sync the project's own VM, without --fork |
 
 ### cave push
 
@@ -531,7 +534,7 @@ Copies the files you changed on the Mac into the VM, following the design's rule
 - A file that changed only on the Mac is applied. One that changed only in the VM is left alone.
 - A file that changed on both sides since the last sync stops the push before anything is applied, and is listed.
 - A snapshot is taken automatically before anything is applied.
-- Dependency and build folders (`node_modules`, `target`, and paths in `.gitignore`) are excluded.
+- Dependency and build folders (`node_modules`, `target`, and paths in `.gitignore`) are excluded, as are `.git`, `.cave` and the top-level `.env`.
 - `--force` applies the Mac's version of the files changed on both sides instead of stopping, after the same snapshot.
 
 In a sealed project ([D58](../ROADMAP.md#decisions)), the Mac files are compared against what the first boot copied in, recorded in `.cave/sync.json`, and from then on against what the last push left. A file deleted on the Mac is not deleted in the VM, since the Mac's files are not kept up to date there. A sealed project set up before 1.0.0 has no such record, so `cave push` stops with `cave has no record of the files it first copied into this VM, so it cannot tell your edits from the VM's` and says to run `cave push --force`, which copies every file that differs.
@@ -552,7 +555,7 @@ error: 2 files changed both on your Mac and in the VM since the last sync, so no
 
 When nothing changed on the Mac, no snapshot is taken and it prints `Nothing to push: the VM has every edit from your Mac`. The VM must be running.
 
-In a sealed project the message ends `since the last push`. Errors: `forks have no Mac copy to push` for a fork.
+In a sealed project the message says `since the last push` instead of `since the last sync`.
 
 ### cave cp
 
@@ -572,7 +575,7 @@ Errors:
 | Error | Fix |
 | --- | --- |
 | `one side of cave cp must be in the VM` | Prefix the VM path with `:`, for example `:src/app.ts` |
-| `no such file in the VM: <path>` | Check the path with `cave exec -- ls <dir>` |
+| `no such file in the VM: <path>` | Check the path with `cave exec ls <dir>` |
 
 ### cave pull
 
@@ -592,12 +595,12 @@ The copy goes through `tar` in the VM, as `cave cp` copies folders. Without a sn
 cave agent <name> [--safe] [--on-mac] [--fork <name>] [<agent args>...]
 ```
 
-Starts a coding agent against this project's VM (design, [decision 0026](decisions/0026-agent-runs-in-the-vm-in-full-auto.md)):
+Starts Claude Code or Codex in this project's VM (design, [decision 0026](decisions/0026-agent-runs-in-the-vm-in-full-auto.md)):
 
 1. Sets up the project and boots the VM if needed, and prints the startup policy.
 2. Takes a snapshot, because the design calls for one before each agent run. It is an automatic snapshot, so it counts towards `keep` in `cave.toml` ([D51](../ROADMAP.md#decisions)).
 3. Prints `Permissions skipped. The VM is the sandbox.` and starts the agent inside the VM with its permission prompts skipped, since its tools reach only the VM. On first use it installs the agent inside the VM with the agent's own installer, and you sign in inside the VM. The agent needs the VM's network to reach its model API.
-4. When the agent exits, in synced mode it updates the Mac mirror as `cave sync` does and prints what changed. It then prints how to undo the run:
+4. When the agent exits, in synced mode and without `--fork`, it updates the Mac mirror as `cave sync` does and prints what changed. It then prints how to undo the run:
 
 ```
 Snapshot before this run: my-project-2026-10-12-debian-4
@@ -612,7 +615,7 @@ Arguments after the agent's name go to the agent unchanged, once cave's own flag
 
 Denying Bash is a guardrail with limits: Claude Code keeps its other tools on the Mac, and an agent started some other way keeps its shell. [docs/safety.md](safety.md#the-agent-boundary) lists them.
 
-Agents in v1: `claude` (Claude Code) and `codex` (Codex, [D44](../ROADMAP.md#decisions), [D54](../ROADMAP.md#decisions)).
+`cave agent` knows two agents in v1: `claude` (Claude Code) and `codex` (Codex, [D44](../ROADMAP.md#decisions), [D54](../ROADMAP.md#decisions)). The VM is not tied to them: any other agent, or any command, runs in it with `cave shell` or `cave exec`, for example `cave exec -- aider`. What `cave agent` adds for these two is the install, the snapshot before the run and the skipped prompts.
 
 With `--on-mac`, `cave` starts `claude` in the project folder with `--mcp-config`, naming `cave mcp` as the `cave` server (`cave mcp --fork <name>` with `--fork`), and `--disallowedTools=Bash,Read(./.env),Edit,Write,NotebookEdit`, which takes the Bash tool and its file-editing tools away from it and stops its Read and Grep tools from opening `.env`. Without the second rule, Claude Code on the Mac could read the credentials straight from `.env`. All of this was checked with Claude Code 2.1 on a Mac. In `--fork` runs there is no snapshot first, since forks cannot be snapshotted yet, and `cave` says so.
 
@@ -628,11 +631,11 @@ Errors:
 
 | Error | Fix |
 | --- | --- |
-| `unknown agent "<name>"` | Supported agents: claude, codex |
+| `unknown agent "<name>"` | Supported agents: claude, codex. Run any other agent in the VM with cave shell or cave exec |
 | `claude is not installed on this Mac` | Install Claude Code, or run it inside the VM with `cave agent claude` |
 | `codex is not installed on this Mac` | Install Codex (npm install -g @openai/codex), or run it inside the VM with `cave agent codex` |
 | `--dangerously-skip-permissions is refused with --on-mac: the agent's own tools reach this Mac` | Run `cave agent claude` without `--on-mac`, which skips the prompts inside the VM |
-| `Claude Code cannot reach its model API: this VM has no network` | Run `cave stop`, set `mode = "nat"` under `[network]` in `cave.toml` if it says `"off"`, then run it again; or use `--on-mac` |
+| `Claude Code cannot reach its model API: this VM has no network` | Run `cave stop`, set `mode = "nat"` under `[network]` in `cave.toml` if it says `"off"`, then run it again; or use `cave agent claude --on-mac` |
 
 ### cave images
 
@@ -683,7 +686,7 @@ Exit code: 1 if any check fails.
 
 ### cave mcp
 
-The design gives agents an MCP server that resolves the VM from the working directory, and `cave init` registers it in agent configs. Something has to start it, so this spec gives it a command:
+The design gives agents an MCP server that resolves the VM from the working directory, and `cave init` registers it in agent configs. Something has to start it, so it has a command:
 
 ```
 cave mcp [--fork <name>]
@@ -749,8 +752,8 @@ brew install rolling7ho/cave/cave-vm
 cd my-project && cave agent claude
 ```
 
-1. `cave agent` finds no `cave.toml`, so it runs `cave init`, which asks whether to keep a copy of the code on the Mac. Enter keeps the default, sealed.
-2. First-run setup fetches the kernel and the Debian image with a progress bar, signs `cave` ad hoc [A5], and runs the doctor checks.
+1. `cave agent` finds no `cave.toml`, so it sets the folder up as `cave init` does, with the defaults (sealed), and says so in one line.
+2. First-run setup checks the Mac as `cave doctor` does, signs `cave-vmm` ad hoc [A5], and downloads the kernel and the Debian image, showing the percentage.
 3. The VM boots, the files in `my-project` are copied into `/workspace` ([D13](../ROADMAP.md#decisions)), and the startup policy is printed.
 4. A snapshot is taken, Claude Code is installed in the VM on first use, and it starts there with its permission prompts skipped. You sign in inside the VM the first time.
 

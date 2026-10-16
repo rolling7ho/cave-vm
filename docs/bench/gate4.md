@@ -1,6 +1,6 @@
 # Gate 4 benchmark
 
-`scripts/bench/gate4.py` measures what [decision 0005](../decisions/0005-spike-report.md) set gate 4 targets for. It runs end to end through `cave` and the daemon, with the default 2 CPU / 2 GiB VM, the real Debian image and the guest agent (ROADMAP P4.11). Run it after `cargo build --release --workspace`. It exits 1 when a target is missed.
+`scripts/bench/gate4.py` measures what [decision 0005](../decisions/0005-spike-report.md) set gate 4 targets for, with booted memory from [decision 0012](../decisions/0012-booted-memory-target.md). It runs end to end through `cave` and the daemon, with the default 2 CPU / 2 GiB VM, the real Debian image and the guest agent (ROADMAP P4.11). Run it after `cargo build --release --workspace`. It exits 1 when a target is missed.
 
 ## Results, 2026-10-14
 

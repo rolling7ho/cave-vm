@@ -1,6 +1,6 @@
 # 0004: CLI and config open items D13 to D22
 
-Date: 2026-10-12 · Decided by: Ivan · Status: accepted
+Date: 2026-10-12 · Decided by: Ivan · Status: accepted; D19's `cave export` renamed `cave pull` by [decision 0029](0029-cave-pull-and-cave-push.md) (D58)
 
 ## Context
 
