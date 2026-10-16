@@ -141,8 +141,12 @@ pub enum Request {
     Sync {
         vm: VmId,
     },
+    /// `cave push`: Mac edits into the VM.
     Pull {
         vm: VmId,
+        /// Apply the Mac's version of files changed on both sides too.
+        #[serde(default, skip_serializing_if = "is_false")]
+        force: bool,
     },
     Gc {
         #[serde(default, skip_serializing_if = "is_false")]
@@ -511,7 +515,7 @@ impl Request {
             | Request::Remove { vm, .. }
             | Request::Inspect { vm, .. }
             | Request::Sync { vm }
-            | Request::Pull { vm } => Some(vm),
+            | Request::Pull { vm, .. } => Some(vm),
             _ => None,
         }
     }

@@ -1,6 +1,6 @@
-//! `cave export`: copies the project directory out of the VM, or out of a
-//! snapshot, into a folder on the Mac (docs/cli.md, "cave export", D19,
-//! D38).
+//! `cave pull`, once `cave export`: copies the project directory out of the VM, or out of a
+//! snapshot, into a folder on the Mac (docs/cli.md, "cave pull", D19,
+//! D38, D58).
 
 use std::fs;
 use std::io::{self, BufRead, IsTerminal};
@@ -94,7 +94,7 @@ fn exported(files: u64, bytes: u64, dir: &Path) -> String {
         1 => "1 file".to_string(),
         n => format!("{} files", thousands(n)),
     };
-    format!("Exported {files} ({}) to {}", size(bytes), dir.display())
+    format!("Copied {files} ({}) to {}", size(bytes), dir.display())
 }
 
 /// A folder to export into: missing, or empty.
@@ -102,7 +102,7 @@ fn check_target(dir: &Path) -> Result<()> {
     let taken = fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some()) || dir.is_file();
     if taken {
         return Err(CliError::new(format!("{} already exists", dir.display()))
-            .fix("Name another folder, as in cave export ../backup, or remove that one"));
+            .fix("Name another folder, as in cave pull ../backup, or remove that one"));
     }
     Ok(())
 }
@@ -125,14 +125,14 @@ fn answer_is_yes(answer: &str) -> bool {
     matches!(answer.trim(), "" | "y" | "Y" | "yes" | "Yes")
 }
 
-/// `cave export [folder] [--from <snapshot>]`.
+/// `cave pull [folder] [--from <snapshot>]`.
 pub fn run(folder: Option<PathBuf>, snapshot: Option<String>) -> Result<()> {
     let project = project::require()?;
     let target = match folder {
         Some(dir) => {
             if !dir.exists() {
                 if !may_create(&dir)? {
-                    return Err(CliError::new("nothing was exported"));
+                    return Err(CliError::new("nothing was copied"));
                 }
                 if !io::stdin().is_terminal() {
                     eprintln!("Creating {}", dir.display());
@@ -161,7 +161,7 @@ pub fn run(folder: Option<PathBuf>, snapshot: Option<String>) -> Result<()> {
             };
             if !credentials.is_empty() {
                 let source = format!("snapshot {snapshot}");
-                let warning = credential_warning(&source, &credentials, "the exported files");
+                let warning = credential_warning(&source, &credentials, "the copied files");
                 eprintln!("{}", Paint::stderr().warning(&warning));
             }
             let fork = TempFork {
@@ -191,11 +191,11 @@ mod tests {
     fn the_message_matches_the_docs() {
         assert_eq!(
             exported(1204, 38 << 20, Path::new("./my-project-export-2026-10-12")),
-            "Exported 1,204 files (38 MB) to ./my-project-export-2026-10-12"
+            "Copied 1,204 files (38 MB) to ./my-project-export-2026-10-12"
         );
         assert_eq!(
             exported(1, 100, Path::new("out")),
-            "Exported 1 file (1 KB) to out"
+            "Copied 1 file (1 KB) to out"
         );
         assert_eq!(thousands(1_234_567), "1,234,567");
         assert_eq!(thousands(999), "999");

@@ -35,7 +35,7 @@ Out of scope: other users or malware on the same Mac with your privileges, an at
 3. **Clients to daemon.** The daemon's socket `daemon.sock` has mode `0600` in a data directory with mode `0700`, so only your user can reach it.
 4. **Guest to network.** A userspace NAT in the VMM. Outbound only; the Mac's own addresses, `localhost`, link-local, reserved and multicast ranges are denied in every mode, and private LAN ranges unless `--net lan` ([safety](safety.md#what-the-vm-protects)). Nothing listens for the guest; ports reach the Mac only with `-p`, and only on its loopback.
 5. **VMM to its files.** The disk image and snapshots in `.cave/`.
-6. **Daemon and CLI to the Mac.** The daemon writes the mirror; the CLI relays the guest's terminal output and file contents.
+6. **Daemon and CLI to the Mac.** The daemon writes the mirror; the CLI relays the guest's terminal output and file contents. In the other direction, `cave push` copies the Mac files you changed into the VM, never `.env` at the top level, `.git` or the paths `.gitignore` names.
 
 ## What the guest can send to the Mac
 
@@ -46,7 +46,7 @@ The guest has no service on the Mac to call. Everything it can send crosses one 
 | Agent protocol over vsock | The daemon parses length-prefixed JSON from the guest agent | Frames over 1 MiB are refused; guest vsock connections are capped at 1024 |
 | Outbound network through the NAT | The VMM opens the connection on the guest's behalf | Policy above; 1024 TCP connections and 1024 UDP flows |
 | Mirror sync | The daemon writes files under the project folder | Paths that are absolute or contain `..` are refused; known credential values are redacted |
-| Folders read out (`cave cp` from the VM, `cave export`) | A tar stream made in the VM is unpacked by the Mac's `/usr/bin/tar` | That tar refuses absolute paths, `..` and writing through symbolic links; links themselves are recreated and may point anywhere on the Mac |
+| Folders read out (`cave cp` from the VM, `cave pull`) | A tar stream made in the VM is unpacked by the Mac's `/usr/bin/tar` | That tar refuses absolute paths, `..` and writing through symbolic links; links themselves are recreated and may point anywhere on the Mac |
 | Terminal output (`cave shell`, `cave exec`, `cave agent`) | Relayed to your terminal | Escape sequences pass through, except cave's own link marker |
 | Sign-in links during `cave agent` | Opened in the Mac's browser | Only `https://` on `claude.ai`, `claude.com`, `anthropic.com` ([D56](../ROADMAP.md#decisions)) |
 | Sign-in callback during `cave agent` | A loopback port on the Mac passes one request into the VM | Port 1024 or more, at most 10 minutes |

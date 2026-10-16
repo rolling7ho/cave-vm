@@ -58,8 +58,14 @@ fn paths<'a>(last: &'a Hashes, mac: &'a Hashes, vm: &'a Hashes) -> BTreeSet<&'a 
     last.keys().chain(mac.keys()).chain(vm.keys()).collect()
 }
 
-/// The pull, or the files changed on both sides, which stop it.
-pub fn plan_pull(last: &Hashes, mac: &Hashes, vm: &Hashes) -> Result<Pull, Vec<String>> {
+/// The pull, or the files changed on both sides, which stop it. With
+/// `force` those files take the Mac's version instead.
+pub fn plan_pull(
+    last: &Hashes,
+    mac: &Hashes,
+    vm: &Hashes,
+    force: bool,
+) -> Result<Pull, Vec<String>> {
     let mut pull = Pull::default();
     let mut conflicts = Vec::new();
     for path in paths(last, mac, vm) {
@@ -67,6 +73,10 @@ pub fn plan_pull(last: &Hashes, mac: &Hashes, vm: &Hashes) -> Result<Pull, Vec<S
         let in_vm = changed(path, vm, last);
         match (on_mac, in_vm) {
             (true, false) => match mac.get(path) {
+                Some(_) => pull.write.push(path.clone()),
+                None => pull.delete.push(path.clone()),
+            },
+            (true, true) if mac.get(path) != vm.get(path) && force => match mac.get(path) {
                 Some(_) => pull.write.push(path.clone()),
                 None => pull.delete.push(path.clone()),
             },

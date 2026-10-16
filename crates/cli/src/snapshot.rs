@@ -175,10 +175,10 @@ mod tests {
             credential_warning(
                 "snapshot s",
                 &["A".into(), "B".into(), "C".into()],
-                "the exported files"
+                "the copied files"
             ),
             "warning: snapshot s was taken after A, B and C were injected\n  \
-             the exported files may contain them"
+             the copied files may contain them"
         );
     }
 

@@ -50,7 +50,7 @@ A credential named in an `exec` call is read from `.env` on the Mac and injected
 What this does not cover:
 
 - The command itself sees the value. A command the agent writes can save it to a file, print it encoded so it no longer matches, or send it over the network. Inject a credential only into commands you would trust with it.
-- A snapshot taken after an injection may hold the value in the VM's memory. `cave fork`, `cave restore` and `cave export` warn when they use one.
+- A snapshot taken after an injection may hold the value in the VM's memory. `cave fork`, `cave restore` and `cave pull` warn when they use one.
 
 ## The Mac mirror backs up source only
 
@@ -59,7 +59,7 @@ In synced mode the project folder on your Mac is a mirror of the code in the VM.
 - It lacks `node_modules`, `target`, everything `.gitignore` names, `.git`, and the VM's running processes.
 - It is updated only when the daemon syncs: after `cave snapshot`, at the end of `cave agent`, and on `cave sync`, or every 2 seconds under `cave sync --watch`. Forks have no mirror. Work since the last sync is only in the VM.
 
-VM snapshots are the real safety net. Take one before a risky change, and use `cave restore` to go back. To keep work outside the VM, use `git push` from inside it, `cave export`, or `cave cp`.
+VM snapshots are the real safety net. Take one before a risky change, and use `cave restore` to go back. To keep work outside the VM, use `git push` from inside it, `cave pull`, or `cave cp`.
 
 ## Host isolation
 
@@ -76,7 +76,7 @@ These are known and accepted for v1:
 - **The Mac's addresses are read once.** The VM is denied every address the Mac has when the VM starts. If the Mac joins another network or gets a new address while the VM runs, the VM can reach that new address until it is stopped and started again.
 - **Turning off update checks is per project.** `[updates] check = false` in a project's `cave.toml` stops cave's own lookups only for commands run in that project. Commands run anywhere else still look for a newer cave.
 - **That setting is read by a small parser.** To stay fast before every command, cave reads `check` with a simple line reader, not a full TOML parser. It understands `check = false` on its own line under `[updates]`. Other ways of writing it, such as an inline table, are not seen, and checks stay on.
-- **Folders read out of the VM keep their symbolic links.** `cave cp` from the VM and `cave export` unpack a tar stream made in the VM with the Mac's `tar`, which refuses absolute paths, `..` and writing through links. A link in the VM's folder is recreated as a link, and can point anywhere on the Mac; following it later reaches that place.
+- **Folders read out of the VM keep their symbolic links.** `cave cp` from the VM and `cave pull` unpack a tar stream made in the VM with the Mac's `tar`, which refuses absolute paths, `..` and writing through links. A link in the VM's folder is recreated as a link, and can point anywhere on the Mac; following it later reaches that place.
 - **Terminal output is passed through.** `cave shell`, `cave exec` and `cave agent` relay the VM's output to your terminal with its escape sequences, apart from cave's own link marker. What a sequence can do depends on your terminal, such as setting the window title.
 - **The network policy runs in the VMM.** A guest that escaped into its VMM process would no longer be held to the LAN and Mac denials, though the VMM's sandbox still keeps it out of your folders.
 - **Downloads use the Mac's curl.** Update lookups and installs run `/usr/bin/curl`, which reads your `~/.curlrc`. Settings there, such as a proxy, apply to these requests as well.
