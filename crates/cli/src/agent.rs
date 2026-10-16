@@ -91,19 +91,77 @@ fn skip_flag(name: &str) -> &'static str {
     }
 }
 
-/// The agent arguments that would skip its prompts, refused on the Mac,
-/// where its own tools reach the Mac (D53).
-fn skips_prompts(name: &str, arg: &str) -> bool {
-    let arg = arg.split('=').next().unwrap_or(arg);
-    match name {
-        "codex" => matches!(arg, "--dangerously-bypass-approvals-and-sandbox" | "--yolo"),
-        _ => {
-            matches!(
-                arg,
-                "--dangerously-skip-permissions" | "--allow-dangerously-skip-permissions"
-            )
+/// The first of the agent's arguments that would skip its prompts or give
+/// it back a tool `cave` turned off, refused on the Mac, where its own
+/// tools reach the Mac (D53). Returned as written, with its value when it
+/// takes one. Arguments after `--` are a prompt and are not checked.
+/// Checked with Claude Code 2.1 and Codex 0.162.
+fn refused_arg(name: &str, args: &[String]) -> Option<String> {
+    let mut args = args.iter().map(String::as_str).take_while(|a| *a != "--");
+    while let Some(arg) = args.next() {
+        let (flag, inline) = match arg.split_once('=') {
+            Some((flag, value)) if flag.starts_with("--") => (flag, Some(value)),
+            _ => (arg, None),
+        };
+        // Codex's short options also take their value joined: `-anever`.
+        let (flag, inline) = match (name, flag.get(..2)) {
+            ("codex", Some(short @ ("-a" | "-c" | "-s"))) if flag.len() > 2 && inline.is_none() => {
+                (short, Some(&flag[2..]))
+            }
+            _ => (flag, inline),
+        };
+        // The value given as the next argument, kept for the message.
+        let mut next = None;
+        let mut value = |takes: &[&str]| -> Option<&str> {
+            if !takes.contains(&flag) {
+                return None;
+            }
+            inline.or_else(|| {
+                next = args.next();
+                next
+            })
+        };
+        let refused = match name {
+            "codex" => {
+                matches!(
+                    flag,
+                    "--dangerously-bypass-approvals-and-sandbox" | "--yolo" | "--full-auto"
+                ) || value(&["-a", "--ask-for-approval"]) == Some("never")
+                    || value(&["-s", "--sandbox"]) == Some("danger-full-access")
+                    || value(&["--enable"]).is_some_and(|f| CODEX_DISABLED.contains(&f))
+                    || value(&["-c", "--config"]).is_some_and(codex_setting_refused)
+            }
+            _ => {
+                matches!(
+                    flag,
+                    "--dangerously-skip-permissions" | "--allow-dangerously-skip-permissions"
+                ) || value(&["--permission-mode"])
+                    .is_some_and(|mode| !matches!(mode, "default" | "plan"))
+            }
+        };
+        if refused {
+            return Some(match next {
+                Some(next) => format!("{arg} {next}"),
+                None => arg.to_string(),
+            });
         }
     }
+    None
+}
+
+/// Whether a Codex `-c key=value` setting would change what `cave` set up
+/// on the Mac: its approvals, its sandbox, its features or the `cave`
+/// server.
+fn codex_setting_refused(setting: &str) -> bool {
+    let key = setting.split('=').next().unwrap_or(setting).trim();
+    key == "approval_policy"
+        || key == "sandbox_mode"
+        || key == "features"
+        || key.starts_with("features.")
+        || key.starts_with("sandbox_workspace_write")
+        || key == "mcp_servers"
+        || key == "mcp_servers.cave"
+        || key.starts_with("mcp_servers.cave.")
 }
 
 /// The agent's product name, for messages.
@@ -144,7 +202,7 @@ pub fn run(
     }
     // Checked first, so nothing boots for an agent that cannot start.
     let on_mac = if on_mac {
-        if let Some(arg) = args.iter().find(|a| skips_prompts(name, a)) {
+        if let Some(arg) = refused_arg(name, &args) {
             return Err(failed(
                 CliError::new(format!(
                     "{arg} is refused with --on-mac: the agent's own tools reach this Mac"
@@ -479,20 +537,75 @@ mod tests {
         assert_eq!(in_vm_argv("codex", true, &[])[3..], ["codex", "-c", &note]);
     }
 
+    fn refused(name: &str, args: &[&str]) -> Option<String> {
+        refused_arg(
+            name,
+            &args.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
+        )
+    }
+
     #[test]
-    fn flags_that_skip_prompts_are_recognised() {
-        assert!(skips_prompts("claude", "--dangerously-skip-permissions"));
-        assert!(skips_prompts(
-            "claude",
-            "--allow-dangerously-skip-permissions"
-        ));
-        assert!(skips_prompts("codex", "--yolo"));
-        assert!(skips_prompts(
-            "codex",
-            "--dangerously-bypass-approvals-and-sandbox"
-        ));
-        assert!(!skips_prompts("claude", "--resume"));
-        assert!(!skips_prompts("codex", "--dangerously-skip-permissions"));
+    fn claude_flags_that_skip_prompts_are_refused() {
+        for args in [
+            &["--dangerously-skip-permissions"][..],
+            &["--allow-dangerously-skip-permissions"],
+            &["--dangerously-skip-permissions=true"],
+            &["--permission-mode", "bypassPermissions"],
+            &["--permission-mode=dontAsk"],
+            &["--resume", "--permission-mode", "acceptEdits"],
+        ] {
+            assert!(refused("claude", args).is_some(), "{args:?}");
+        }
+        assert_eq!(
+            refused("claude", &["-p", "hi", "--permission-mode", "dontAsk"]).as_deref(),
+            Some("--permission-mode dontAsk")
+        );
+        for args in [
+            &["--resume"][..],
+            &["--permission-mode", "default"],
+            &["--permission-mode=plan"],
+            &["--", "--dangerously-skip-permissions"],
+            &["--yolo"],
+        ] {
+            assert_eq!(refused("claude", args), None, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn codex_flags_that_skip_prompts_or_restore_its_shell_are_refused() {
+        for args in [
+            &["--dangerously-bypass-approvals-and-sandbox"][..],
+            &["--yolo"],
+            &["--full-auto"],
+            &["-a", "never"],
+            &["-anever"],
+            &["--ask-for-approval=never"],
+            &["-s", "danger-full-access"],
+            &["--sandbox=danger-full-access"],
+            &["--enable", "shell_tool"],
+            &["--enable=unified_exec"],
+            &["-c", "approval_policy=\"never\""],
+            &["-csandbox_mode=\"danger-full-access\""],
+            &["--config", "features.shell_tool=true"],
+            &["-c", "features={shell_tool=true}"],
+            &["-c", "mcp_servers.cave.command=\"/bin/sh\""],
+            &["-c", " mcp_servers.cave = {}"],
+        ] {
+            assert!(refused("codex", args).is_some(), "{args:?}");
+        }
+        for args in [
+            &["--resume"][..],
+            &["-a", "on-request"],
+            &["-s", "read-only"],
+            &["--enable", "web_search"],
+            &["-c", "model=\"o3\""],
+            &["-c", "mcp_servers.other.command=\"x\""],
+            &["never"],
+            &["--", "--yolo"],
+            &["--dangerously-skip-permissions"],
+        ] {
+            assert_eq!(refused("codex", args), None, "{args:?}");
+        }
     }
 
     #[test]

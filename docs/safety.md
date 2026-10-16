@@ -33,7 +33,7 @@ cave ships guidance and a guardrail.
 
 The limit, stated plainly: **a confused or prompt-injected agent that still has a host shell can step outside the VM.** The VM contains only what runs inside it. In particular:
 
-- `cave agent --on-mac` never skips the agent's prompts, and refuses the agent's own flags that would.
+- `cave agent --on-mac` never skips the agent's prompts, and refuses the agent's own flags that would, or that would give back a tool cave turned off: for Claude Code, the skip flags and `--permission-mode` other than `default` or `plan`; for Codex, the skip flags, `--full-auto`, `-a never`, `-s danger-full-access`, `--enable` of its shell tools and `-c` settings for its approvals, sandbox, features or the `cave` server. Settings in the agent's own config files on the Mac are not checked.
 - An agent you start yourself, without `cave agent` and without the settings `cave init` writes, keeps its host shell. The skill alone does not stop it.
 - Agents other than Claude Code and Codex get the skill and the MCP server, but cave does not deny their shell. It denies only where the agent supports it. `cave init` writes the denial for Claude Code only; Codex has it only when started with `cave agent codex --on-mac`.
 - Codex on the Mac keeps its other tools, including `apply_patch`, which edits files on the Mac, web search and any MCP servers you configured for it. Like Claude Code's edits, these do not reach the VM.

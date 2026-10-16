@@ -611,7 +611,7 @@ Undo everything the agent did with: cave restore my-project-2026-10-12-debian-4
 
 `--safe` keeps the agent's permission prompts.
 
-`--on-mac` runs the agent on the Mac instead, connected to this VM through the MCP server, with host Bash denied where the agent supports it. The model API key stays on the Mac. Its prompts are never skipped there, and the agent's own flags that would skip them are refused. `--in-vm`, the way to run inside the VM before D53, is still accepted and changes nothing.
+`--on-mac` runs the agent on the Mac instead, connected to this VM through the MCP server, with host Bash denied where the agent supports it. The model API key stays on the Mac. Its prompts are never skipped there, and the agent's own flags that would skip them or give back a tool cave turned off are refused: Claude Code's `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions` and `--permission-mode` other than `default` or `plan`; Codex's `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--full-auto`, `-a never`, `-s danger-full-access`, `--enable shell_tool` or `unified_exec`, and `-c` settings for `approval_policy`, `sandbox_mode`, `features` or `mcp_servers.cave`. Arguments after `--` are not checked. `--in-vm`, the way to run inside the VM before D53, is still accepted and changes nothing.
 
 Arguments after the agent's name go to the agent unchanged, once cave's own flags (`--safe`, `--on-mac`, `--fork`) are read: `cave agent claude --safe --resume` passes `--resume`. A `--` before them still works ([D35](../ROADMAP.md#decisions)).
 
