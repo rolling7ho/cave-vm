@@ -2,26 +2,15 @@
 
 **A fast, disposable Linux VM for every project, built for coding agents on macOS.**
 
-> **Status: v1.0.0 RC 2.** It works on Apple Silicon Macs with macOS 26 or later. v1.0 follows the release review.
-
-cave-vm (Coding Agent Virtual Environment, command: `cave`) is an open-source microVM runtime for Macs with Apple Silicon (M-series) chips. It gives each project directory its own Linux VM that starts quickly, can be snapshotted, rolled back and forked, and shows you exactly what it can reach.
+cave-vm (Coding Agent Virtual Environment) is an open-source microVM runtime for Macs with Apple Silicon (M-series) chips. It gives each project directory its own Linux VM that starts quickly, can be snapshotted, rolled back and forked, and shows you exactly what it can reach.
 
 Coding agents are most useful when you stop approving every command, and most risky at the same moment. With cave-vm the agent works inside a hardware-isolated VM instead of on your Mac, so a bad command damages a disposable machine, not your files.
-
-## The idea
-
-- **The project directory is the VM.** `cd` into a project and run `cave shell`. No names, no registry, no IDs. Delete the folder and everything is gone.
-- **Code lives inside the VM.** The agent can't touch host files because nothing from the host is mounted. If you want your normal editor, an optional synced copy of the source stays on your Mac.
-- **Snapshot, roll back, fork.** Snapshot before a risky run and restore after. Fork a project into parallel copies to try several approaches at once, using copy-on-write so forks are cheap. The target is a fork in well under a second.
-- **Safety you can see.** Every VM has an inspectable policy: what is reachable, how much CPU and memory it gets, and a log of what the agent did.
-- **Agent-first.** An MCP server and a ready-made skill let Claude Code and other agents use the VM as their sandbox with no host shell.
-- **Easy to set up.** One install, and the first run fetches everything else and fixes what it can. No SSH keys, no cloud-init, no image formats to learn.
 
 ## Quickstart
 
 ```sh
 brew install rolling7ho/cave/cave-vm
-cd my-project && cave agent claude
+cd [my-project] && cave agent [claude/codex]
 ```
 
 Without Homebrew, `curl -fsSL https://github.com/rolling7ho/cave-vm/releases/latest/download/install.sh | sh` installs the release binaries in `~/.local/bin` (set `CAVE_PREFIX` to change that) after checking their checksum.
@@ -32,17 +21,39 @@ Commands:
 
 | Command | What it does |
 | --- | --- |
-| `cave init` | Set up a project: `cave.toml`, the `.cave/` folder, and the agent skill files |
-| `cave run` / `cave shell` | Boot or restore this project's VM, and open a shell in it |
-| `cave exec -- <cmd>` | Run a command in the VM |
-| `cave snapshot` / `cave restore` | Save VM state and roll back to it |
-| `cave fork` | Create a new VM from a snapshot, copy-on-write |
-| `cave inspect` | Show the VM's policy, resources and audit log |
-| `cave sync` / `cave push` | Keep a Mac copy of the code in step with the VM, and bring Mac edits back (synced mode) |
-| `cave agent claude` | Start Claude Code against this project's VM, with host Bash denied |
-| `cave doctor` | Check entitlements, macOS version, disk space and image state |
+| `cave init` | Initialize a project with `cave.toml` and `.cave/`, choosing sealed or synced mode |
+| `cave run` | Boot or restore the project's VM, with optional networking, port forwarding, or fork selection |
+| `cave shell` | Open an interactive shell inside the VM |
+| `cave exec -- <cmd>` | Execute a command inside the VM |
+| `cave stop` | Suspend the VM, preserving its state |
+| `cave snapshot` | Save the VM's current state as a snapshot |
+| `cave restore` | Roll back the VM to a snapshot, using the newest by default |
+| `cave fork` | Create an independent VM from a snapshot using copy-on-write |
+| `cave rm` | Remove the project's VM, a fork, or a snapshot |
+| `cave agent <name>` | Launch a coding agent against the project's VM, with optional safety and host execution settings |
+| `cave cp` | Copy files between the Mac and VM, using `:` to identify VM paths |
+| `cave pull` | Export the project from the VM or a snapshot to a folder on the Mac |
+| `cave sync` | Update the Mac mirror from the VM, optionally watching for changes |
+| `cave push` | Copy Mac-side changes into the VM after taking a snapshot |
+| `cave inspect` | Display the VM's policy, resources, and audit log |
+| `cave view` | Watch VM activity live, including commands, file writes, and connections |
+| `cave ls` | List project VMs, optionally including all entries or JSON output |
+| `cave images` | List available base VM images |
+| `cave gc` | Inspect disk usage and safely reclaim unused storage |
+| `cave doctor` | Check Mac compatibility, cave's signature, and the image cache |
+| `cave help` | Display general help or detailed help for a specific command |
+| `cave --version` | Display the installed cave version |
 
 The full command reference, with every flag and error, is in [docs/cli.md](docs/cli.md), and `cave.toml` is described in [docs/config.md](docs/config.md). SDKs for Rust ([crates/sdk](crates/sdk)), Python ([sdks/python](sdks/python)) and TypeScript ([sdks/typescript](sdks/typescript)) expose the same operations, and `cave mcp` serves them to agents as MCP tools.
+
+## The idea
+
+- **The project directory is the VM.** `cd` into a project and run `cave shell`. Delete the folder and everything is gone.
+- **Code lives inside the VM.** The agent can't touch host files because nothing from the host is mounted. If you want your normal editor, an optional synced copy of the source stays on your Mac.
+- **Snapshot, roll back, fork.** Snapshot before a risky run and restore after. Fork a project into parallel copies to try several approaches at once, using copy-on-write so forks are cheap.
+- **Safety you can see.** Every VM has an inspectable policy: what is reachable, how much CPU and memory it gets, and a log of what the agent did.
+- **Agent-first.** An MCP server and a ready-made skill let Claude Code and Codex use the VM as their sandbox with no host shell.
+- **Easy to set up.** One install, and the first run fetches everything else and fixes what it can. No SSH keys, no cloud-init, no image formats to learn.
 
 ## Safety defaults
 
@@ -65,20 +76,9 @@ The full design is in [docs/design.md](docs/design.md).
 - Apple Silicon Mac
 - Guests are ARM64 Linux (Debian by default, or optionally Ubuntu)
 
-## Roadmap
-
-Phases 1 to 5 are done, each closed by a gate measured on a real Mac ([docs/bench/gate4.md](docs/bench/gate4.md) has the snapshot and fork numbers). Phase 6 is under way; [ROADMAP.md](ROADMAP.md) has the details.
-
-1. **Spec:** README quickstart and CLI surface written before any code.
-2. **Spike:** boot a Linux kernel to a shell through Hypervisor.framework, and confirm the signing and snapshot assumptions.
-3. **Core VM:** block, network and vsock devices, the guest agent, and the basic CLI.
-4. **Snapshot and fork:** the headline feature.
-5. **Agent layer:** `cave init`, the agent skill, the MCP server, the safety policy and audit log.
-6. **Density and polish:** memory ballooning, `cave doctor`, first-run setup, the SDKs, the Ubuntu image, and the Homebrew formula.
-
 ## Contributing
 
-Contributions are welcome once the project opens up. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Contributors are expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md). AI-assisted contributions are allowed with disclosure in the pull request. Report security problems privately, as described in [SECURITY.md](SECURITY.md).
+Contributions are welcome once the project opens up. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Contributors are expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately, as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
