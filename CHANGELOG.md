@@ -4,6 +4,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [1.0.0-rc.3] - 2026-10-16
+
+The third release candidate for 1.0.0: plain `claude` in a project really skips its prompts after a yes in `cave init`, the VM keeps the Mac's time and timezone, `cave pull` and `cave push` copy the project out and in, in both modes, and a threat model.
+
 ### Added
 - `docs/threat-model.md`: who cave defends against, its trust boundaries, everything a VM can send to the Mac and what happens if a boundary falls. `docs/safety.md` lists three more known limits: symbolic links in folders read out of the VM, terminal escape sequences, and the network policy running in the VMM.
 

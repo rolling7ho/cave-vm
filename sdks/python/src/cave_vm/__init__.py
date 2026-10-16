@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Union
 
-__version__ = "1.0.0rc2"
+__version__ = "1.0.0rc3"
 __all__ = [
     "CaveError",
     "Forked",
