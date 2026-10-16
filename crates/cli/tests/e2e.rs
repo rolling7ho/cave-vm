@@ -349,6 +349,30 @@ fn gate_3() {
     );
     assert_eq!(fs::read_to_string(&back).unwrap(), "round trip\n");
 
+    // A folder copied into a Mac folder stays in its own subfolder, even
+    // when the VM's tar sends other entries.
+    rig.exec(
+        &[
+            "sh",
+            "-c",
+            "mkdir -p dir && echo in > dir/a && echo out > evil.txt && \
+             printf '#!/bin/sh\\nexec /usr/bin/tar -c -f - -C /workspace dir evil.txt\\n' | \
+             sudo tee /usr/local/bin/tar >/dev/null && sudo chmod 755 /usr/local/bin/tar",
+        ],
+        0,
+    );
+    let into = rig.root.join("into");
+    fs::create_dir_all(&into).unwrap();
+    let out = rig.cave(&["cp", ":dir", &format!("{}/", into.display())]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(fs::read_to_string(into.join("dir/a")).unwrap(), "in\n");
+    assert!(!into.join("evil.txt").exists());
+    rig.exec(&["sudo", "rm", "/usr/local/bin/tar"], 0);
+
     // A killed VMM is noticed, and the next command starts a new one.
     let pid = rig.vmm_pid().expect("a running VMM");
     assert!(

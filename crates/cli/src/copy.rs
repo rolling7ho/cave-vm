@@ -186,9 +186,17 @@ pub fn from_vm_folder(vm: &VmId, src: &str, dest: &Path) -> Result<()> {
 fn from_vm_one(vm: &VmId, src: &str, dest: &Path, into: bool) -> Result<()> {
     let name = vm_name(src);
     if is_vm_dir(vm, src)? {
-        let (target, strip) = (dest, !into);
+        // The VM makes the archive, so its entries are not trusted to sit
+        // under `name`: the top folder is always stripped, and the rest
+        // lands in the folder cave chose for it.
+        let target = if into {
+            dest.join(name)
+        } else {
+            dest.to_path_buf()
+        };
+        let target = target.as_path();
         fs::create_dir_all(target)?;
-        let mut tar = local_tar_extract(target, strip)?;
+        let mut tar = local_tar_extract(target)?;
         let mut stdin = tar.stdin.take().expect("piped");
         let result = vm_ok(
             vm,
@@ -227,12 +235,23 @@ fn local_tar_create(parent: &Path, name: &str) -> Result<Child> {
         .spawn()?)
 }
 
-fn local_tar_extract(target: &Path, strip: bool) -> Result<Child> {
+/// Unpacks an archive from the VM into `target`, dropping its top folder.
+/// macOS's tar refuses absolute paths, `..` and writing through links,
+/// and takes no metadata, attributes or ACLs from the archive.
+fn local_tar_extract(target: &Path) -> Result<Child> {
     let mut tar = Command::new("/usr/bin/tar");
-    tar.args(["-x", "-f", "-", "-C"]).arg(target);
-    if strip {
-        tar.args(["--strip-components", "1"]);
-    }
+    tar.args([
+        "--no-mac-metadata",
+        "--no-xattrs",
+        "--no-acls",
+        "-x",
+        "-f",
+        "-",
+        "--strip-components",
+        "1",
+        "-C",
+    ])
+    .arg(target);
     Ok(tar.stdin(Stdio::piped()).spawn()?)
 }
 
@@ -386,7 +405,18 @@ fn read_file(vm: &VmId, src: &str, target: &Path) -> Result<()> {
         match connection.receive()? {
             Reply::FileInfo { mode: m, .. } => {
                 mode = m & 0o777;
-                file = Some(File::create(&partial.0)?);
+                // A link left at the partial name is removed, never
+                // written through: `create_new` does not follow one.
+                match fs::remove_file(&partial.0) {
+                    Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e.into()),
+                    _ => {}
+                }
+                file = Some(
+                    fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&partial.0)?,
+                );
             }
             Reply::FileData { data } => match file.as_mut() {
                 Some(file) => file.write_all(&data.0)?,
