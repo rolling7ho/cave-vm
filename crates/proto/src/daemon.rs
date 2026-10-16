@@ -363,6 +363,11 @@ pub struct Policy {
     /// Flags that widened the defaults, echoed back (such as `--net lan`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub widened: Vec<String>,
+    /// Why this start booted from the disk instead of resuming the VM's
+    /// suspension, so processes running before `cave stop` were not kept.
+    /// Only in the reply to `start`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fresh_boot: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

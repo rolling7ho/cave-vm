@@ -174,6 +174,7 @@ fn replies_round_trip() {
         memory_bytes: 2 << 30,
         ttl_seconds: None,
         widened: vec![],
+        fresh_boot: None,
     };
     let policy_json = json!({"name": "my-project", "image": "base@sha256:3f2a", "storage": "sealed", "net": "nat", "ports": [{"mac": 3000, "vm": 3000}], "cpus": 2, "memory_bytes": 2147483648u64});
     let mut policy_reply = policy_json.clone();

@@ -154,6 +154,7 @@ mod tests {
             memory_bytes: 2 << 30,
             ttl_seconds: None,
             widened: Vec::new(),
+            fresh_boot: None,
         }
     }
 

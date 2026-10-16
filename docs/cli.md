@@ -266,7 +266,7 @@ cave stop [--fork <name>]
 cave stop --force
 ```
 
-Suspends the VM to a snapshot, freeing its memory, and prints `Suspended <name> (1.2s)`. The next command that needs the VM restores it with processes intact, unless it changes `--net` between `off` and another mode, or `cave.toml` now asks for other `cpus` or `memory` or a larger `disk`, which boots from the disk ([suspensions](snapshots.md#suspensions)). If the VM is not running, it says so and exits 0. If the VM cannot be saved, it keeps running and the error says why.
+Suspends the VM to a snapshot, freeing its memory, and prints `Suspended <name> (1.2s)`. The next command that needs the VM restores it with processes intact, unless it changes `--net` between `off` and another mode, or `cave.toml` now asks for other `cpus` or `memory` or a larger `disk`, which boots from the disk and says so: `Booted from the disk instead of resuming, since cave.toml asks for other cpus, memory or disk: files are kept, processes running before `cave stop` are not` ([suspensions](snapshots.md#suspensions)). If the VM is not running, it says so and exits 0. If the VM cannot be saved, it keeps running and the error says why.
 
 `cave stop --force` is the emergency stop ([D43](../ROADMAP.md#decisions)). It stops every running VM on this Mac, in every project, at once and saves nothing: each VMM process gets SIGTERM, and SIGKILL if it is still running 5 seconds later. It names them and asks first:
 
