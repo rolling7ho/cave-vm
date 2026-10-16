@@ -29,7 +29,7 @@ The daemon also suspends a VM left unused for its `idle_suspend` time ([config](
 
 To check sleep by hand: start a VM with a process in it (`cave exec -- sh -c 'setsid sleep 100000 &'`), run `pmset sleepnow`, wake the Mac, and see `cave ls` show it suspended and `cave exec -- pgrep sleep` find the process.
 
-A start that changes the network between `off` and `nat` or `lan` cannot resume, because the VM would need another set of devices, so it boots from the disk and the processes are lost. A snapshot of a suspended VM copies the suspension, memory included.
+A start that changes the network between `off` and `nat` or `lan` cannot resume, because the VM would need another set of devices, so it boots from the disk and the processes are lost. The same happens when `cave.toml` now asks for other `cpus` or `memory`, or a larger `disk`, so a new size takes effect after `cave stop`. A snapshot of a suspended VM copies the suspension, memory included.
 
 ## Manifest
 
