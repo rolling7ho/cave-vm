@@ -75,6 +75,11 @@ const BACKLOG: usize = 256;
 /// keep it from returning.
 const RELAY_ROUNDS: usize = 8;
 
+/// Most denied UDP flows remembered as reported. Past it, a denied flow
+/// not yet reported is denied without an audit entry, so a guest sending
+/// to ever new ports cannot grow the map without end.
+pub const MAX_UDP_DENIED: usize = 4096;
+
 /// The longest [`Stack::run`] sleeps without news, so idle flows still
 /// expire.
 const IDLE_WAIT: Duration = Duration::from_secs(1);
@@ -341,7 +346,7 @@ impl Stack {
                         .udp_denied
                         .get(&key)
                         .is_some_and(|at| now.saturating_sub(*at) < IDLE_TIMEOUT);
-                    if !reported {
+                    if !reported && self.udp_denied.len() < MAX_UDP_DENIED {
                         self.udp_denied.insert(key, now);
                         self.connects.push(ConnectEvent {
                             protocol: Protocol::Udp,

@@ -180,9 +180,60 @@ impl<W: Write> Pl011<W> {
     }
 }
 
+/// Bytes of console output [`Console`] passes on for one VMM run.
+pub const CONSOLE_LIMIT: u64 = 16 << 20;
+
+/// The guest's console output, passed to `out` up to a limit, so a guest
+/// writing without end cannot fill the Mac's disk through `vmm.log`. Past
+/// it, one line says so and the rest is dropped.
+pub struct Console<W> {
+    out: W,
+    left: u64,
+}
+
+impl<W: Write> Console<W> {
+    pub fn new(out: W, limit: u64) -> Console<W> {
+        Console { out, left: limit }
+    }
+}
+
+impl<W: Write> Write for Console<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.left == 0 {
+            return Ok(buf.len());
+        }
+        let n = buf
+            .len()
+            .min(usize::try_from(self.left).unwrap_or(usize::MAX));
+        self.out.write_all(&buf[..n])?;
+        self.left -= n as u64;
+        if self.left == 0 {
+            self.out.write_all(
+                b"\ncave-vmm: the guest's console wrote too much; the rest of it is dropped\n",
+            )?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.out.flush()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn console_output_stops_at_its_limit() {
+        let mut console = Console::new(Vec::new(), 5);
+        assert_eq!(console.write(b"abc").unwrap(), 3);
+        assert_eq!(console.write(b"defg").unwrap(), 4);
+        assert_eq!(console.write(b"hij").unwrap(), 3);
+        let out = String::from_utf8(console.out).unwrap();
+        assert!(out.starts_with("abcde\ncave-vmm: "), "{out}");
+        assert!(out.ends_with("dropped\n") && !out.contains("hij"), "{out}");
+    }
 
     #[test]
     fn state_round_trips() {

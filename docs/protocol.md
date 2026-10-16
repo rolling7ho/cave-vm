@@ -243,7 +243,7 @@ The daemon resolves each name from the project's `.env` (see [the CLI reference]
 
 ## VMM control
 
-The daemon starts one VMM process per VM and talks to it over a Unix socket pair, whose VMM end is the process's standard input. There is no socket file, so this works at any project path (D26). When the link closes, the VMM stops its VM and exits, so a VMM never outlives the daemon that started it. Its standard output and error go to `vmm.log` in the VM's folder in the data directory.
+The daemon starts one VMM process per VM and talks to it over a Unix socket pair, whose VMM end is the process's standard input. There is no socket file, so this works at any project path (D26). When the link closes, the VMM stops its VM and exits, so a VMM never outlives the daemon that started it. Its standard output and error go to `vmm.log` in the VM's folder in the data directory. The guest's console output there stops after 16 MiB per run, and a `vmm.log` past 16 MiB is moved to `vmm.log.old` when the next VMM starts.
 
 The link uses the same framing, handshake and errors. Unlike the other links it carries more than one operation: the daemon sends one request at a time and reads its reply.
 

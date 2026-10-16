@@ -228,6 +228,16 @@ fn denied_datagrams_are_dropped_and_reported_once() {
 }
 
 #[test]
+fn denied_flows_reported_are_capped() {
+    let (mut stack, _udp) = stack(Mode::Nat, vec![DNS]);
+    let lan = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 5), 53);
+    for port in 0..=MAX_UDP_DENIED as u16 {
+        assert!(!stack.from_guest(&datagram(1000 + port, lan, b"q")));
+    }
+    assert_eq!(stack.take_connects().len(), MAX_UDP_DENIED);
+}
+
+#[test]
 fn without_udp_set_up_datagrams_are_dropped_silently() {
     let mut stack = Stack::new(
         Duration::ZERO,

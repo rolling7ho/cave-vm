@@ -30,6 +30,11 @@ const JUMP: Duration = Duration::from_secs(1);
 /// How often the time is sent anyway, to correct the guest's drift.
 const REFRESH: Duration = Duration::from_secs(10 * 60);
 
+/// The longest wait before trying again after a failed send. The wait
+/// starts at [`CHECK`] and doubles, so a guest that does not answer is
+/// not sent a connection every check.
+const MAX_RETRY: Duration = Duration::from_secs(5 * 60);
+
 /// The Mac's timezone, or None when it cannot be read.
 pub fn mac_timezone() -> Option<Timezone> {
     timezone_at(Path::new(LOCALTIME))
@@ -93,18 +98,21 @@ fn due(jumped: i128, zone_changed: bool, since_sent: Duration) -> bool {
 
 /// Sends the time to the guest again whenever [`due`], until `done`.
 /// `send` opens a control connection and delivers a message; a failure is
-/// tried again at the next check.
+/// tried again after [`retry_after`].
 pub fn keep(send: impl Fn(&Message) -> io::Result<()>, done: &AtomicBool) {
     let start = (SystemTime::now(), Instant::now());
     let mut sent_offset = offset(start);
     let mut sent_zone = mac_timezone().map(|z| z.name);
     let mut sent_at = Instant::now();
+    let (mut failures, mut next_try) = (0, Instant::now());
     while !done.load(Ordering::Acquire) {
         thread::sleep(CHECK);
         let now_offset = offset(start);
         let zone = mac_timezone();
         let zone_changed = zone.as_ref().map(|z| &z.name) != sent_zone.as_ref();
-        if !due(now_offset - sent_offset, zone_changed, sent_at.elapsed()) {
+        if !due(now_offset - sent_offset, zone_changed, sent_at.elapsed())
+            || Instant::now() < next_try
+        {
             continue;
         }
         if done.load(Ordering::Acquire) {
@@ -115,8 +123,19 @@ pub fn keep(send: impl Fn(&Message) -> io::Result<()>, done: &AtomicBool) {
             sent_offset = now_offset;
             sent_zone = zone.map(|z| z.name);
             sent_at = Instant::now();
+            failures = 0;
+        } else {
+            failures += 1;
+            next_try = Instant::now() + retry_after(failures);
         }
     }
+}
+
+/// The wait before trying again after `failures` failed sends in a row.
+fn retry_after(failures: u32) -> Duration {
+    CHECK
+        .saturating_mul(1 << failures.saturating_sub(1).min(16))
+        .min(MAX_RETRY)
 }
 
 /// The send for [`keep`]: one control connection from `connect` per
@@ -183,6 +202,14 @@ mod tests {
         assert!(due(-2 * second, false, Duration::ZERO));
         assert!(due(0, true, Duration::ZERO));
         assert!(due(0, false, REFRESH));
+    }
+
+    #[test]
+    fn failed_sends_are_tried_again_less_often() {
+        assert_eq!(retry_after(1), CHECK);
+        assert_eq!(retry_after(2), 2 * CHECK);
+        assert_eq!(retry_after(3), 4 * CHECK);
+        assert_eq!(retry_after(100), MAX_RETRY);
     }
 
     #[test]

@@ -45,6 +45,7 @@ mod vmm {
     use cave_vm_vmm::boot::{self, BootConfig};
     use cave_vm_vmm::clock;
     use cave_vm_vmm::control::{self, RunningVm};
+    use cave_vm_vmm::devices::pl011::{CONSOLE_LIMIT, Console};
     use cave_vm_vmm::devices::virtio::balloon::Balloon;
     use cave_vm_vmm::devices::virtio::block::Block;
     use cave_vm_vmm::devices::virtio::device_type;
@@ -142,7 +143,7 @@ mod vmm {
 
     struct Booted<'a, B> {
         connector: vsock::Connector,
-        machine: &'a Machine<io::Stdout>,
+        machine: &'a Machine<Console<io::Stdout>>,
         backend: &'a B,
         memory: &'a GuestMemory,
         disk: &'a Path,
@@ -284,7 +285,8 @@ mod vmm {
             (None, Some(state)) => Start::Restore(state),
             (None, None) => unreachable!("a VM either boots or restores"),
         };
-        let mut machine = Machine::new(io::stdout(), None, config.cpus);
+        let mut machine =
+            Machine::new(Console::new(io::stdout(), CONSOLE_LIMIT), None, config.cpus);
         if base.is_some() {
             machine = machine.track_writes(memory.clone());
         }
