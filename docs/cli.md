@@ -161,7 +161,7 @@ Sets up the current directory as a project. It writes:
   - `AGENTS.md`: `This project runs in a cave VM. Before doing anything, read .cave/AGENTS.md: it says how to work inside the VM.`, between `<!-- cave:start -->` and `<!-- cave:end -->`. A section an older cave wrote there, with the whole text, is replaced by this line.
   - `.mcp.json`: registers `cave mcp` as the `cave` server.
   - `.claude/settings.json`: adds `Bash`, `Read(./.env)`, `Edit`, `Write` and `NotebookEdit` to `permissions.deny`, so Claude Code has no shell on the Mac and reaches the VM through MCP, cannot read the credentials in `.env`, and cannot edit Mac files, whose edits would never reach the VM. Claude Code asks once to approve the `cave` server, since a project's own settings cannot approve it.
-  - `.claude/settings.local.json`, only after a yes to the question below: `permissions.defaultMode` set to `bypassPermissions`, and `Read`, `Glob`, `Grep` and `WebFetch` denied as well as the list above, so plain `claude` skips its prompts and can act only through the `cave` tools. The file is personal, so it is added to `.gitignore` ([D55](../ROADMAP.md#decisions)).
+  - `.claude/settings.local.json`, only after a yes to the question below: `permissions.defaultMode` set to `dontAsk`, `mcp__cave` allowed, and `Read`, `Glob`, `Grep` and `WebFetch` denied as well as the list above, so plain `claude` never prompts and can act only through the `cave` tools; any other tool is turned away without asking. Claude Code ignores `bypassPermissions` in project and local settings, so it is not used, and a file an earlier cave wrote with it is moved to `dontAsk`. The file is personal, so it is added to `.gitignore` ([D55](../ROADMAP.md#decisions)).
 
   Other settings in those files are kept. A file that already has these entries is not rewritten. A file that is not valid JSON is an error that says to fix it, and is left alone.
 
@@ -185,7 +185,7 @@ and next to it whether plain `claude` may skip its permission prompts, with no a
 Let Claude Code skip its permission prompts in this project? Its own tools on the Mac are turned off, so it can act only inside the VM, which is its sandbox. [y/N]
 ```
 
-That second question is asked whenever stdin is a terminal and `cave.toml` is new, with or without `--sealed` and `--synced`. Without a terminal it picks sealed and no, and says so for sealed. MCP servers and plugins from your own Claude Code settings still run on the Mac ([docs/safety.md](safety.md#the-agent-boundary)).
+That second question is asked whenever stdin is a terminal, with or without `--sealed` and `--synced`, also when `cave.toml` already exists, unless `.claude/settings.local.json` already skips the prompts from an earlier yes. Without a terminal it picks sealed and no, and says so for sealed. MCP servers and plugins from your own Claude Code settings run on the Mac only where your own settings allow them ([docs/safety.md](safety.md#the-agent-boundary)).
 
 Running `cave init` again in a project is safe: it refreshes the skill files and never changes `cave.toml`.
 

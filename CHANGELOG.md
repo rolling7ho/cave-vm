@@ -4,6 +4,9 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Fixed
+- Plain `claude` still asked for permission after a yes to `cave init`'s question about skipping prompts: Claude Code ignores `bypassPermissions` in `.claude/settings.local.json`, since a repository can write that file, and fell back to asking. A yes now writes `dontAsk` with the `cave` tools allowed and the same tools denied, so Claude Code never prompts and turns away anything else. `cave init` also asks the question in an existing project, and moves an earlier yes to `dontAsk` (D55, decision 0026).
+
 ## [1.0.0-rc.2] - 2026-10-15
 
 The second release candidate for 1.0.0: signing in to Claude Code inside the VM now finishes by itself after you approve in the browser.
