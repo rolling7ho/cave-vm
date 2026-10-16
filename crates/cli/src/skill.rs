@@ -48,6 +48,21 @@ pub const CLAUDE_LOCAL_SETTINGS: &str = ".claude/settings.local.json";
 /// the `cave` tools, inside the VM (D55).
 pub const SKIPPED_PROMPTS_DENIED: [&str; 4] = ["Read", "Glob", "Grep", "WebFetch"];
 
+/// The permission mode a yes writes. Claude Code never prompts in it: a
+/// tool that is not allowed is turned away. `bypassPermissions` cannot be
+/// used here: Claude Code ignores it in project and local settings, since
+/// a repository can write those, and starts in `default`, which prompts
+/// (checked in Claude Code 2.1.301; D55, decision 0026).
+pub const SKIP_PROMPTS_MODE: &str = "dontAsk";
+
+/// The mode cave 1.0.0-rc.1 and rc.2 wrote for a yes, which Claude Code
+/// ignores. A file with it is moved to [`SKIP_PROMPTS_MODE`].
+const IGNORED_SKIP_PROMPTS_MODE: &str = "bypassPermissions";
+
+/// What a yes allows without a prompt: the `cave` tools, which act only
+/// on the VM.
+pub const SKIPPED_PROMPTS_ALLOWED: [&str; 1] = ["mcp__cave"];
+
 /// Claude Code's project MCP servers, where `cave mcp` is registered.
 pub const MCP_CONFIG: &str = ".mcp.json";
 
@@ -135,12 +150,25 @@ pub fn skip_prompts(dir: &Path) -> Result<()> {
     update_json(dir, CLAUDE_LOCAL_SETTINGS, skip_prompts_settings)
 }
 
-/// `bypassPermissions`, with [`agent::DENIED_TOOLS`] and
-/// [`SKIPPED_PROMPTS_DENIED`] denied. The shared list is repeated here, so
-/// the file is safe on its own.
+/// Whether Claude Code's personal settings in project `dir` already skip
+/// its prompts, from an earlier yes. An unreadable file counts as no.
+pub fn prompts_skipped(dir: &Path) -> bool {
+    fs::read_to_string(dir.join(CLAUDE_LOCAL_SETTINGS))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|v| v["permissions"]["defaultMode"].as_str().map(str::to_owned))
+        .is_some_and(|mode| mode == SKIP_PROMPTS_MODE || mode == IGNORED_SKIP_PROMPTS_MODE)
+}
+
+/// [`SKIP_PROMPTS_MODE`], with [`SKIPPED_PROMPTS_ALLOWED`] allowed and
+/// [`agent::DENIED_TOOLS`] and [`SKIPPED_PROMPTS_DENIED`] denied. The
+/// shared list is repeated here, so the file is safe on its own.
 fn skip_prompts_settings(settings: &mut Map<String, Value>) -> std::result::Result<(), String> {
     let permissions = object(settings, "permissions")?;
-    permissions.insert("defaultMode".into(), "bypassPermissions".into());
+    permissions.insert("defaultMode".into(), SKIP_PROMPTS_MODE.into());
+    SKIPPED_PROMPTS_ALLOWED
+        .iter()
+        .try_for_each(|tool| push_unique(permissions, "allow", tool))?;
     agent::DENIED_TOOLS
         .iter()
         .chain(&SKIPPED_PROMPTS_DENIED)
@@ -365,13 +393,42 @@ mod tests {
             read_json(&dir.join(CLAUDE_LOCAL_SETTINGS)),
             json!({"permissions": {
                 "allow": ["mcp__cave"],
-                "defaultMode": "bypassPermissions",
+                "defaultMode": "dontAsk",
                 "deny": [
                     "Bash", "Read(./.env)", "Edit", "Write", "NotebookEdit",
                     "Read", "Glob", "Grep", "WebFetch"
                 ]
             }})
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn skipping_prompts_allows_the_cave_tools_and_replaces_the_ignored_mode() {
+        let dir = temp("skip-old");
+        assert!(!prompts_skipped(&dir));
+        fs::create_dir_all(dir.join(".claude")).unwrap();
+        fs::write(
+            dir.join(CLAUDE_LOCAL_SETTINGS),
+            r#"{"permissions": {"defaultMode": "bypassPermissions", "deny": ["Bash"]}}"#,
+        )
+        .unwrap();
+        assert!(prompts_skipped(&dir));
+        skip_prompts(&dir).unwrap();
+        let settings = read_json(&dir.join(CLAUDE_LOCAL_SETTINGS));
+        assert_eq!(settings["permissions"]["defaultMode"], "dontAsk");
+        assert_eq!(settings["permissions"]["allow"], json!(["mcp__cave"]));
+        assert_eq!(settings["permissions"]["deny"].as_array().unwrap().len(), 9);
+        assert!(prompts_skipped(&dir));
+
+        fs::write(
+            dir.join(CLAUDE_LOCAL_SETTINGS),
+            r#"{"permissions": {"defaultMode": "acceptEdits"}}"#,
+        )
+        .unwrap();
+        assert!(!prompts_skipped(&dir));
+        fs::write(dir.join(CLAUDE_LOCAL_SETTINGS), "not json").unwrap();
+        assert!(!prompts_skipped(&dir));
         let _ = fs::remove_dir_all(&dir);
     }
 

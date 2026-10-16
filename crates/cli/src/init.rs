@@ -105,6 +105,17 @@ fn ask_storage() -> Result<Storage> {
 /// The question next to [`ask_storage`] (D55).
 const SKIP_PROMPTS_QUESTION: &str = "Let Claude Code skip its permission prompts in this project? Its own tools on the Mac are turned off, so it can act only inside the VM, which is its sandbox. [y/N] ";
 
+/// Whether Claude Code skips its prompts in project `dir`: yes if an
+/// earlier yes is in its personal settings, otherwise asked when stdin is
+/// a terminal. Asked in an existing project too, so one set up before the
+/// question existed can still say yes.
+fn skip_prompts_answer(dir: &Path) -> Result<bool> {
+    if skill::prompts_skipped(dir) {
+        return Ok(true);
+    }
+    Ok(io::stdin().is_terminal() && ask_skip_prompts()?)
+}
+
 fn ask_skip_prompts() -> Result<bool> {
     eprint!("{SKIP_PROMPTS_QUESTION}");
     let mut answer = String::new();
@@ -144,9 +155,10 @@ pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
             .fix("Run `cave images` to see the image names"));
     };
     let config_path = dir.join(CONFIG_FILE);
-    let mut skip_prompts = false;
+    let skip_prompts;
     if config_path.exists() {
         println!("cave.toml already exists; left it unchanged");
+        skip_prompts = skip_prompts_answer(&dir)?;
     } else {
         let storage = if synced {
             Storage::Synced
@@ -158,7 +170,7 @@ pub fn run(sealed: bool, synced: bool, image: &str) -> Result<()> {
             println!("No terminal to ask, so the project is sealed: code lives only in the VM");
             Storage::Sealed
         };
-        skip_prompts = io::stdin().is_terminal() && ask_skip_prompts()?;
+        skip_prompts = skip_prompts_answer(&dir)?;
         write_project(&dir, storage, image)?;
         let mode = if storage == Storage::Sealed {
             "sealed"
