@@ -4,13 +4,13 @@
 
 cave-vm (Coding Agent Virtual Environment) is an open-source microVM runtime for Macs with Apple Silicon (M-series) chips. It gives each project directory its own Linux VM that starts quickly, can be snapshotted, rolled back and forked, and shows you exactly what it can reach.
 
-Coding agents are most useful when you stop approving every command, and most risky at the same moment. With cave-vm the agent works inside a hardware-isolated VM instead of on your Mac, so a bad command damages a disposable machine, not your files.
+Coding agents are most useful when you stop approving every command, and most risky at the same moment. With cave-vm, the agent works inside a hardware-isolated VM instead of on your Mac, so a bad command damages a disposable machine, not your own files.
 
 ## Requirements
 
 - macOS 26 (Tahoe) or later
 - Apple Silicon Mac
-- Guests are ARM64 Linux (Debian by default, or optionally Ubuntu)
+- Preferably, Homebrew
 
 ## Quickstart
 
@@ -20,9 +20,10 @@ cd [project-dir]
 cave agent [claude/codex]
 ```
 
-Without Homebrew, `curl -fsSL https://github.com/rolling7ho/cave-vm/releases/latest/download/install.sh | sh` installs the release binaries in `~/.local/bin` (set `CAVE_PREFIX` to change that) after checking their checksum.
-
-The first run downloads the kernel and a Debian image, signs the binary for Hypervisor.framework, and checks your setup. If something is wrong, the error says how to fix it, and `cave doctor` re-runs the checks.
+Don’t have Homebrew? <br>
+```sh
+curl -fsSL https://github.com/rolling7ho/cave-vm/releases/latest/download/install.sh | sh
+```
 
 Commands:
 
@@ -51,17 +52,17 @@ Commands:
 | `cave help` | Display general help or detailed help for a specific command |
 | `cave --version` | Display the installed cave version |
 
-The full command reference, with every flag and error, is in [docs/cli.md](docs/cli.md), and `cave.toml` is described in [docs/config.md](docs/config.md). SDKs for Rust ([crates/sdk](crates/sdk)), Python ([sdks/python](sdks/python)) and TypeScript ([sdks/typescript](sdks/typescript)) expose the same operations, and `cave mcp` serves them to agents as MCP tools.
+The full command reference, with every flag and error, is in [docs/cli.md](docs/cli.md).
 
 ## The idea
 
-- **The project directory is the VM.** `cd` into a project and run `cave shell`. Delete the folder and everything is gone.
-- **Code lives inside the VM.** The agent can't touch host files because nothing from the host is mounted. If you want your normal editor, an optional synced copy of the source stays on your Mac.
-- **Snapshot, roll back, fork.** Snapshot before a risky run and restore after. Fork a project into parallel copies to try several approaches at once, using copy-on-write so forks are cheap.
+- **The project directory is the VM.** `cd` into your project and run `cave shell`. Delete the folder and everything is gone.
+- **Code lives inside the VM.** The agent can't touch host files because nothing from the host is mounted. A synced mode is also optionally available if you prefer it.
+- **Snapshot, roll back, fork.** Snapshot before a risky run and restore after. Fork a project into parallel copies to try several approaches at once.
 - **Safety you can see.** Every VM has an inspectable policy: what is reachable, how much CPU and memory it gets, and a log of what the agent did.
-- **Agent-first.** An MCP server and a ready-made skill let Claude Code and Codex use the VM as their sandbox with no host shell.
-- **Easy to set up.** One install, and the first run fetches everything else and fixes what it can. No SSH keys, no cloud-init, no image formats to learn.
-
+- **Agent-first.** An MCP server and a skill let Claude Code and Codex use the VM as their sandbox with no host shell.
+- **Easy to set up.** One install, and the first run fetches everything else and fixes what it can.
+  
 ## Safety defaults
 
 - **Files:** nothing from your Mac is reachable from the VM.
@@ -69,7 +70,7 @@ The full command reference, with every flag and error, is in [docs/cli.md](docs/
 - **Credentials:** injected into the single command that needs them, never returned to the agent and never written to the audit log.
 - **Widening access** always takes an explicit flag, and the flag is echoed back when the VM starts.
 
-A VM protects your Mac from a misbehaving or prompt-injected agent. It does not protect secrets you place inside it, or anything the agent can reach over the network, and an agent that still has a host shell can step outside the VM. [docs/safety.md](docs/safety.md) describes the model and its limits, and [SECURITY.md](SECURITY.md) says what counts as a vulnerability.
+A VM protects your Mac from a misbehaving or prompt-injected agent. It does not protect secrets you place inside it, or anything the agent can reach over the network.
 
 ## How it works
 
@@ -79,7 +80,7 @@ The full design is in [docs/design.md](docs/design.md).
 
 ## Contributing
 
-Contributions are welcome once the project opens up. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Contributors are expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately, as described in [SECURITY.md](SECURITY.md).
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems privately, as instructed in [SECURITY.md](SECURITY.md).
 
 ## License
 
