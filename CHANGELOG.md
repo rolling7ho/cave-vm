@@ -7,6 +7,9 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 ### Added
 - `docs/threat-model.md`: who cave defends against, its trust boundaries, everything a VM can send to the Mac and what happens if a boundary falls. `docs/safety.md` lists three more known limits: symbolic links in folders read out of the VM, terminal escape sequences, and the network policy running in the VMM.
 
+### Changed
+- The VM's clock and timezone follow the Mac's. The time was set only at boot, restore and resume; it is now sent again whenever the Mac's clock jumps, such as after the Mac slept with the VM running, when its timezone changes, and every 10 minutes. The guest takes the Mac's timezone instead of UTC once its image has the new guest agent (D57, decision 0028).
+
 ### Fixed
 - Plain `claude` still asked for permission after a yes to `cave init`'s question about skipping prompts: Claude Code ignores `bypassPermissions` in `.claude/settings.local.json`, since a repository can write that file, and fell back to asking. A yes now writes `dontAsk` with the `cave` tools allowed and the same tools denied, so Claude Code never prompts and turns away anything else. `cave init` also asks the question in an existing project, and moves an earlier yes to `dontAsk` (D55, decision 0026).
 

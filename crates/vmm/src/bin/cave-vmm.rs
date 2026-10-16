@@ -43,6 +43,7 @@ mod vmm {
     use cave_vm_vmm::backend::Backend;
     use cave_vm_vmm::backend::hvf::HvfBackend;
     use cave_vm_vmm::boot::{self, BootConfig};
+    use cave_vm_vmm::clock;
     use cave_vm_vmm::control::{self, RunningVm};
     use cave_vm_vmm::devices::virtio::balloon::Balloon;
     use cave_vm_vmm::devices::virtio::block::Block;
@@ -481,7 +482,20 @@ mod vmm {
             .map_err(|e| e.with_fix("the guest's console is in vmm.log in the VM's folder"))?;
         note("the guest agent answered");
         control::reply(link, &FromVmm::Booted).map_err(|e| failed("control link", e))?;
-        match control::serve(link, vm) {
+        // Keeps the guest's clock and timezone on the Mac's until the VM
+        // stops.
+        let done = Arc::new(AtomicBool::new(false));
+        let connector = vm.connector.clone();
+        let keeping = Arc::clone(&done);
+        thread::spawn(move || {
+            clock::keep(
+                clock::send_over(move || connector.connect(AGENT_PORT)),
+                &keeping,
+            )
+        });
+        let served = control::serve(link, vm);
+        done.store(true, Ordering::Release);
+        match served {
             Ok(ending) => note(format!("stopping: {ending:?}")),
             // The guest stopped and shut the link, or the daemon went away.
             Err(e) if gone.load(Ordering::Acquire) => note(format!("the VM stopped ({e})")),

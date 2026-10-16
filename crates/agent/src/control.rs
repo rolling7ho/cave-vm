@@ -1,7 +1,8 @@
-//! The control connection: liveness, snapshot preparation and the clock
-//! after a restore.
+//! The control connection: liveness, snapshot preparation, and the clock
+//! and timezone.
 
 use std::io;
+use std::path::Path;
 
 use cave_vm_proto::agent::Message;
 use cave_vm_proto::{ErrorCode, read_frame};
@@ -9,6 +10,7 @@ use cave_vm_proto::{ErrorCode, read_frame};
 use crate::session::kind;
 use crate::stream::{Out, Stream};
 use crate::sys;
+use crate::timezone;
 
 pub fn run(mut reader: Box<dyn Stream>, out: &Out) -> io::Result<()> {
     loop {
@@ -24,8 +26,20 @@ pub fn run(mut reader: Box<dyn Stream>, out: &Out) -> io::Result<()> {
                 sys::sync();
                 out.send(&Message::SnapshotReady)?;
             }
-            Message::Restored { time_unix_ns } => match sys::set_clock(time_unix_ns) {
-                Ok(()) => out.send(&Message::Ok)?,
+            Message::Restored {
+                time_unix_ns,
+                timezone,
+            } => match sys::set_clock(time_unix_ns) {
+                Ok(()) => {
+                    // A timezone that cannot be set leaves the old one; the
+                    // clock is what matters.
+                    if let Some(zone) = timezone
+                        && let Err(e) = timezone::set(Path::new("/"), &zone)
+                    {
+                        eprintln!("cave-agent: could not set the timezone: {e}");
+                    }
+                    out.send(&Message::Ok)?
+                }
                 Err(e) => out.error(
                     ErrorCode::PermissionDenied,
                     format!("could not set the guest clock: {e}"),

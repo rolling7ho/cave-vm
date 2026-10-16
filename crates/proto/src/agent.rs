@@ -22,6 +22,14 @@ pub const EXIT_NOT_FOUND: i32 = 127;
 /// Exit code when the program cannot be run, as in a shell.
 pub const EXIT_CANNOT_RUN: i32 = 126;
 
+/// A timezone for the guest: its name, such as `Asia/Manila`, and the
+/// Mac's compiled zone file for it, so the guest needs no zone database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Timezone {
+    pub name: String,
+    pub tzif: Data,
+}
+
 /// Every message on the agent link.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -100,9 +108,13 @@ pub enum Message {
     Pong,
     SnapshotPrepare,
     SnapshotReady,
-    /// Sent after a restore, so the agent sets the guest clock.
+    /// Sent after a boot and a restore, and again whenever the Mac's clock
+    /// or timezone moves, so the agent sets the guest's to match.
     Restored {
         time_unix_ns: u64,
+        /// The Mac's timezone; left out when it cannot be read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timezone: Option<Timezone>,
     },
     Ok,
 
@@ -350,6 +362,17 @@ mod tests {
             json!({"type": "restored", "time_unix_ns": 1791800569000000000u64}),
             Message::Restored {
                 time_unix_ns: 1_791_800_569_000_000_000,
+                timezone: None,
+            },
+        );
+        check(
+            json!({"type": "restored", "time_unix_ns": 1, "timezone": {"name": "Asia/Manila", "tzif": "VFppZg=="}}),
+            Message::Restored {
+                time_unix_ns: 1,
+                timezone: Some(Timezone {
+                    name: "Asia/Manila".into(),
+                    tzif: Data(b"TZif".to_vec()),
+                }),
             },
         );
     }

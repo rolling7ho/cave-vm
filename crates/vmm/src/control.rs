@@ -10,7 +10,7 @@ use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use cave_vm_proto::agent::Message;
 use cave_vm_proto::daemon::AuditEntry;
@@ -20,6 +20,7 @@ use cave_vm_proto::{
     ErrorCode, ErrorMessage, FrameError, Hello, VERSIONS, read_frame, write_frame,
 };
 
+use crate::clock;
 use crate::host;
 
 /// What the control loop needs from a booted VM.
@@ -262,12 +263,20 @@ fn greet(stream: &mut UnixStream, attempt: Duration) -> io::Result<()> {
     }
     // The VM has no clock of its own, and TLS and package managers need
     // the right time.
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(io::Error::other)?;
-    let time_unix_ns = u64::try_from(now.as_nanos()).map_err(io::Error::other)?;
-    send_agent(stream, &Message::Restored { time_unix_ns })?;
+    send_agent(stream, &clock::message()?)?;
     match read_agent(stream)? {
+        Message::Ok => Ok(()),
+        _ => Err(io::ErrorKind::InvalidData.into()),
+    }
+}
+
+/// Sends `message`, the clock, on a new control connection, and waits for
+/// the agent's `ok`.
+pub fn send_clock(mut stream: UnixStream, message: &Message) -> io::Result<()> {
+    stream.set_read_timeout(Some(AGENT_ATTEMPT))?;
+    open_control(&mut stream)?;
+    send_agent(&mut stream, message)?;
+    match read_agent(&mut stream)? {
         Message::Ok => Ok(()),
         _ => Err(io::ErrorKind::InvalidData.into()),
     }

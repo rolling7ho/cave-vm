@@ -159,7 +159,7 @@ The daemon, through the VMM, keeps one connection to the agent open while the VM
 | `{"type": "ping"}` / `{"type": "pong"}` | either way | Liveness |
 | `{"type": "snapshot_prepare"}` | host to agent | A snapshot is about to be taken. The agent flushes file systems (`sync`) and answers `snapshot_ready` |
 | `{"type": "snapshot_ready"}` | agent to host | Safe to pause the VM |
-| `{"type": "restored", "time_unix_ns": 1791800569000000000}` | host to agent | Sent after a boot and after a restore, since the VM has no clock of its own. The agent sets the guest clock to the host's time and answers `ok` |
+| `{"type": "restored", "time_unix_ns": 1791800569000000000, "timezone": {"name": "Asia/Manila", "tzif": "VFppZjI..."}}` | host to agent | Sent after a boot and after a restore, since the VM has no clock of its own, and again whenever the Mac's clock jumps, its timezone changes, or 10 minutes pass ([D57](../ROADMAP.md#decisions)). The agent sets the guest clock to the host's time and, when `timezone` is there, the guest's timezone: `name` is the zone's name and `tzif` the Mac's compiled zone file, in base64, used when the guest has no file for that zone. It answers `ok`; a timezone it cannot set is skipped |
 | `{"type": "ok"}` | agent to host | Acknowledgement |
 
 After a restore the vsock transport is reset, so every connection from before the snapshot is gone. The host opens a new control connection and sends `restored` before anything else (ROADMAP P4.3).
