@@ -207,7 +207,7 @@ class SandboxTest(unittest.TestCase):
         self.assertEqual(forked.sandbox.fork_name, "fork-1")
         forked.sandbox.destroy()
         (remove,) = self.requests("remove")
-        self.assertEqual(remove, {"type": "remove", "vm": {"project": str(self.project)}, "name": "fork-1"})
+        self.assertEqual(remove, {"type": "remove", "vm": {"project": str(self.project), "fork": "fork-1"}})
         self.assertEqual(sb.fork_named("try")._vm(), {"project": str(self.project), "fork": "try"})
 
     def test_no_daemon_and_none_to_start_says_how_to_start_one(self):

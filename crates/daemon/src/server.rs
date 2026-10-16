@@ -190,12 +190,7 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
         Request::Remove {
             vm,
             name: Some(name),
-        } => vms
-            .remove(&VmId {
-                fork: Some(name),
-                ..vm
-            })
-            .map(|()| Reply::Ok),
+        } => vms.remove_named(&vm, &name).map(|()| Reply::Ok),
         Request::Fork { vm, name, from } => {
             vms.fork(&vm, name.as_deref(), from.as_deref())
                 .map(|forked| Reply::Forked {

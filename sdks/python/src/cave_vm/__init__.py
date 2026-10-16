@@ -515,10 +515,12 @@ class Sandbox:
         """Removes the VM. For a fork, that is the fork alone. For the
         project's own VM, it is its disk, snapshots and forks, as with
         ``cave rm --yes``: in a sealed project, code that is only in the VM
-        is lost. ``cave.toml`` stays."""
-        request = {"type": "remove", "vm": {"project": str(self.project)}}
+        is lost. ``cave.toml`` stays. A fork's name never removes a snapshot
+        with that name."""
+        vm = {"project": str(self.project)}
         if self.fork_name is not None:
-            request["name"] = self.fork_name
+            vm["fork"] = self.fork_name
+        request = {"type": "remove", "vm": vm}
         reply = self.daemon.call(request)
         if reply.get("type") != "ok":
             raise _unexpected("remove", reply)

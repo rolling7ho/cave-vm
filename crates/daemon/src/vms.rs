@@ -730,22 +730,40 @@ impl Vms {
         Ok(())
     }
 
+    /// Removes snapshot or fork `name` of `id`'s project, the snapshot
+    /// when both have that name (`cave rm <name>`).
+    pub fn remove_named(&self, id: &VmId, name: &str) -> Result<(), ErrorMessage> {
+        let project = VmId {
+            fork: None,
+            ..id.clone()
+        };
+        if self.remove_snapshot(&project, name)? || self.remove_fork(&project, name)? {
+            return Ok(());
+        }
+        Err(error(
+            ErrorCode::NotFound,
+            format!("no fork or snapshot named {name} in this project"),
+        )
+        .with_fix("List them with `cave ls`"))
+    }
+
     /// Removes a project's VM: stops it, then deletes the project's
     /// `.cave/` (disk, snapshots and forks) and the daemon's state for it.
     /// `cave.toml` and the rest of the folder stay. Removing a VM that has
-    /// no `.cave/` is not an error.
+    /// no `.cave/` is not an error. For a fork, it removes that fork and
+    /// never a snapshot.
     pub fn remove(&self, id: &VmId) -> Result<(), ErrorMessage> {
         if let Some(name) = &id.fork {
             let project = VmId {
                 fork: None,
                 ..id.clone()
             };
-            if self.remove_snapshot(&project, name)? || self.remove_fork(&project, name)? {
+            if self.remove_fork(&project, name)? {
                 return Ok(());
             }
             return Err(error(
                 ErrorCode::NotFound,
-                format!("no fork or snapshot named {name} in this project"),
+                format!("no fork named {name} in this project"),
             )
             .with_fix("List them with `cave ls`"));
         }

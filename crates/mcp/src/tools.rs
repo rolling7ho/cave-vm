@@ -112,7 +112,6 @@ impl Tools {
                     "type": "object",
                     "properties": {
                         "name": { "type": "string", "description": "Letters, digits, `-` and `_`, such as before-refactor." },
-                        "fork": fork,
                     },
                     "required": ["name"],
                 },
@@ -124,7 +123,6 @@ impl Tools {
                     "type": "object",
                     "properties": {
                         "name": { "type": "string", "description": "The snapshot's name." },
-                        "fork": fork,
                     },
                     "required": ["name"],
                 },

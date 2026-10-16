@@ -437,8 +437,9 @@ export class Sandbox {
   /** Removes the VM: a fork alone, or the project's VM with its disk,
    * snapshots and forks, as `cave rm --yes` does. `cave.toml` stays. */
   async destroy() {
-    const request = { type: "remove", vm: { project: this.project } };
-    if (this.forkName !== undefined) request.name = this.forkName;
+    const vm = { project: this.project };
+    if (this.forkName !== undefined) vm.fork = this.forkName;
+    const request = { type: "remove", vm };
     const reply = await this.daemon.call(request);
     if (reply.type !== "ok") throw unexpected("remove", reply);
   }
