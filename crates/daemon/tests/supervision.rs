@@ -1458,6 +1458,14 @@ fn a_fork_of_the_running_vm_starts_from_its_memory() {
         r.forks(&id),
         [("fork-2".to_string(), Some(VmState::Running))]
     );
+    // Removing a fork by its VM, as the SDKs and the MCP server do, never
+    // removes a snapshot with that name.
+    let e = error_of(r.request(Request::Remove {
+        vm: fork_id(&id, "before"),
+        name: None,
+    }));
+    assert_eq!(e.code, ErrorCode::NotFound);
+    assert!(project.join(".cave/snapshots/before").exists());
     // Removing the project's VM stops its forks too.
     assert_eq!(
         r.request(Request::Remove {

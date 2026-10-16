@@ -199,7 +199,7 @@ test("snapshot, restore, fork and destroy", async () => {
   assert.equal(forked.source, "before");
   assert.equal(forked.sandbox.forkName, "fork-1");
   await forked.sandbox.destroy();
-  assert.deepEqual(kind("remove"), [{ type: "remove", vm: { project }, name: "fork-1" }]);
+  assert.deepEqual(kind("remove"), [{ type: "remove", vm: { project, fork: "fork-1" } }]);
   assert.deepEqual(sb.forkNamed("try").vm(), { project, fork: "try" });
 });
 

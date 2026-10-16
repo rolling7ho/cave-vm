@@ -29,8 +29,11 @@ struct TempFork {
 impl Drop for TempFork {
     fn drop(&mut self) {
         let _ = Connection::call(&Request::Remove {
-            vm: self.project.clone(),
-            name: Some(self.name.clone()),
+            vm: VmId {
+                fork: Some(self.name.clone()),
+                ..self.project.clone()
+            },
+            name: None,
         });
     }
 }

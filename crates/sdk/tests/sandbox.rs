@@ -341,8 +341,8 @@ fn snapshot_restore_fork_and_destroy_send_the_matching_requests() {
                 from: None
             },
             Request::Remove {
-                vm: vm.clone(),
-                name: Some("fork-1".into())
+                vm: fake.vm(Some("fork-1")),
+                name: None
             },
             Request::Remove {
                 vm: vm.clone(),

@@ -25,7 +25,7 @@ fork.destroy()
 | `snapshot(name=None)` / `restore(name=None)` | Save the VM's state, and roll back to it |
 | `fork(name=None, from_snapshot=None)` | A new copy-on-write fork; `.sandbox` is the fork |
 | `fork_named(name)` | An existing fork |
-| `destroy()` | Removes a fork, or the project's VM as `cave rm --yes` does |
+| `destroy()` | Removes a fork, never a snapshot, or the project's VM as `cave rm --yes` does |
 
 A credential named in `credentials`, such as `API_KEY`, is read from the project's `.env` by the daemon and given to that one command. Its value is never returned, and output that prints it shows `[API_KEY]` instead. [docs/safety.md](../../docs/safety.md) covers what that does not protect.
 

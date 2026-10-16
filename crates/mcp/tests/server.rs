@@ -448,8 +448,8 @@ fn snapshot_restore_fork_and_destroy() {
                 from: Some("before".into())
             },
             Request::Remove {
-                vm,
-                name: Some("fork-1".into())
+                vm: fake.vm(Some("fork-1")),
+                name: None
             },
         ]
     );

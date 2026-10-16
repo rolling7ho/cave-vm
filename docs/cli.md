@@ -703,10 +703,10 @@ The server is written by hand ([decision 0013](decisions/0013-mcp-server-by-hand
 | `exec` | `command`, optional `cwd`, `fork` and `credentials` (a list of names) | Runs `bash -c <command>` in the VM, starting it if needed, and returns the exit code, stdout and stderr. Each stream keeps its first and last 50 KB when longer. Each credential named is given to the command as an environment variable (see [Credentials](#credentials)) |
 | `read_file` | `path`, optional `fork` | Returns a UTF-8 text file up to 1 MiB; relative paths are under `/workspace` |
 | `write_file` | `path`, `content`, optional `fork` | Writes a text file, creating missing folders |
-| `snapshot` | `name`, optional `fork` | As `cave snapshot <name>` |
-| `restore` | `name`, optional `fork` | As `cave restore <name>`, including the automatic snapshot that undoes it |
+| `snapshot` | `name` | As `cave snapshot <name>`, for the project's VM; forks cannot be snapshotted yet |
+| `restore` | `name` | As `cave restore <name>`, including the automatic snapshot that undoes it |
 | `fork` | optional `from` | As `cave fork [--from <snapshot>]`; returns the fork's name to pass as `fork` |
-| `destroy` | `fork` | Removes a fork. The project's own VM cannot be removed through MCP, since in a sealed project it can hold the only copy of the code; that is `cave rm` |
+| `destroy` | `fork` | Removes a fork, never a snapshot. The project's own VM cannot be removed through MCP, since in a sealed project it can hold the only copy of the code; that is `cave rm` |
 
 A tool that fails returns the error and its fix as text, marked `isError`, so the agent can act on it.
 

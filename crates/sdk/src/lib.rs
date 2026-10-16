@@ -463,14 +463,15 @@ impl Sandbox {
     /// Removes the VM. For a fork, that is the fork alone. For the
     /// project's own VM, it is its disk, snapshots and forks, as with
     /// `cave rm --yes`: in a sealed project, code that is only in the VM
-    /// is lost. `cave.toml` stays.
+    /// is lost. `cave.toml` stays. A fork's name never removes a snapshot
+    /// with that name.
     pub fn destroy(self) -> Result<()> {
         match self.daemon.call(&Request::Remove {
             vm: VmId {
                 project: self.project.to_string_lossy().into_owned(),
-                fork: None,
+                fork: self.fork,
             },
-            name: self.fork,
+            name: None,
         })? {
             Reply::Ok => Ok(()),
             other => Err(Error::unexpected("remove", other)),
