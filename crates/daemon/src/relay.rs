@@ -85,7 +85,14 @@ fn to_client(message: Message) -> (Reply, bool) {
     match message {
         Message::Output { stream, data } => (Reply::Output { stream, data }, false),
         Message::PtyData { data } => (Reply::PtyData { data }, false),
-        Message::Exit { code, signal } => (Reply::Exit { code, signal }, true),
+        Message::Exit { code, signal } => (
+            Reply::Exit {
+                code,
+                signal,
+                redacted: false,
+            },
+            true,
+        ),
         Message::FileInfo { size, mode } => (Reply::FileInfo { size, mode }, false),
         Message::FileData { data } => (Reply::FileData { data }, false),
         Message::FileEnd { sha256 } => (Reply::FileEnd { sha256 }, true),
@@ -217,6 +224,7 @@ pub fn run_redacted(
             Ok(message) => to_client(message),
             Err(e) => (Reply::Error(e), true),
         };
+        let mut reply = reply;
         // Output held back in case it was the start of a value goes out
         // before the operation ends.
         if last {
@@ -232,6 +240,9 @@ pub fn run_redacted(
                         },
                     );
                 }
+            }
+            if let Reply::Exit { redacted, .. } = &mut reply {
+                *redacted = stdout.replaced() || stderr.replaced();
             }
         }
         let result = write_frame(client, &reply).map_err(io::Error::other);

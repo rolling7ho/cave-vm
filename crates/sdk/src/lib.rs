@@ -322,7 +322,7 @@ impl Sandbox {
                     Stream::Stdout => output.stdout.extend_from_slice(&data.0),
                     Stream::Stderr => output.stderr.extend_from_slice(&data.0),
                 },
-                Reply::Exit { code, signal } => {
+                Reply::Exit { code, signal, .. } => {
                     output.code = code;
                     output.signal = signal;
                     return Ok(output);

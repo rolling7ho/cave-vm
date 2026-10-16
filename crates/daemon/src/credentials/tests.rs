@@ -113,6 +113,9 @@ fn held_back_text_that_is_not_a_value_comes_out() {
     assert_eq!(r.push(b"ond"), b"second");
     assert_eq!(r.push(b" sec"), b" ");
     assert_eq!(r.finish(), b"sec");
+    assert!(!r.replaced());
+    assert_eq!(r.push(b"a secret"), b"a [K]");
+    assert!(r.replaced());
 }
 
 #[test]

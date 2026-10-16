@@ -188,6 +188,7 @@ fn fake_exec(stream: &mut UnixStream, argv: &[String]) {
     let exit = |code: Option<i32>, signal: Option<&str>| Reply::Exit {
         code,
         signal: signal.map(Into::into),
+        redacted: false,
     };
     match argv[0].as_str() {
         "cat" => {

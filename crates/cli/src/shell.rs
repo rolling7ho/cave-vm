@@ -249,7 +249,7 @@ pub fn session(vm: VmId, argv: Option<Vec<String>>, open_links: bool) -> Result<
                     break Ok(EXIT_CAVE_FAILED_RUNNING);
                 }
             }
-            Ok(Reply::Exit { code, signal }) => break Ok(exit_code(code, signal.as_deref())),
+            Ok(Reply::Exit { code, signal, .. }) => break Ok(exit_code(code, signal.as_deref())),
             Ok(Reply::Error(e)) => break Err(failed(e.into())),
             Ok(Reply::Progress { .. }) => {}
             Ok(other) => {

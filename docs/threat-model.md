@@ -54,7 +54,7 @@ The guest has no service on the Mac to call. Everything it can send crosses one 
 
 ## Credentials
 
-A credential is read from `.env` only when a command names it, injected into that command's environment, and redacted as `[NAME]` from that and every later output and file read while the VM may still hold it. The audit log records names, never values. The command itself sees the value, so a command can leak it ([safety](safety.md#credentials)).
+A credential is read from `.env` only when a command names it, injected into that command's environment, and redacted as `[NAME]` from that and every later output and file read while the VM may still hold it; terminal sessions (`cave shell`, `cave agent`) are not redacted, and a folder copy that would need it is refused. The audit log records names, never values. The command itself sees the value, so a command can leak it ([safety](safety.md#credentials)).
 
 ## What happens if a boundary falls
 

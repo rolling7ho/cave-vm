@@ -98,7 +98,8 @@ fn input_goes_up_and_output_and_exit_come_back() {
         read_reply(&mut client),
         Some(Reply::Exit {
             code: Some(3),
-            signal: None
+            signal: None,
+            redacted: false,
         })
     );
     agent.join().unwrap();
@@ -108,7 +109,8 @@ fn input_goes_up_and_output_and_exit_come_back() {
         ended.last,
         Some(Reply::Exit {
             code: Some(3),
-            signal: None
+            signal: None,
+            redacted: false,
         })
     );
 }
@@ -282,8 +284,10 @@ fn injected_values_are_redacted_even_across_chunks() {
                 Stream::Stdout => stdout.extend(data.0),
                 Stream::Stderr => stderr.extend(data.0),
             },
-            Reply::Exit { code, .. } => {
+            Reply::Exit { code, redacted, .. } => {
                 assert_eq!(code, Some(0));
+                // The client is told the output is not what was written.
+                assert!(redacted);
                 break;
             }
             other => panic!("unexpected {other:?}"),

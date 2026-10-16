@@ -229,6 +229,7 @@ fn exec_runs_the_command_with_bash_and_reports_how_it_ended() {
             Reply::Exit {
                 code: Some(1),
                 signal: None,
+                redacted: false,
             },
         ],
         _ => Vec::new(),
@@ -271,6 +272,7 @@ fn exec_names_credentials_and_never_handles_their_values() {
             Reply::Exit {
                 code: Some(0),
                 signal: None,
+                redacted: false,
             },
         ],
         _ => Vec::new(),
@@ -493,6 +495,7 @@ fn tools_set_to_a_fork_act_on_it_unless_a_call_names_another() {
         Request::Exec { .. } => vec![Reply::Exit {
             code: Some(0),
             signal: None,
+            redacted: false,
         }],
         Request::Fork { .. } => vec![Reply::Forked {
             name: "fork-2".into(),

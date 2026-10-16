@@ -138,6 +138,8 @@ pub struct Redactor {
     /// containing another is replaced whole.
     secrets: Vec<(Vec<u8>, Vec<u8>)>,
     held: Vec<u8>,
+    /// Whether a value has been replaced.
+    replaced: bool,
 }
 
 impl Redactor {
@@ -154,7 +156,13 @@ impl Redactor {
         Redactor {
             secrets,
             held: Vec::new(),
+            replaced: false,
         }
+    }
+
+    /// Whether a value has been replaced so far.
+    pub fn replaced(&self) -> bool {
+        self.replaced
     }
 
     /// Whether there is nothing to redact.
@@ -184,6 +192,7 @@ impl Redactor {
             let rest = &input[i..];
             for (value, replacement) in &self.secrets {
                 if rest.starts_with(value) {
+                    self.replaced = true;
                     out.extend_from_slice(replacement);
                     i += value.len();
                     continue 'scan;

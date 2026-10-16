@@ -206,7 +206,15 @@ fn from_vm_one(vm: &VmId, src: &str, dest: &Path, into: bool) -> Result<()> {
         );
         drop(stdin);
         let status = tar.wait()?;
-        result?;
+        if result? {
+            // The archive's bytes changed, so what tar unpacked is not
+            // what is in the VM.
+            return Err(CliError::new(format!(
+                "{src} holds the value of a credential the VM was given, so cave replaced it with its name and the copy in {} is incomplete",
+                target.display()
+            ))
+            .fix("Copy its files one at a time with `cave cp :<file> <destination>`, which replaces the value with its name in each file"));
+        }
         if !status.success() {
             return Err(
                 CliError::new(format!("tar could not write into {}", target.display()))
@@ -257,18 +265,19 @@ fn local_tar_extract(target: &Path) -> Result<Child> {
 
 /// Whether `path` is a folder in the VM.
 fn is_vm_dir(vm: &VmId, path: &str) -> Result<bool> {
-    let (code, _) = exec_in_vm(vm, &["test", "-d", path], None, &mut io::sink())?;
+    let (code, _, _) = exec_in_vm(vm, &["test", "-d", path], None, &mut io::sink())?;
     Ok(code == 0)
 }
 
 /// Runs `argv` in the VM and fails with its stderr unless it exits 0.
+/// Returns whether the daemon replaced credential values in its output.
 fn vm_ok(
     vm: &VmId,
     argv: &[&str],
     input: Option<Box<dyn Read + Send>>,
     out: &mut dyn Write,
-) -> Result<()> {
-    let (code, stderr) = exec_in_vm(vm, argv, input, out)?;
+) -> Result<bool> {
+    let (code, stderr, redacted) = exec_in_vm(vm, argv, input, out)?;
     if code != 0 {
         let why = stderr.trim();
         return Err(CliError::new(if why.is_empty() {
@@ -278,17 +287,18 @@ fn vm_ok(
         })
         .fix("Check the path and its permissions in the VM, for example with `cave exec -- ls -la /workspace`"));
     }
-    Ok(())
+    Ok(redacted)
 }
 
 /// Runs `argv` in the VM with `input` as stdin, writes its stdout to
-/// `out`, and returns its exit code and stderr.
+/// `out`, and returns its exit code, its stderr and whether the daemon
+/// replaced credential values in its output.
 pub(crate) fn exec_in_vm(
     vm: &VmId,
     argv: &[&str],
     input: Option<Box<dyn Read + Send>>,
     out: &mut dyn Write,
-) -> Result<(u8, String)> {
+) -> Result<(u8, String, bool)> {
     let mut connection = Connection::open()?;
     connection.send(&Request::Exec {
         vm: vm.clone(),
@@ -324,9 +334,13 @@ pub(crate) fn exec_in_vm(
                 cave_vm_proto::agent::Stream::Stdout => out.write_all(&data.0)?,
                 cave_vm_proto::agent::Stream::Stderr => stderr.extend_from_slice(&data.0),
             },
-            Reply::Exit { code, signal } => {
+            Reply::Exit {
+                code,
+                signal,
+                redacted,
+            } => {
                 let stderr = String::from_utf8_lossy(&stderr).into_owned();
-                return Ok((exit_code(code, signal.as_deref()), stderr));
+                return Ok((exit_code(code, signal.as_deref()), stderr, redacted));
             }
             Reply::Error(e) => return Err(e.into()),
             Reply::Progress { .. } => {}
