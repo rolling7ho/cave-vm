@@ -6,6 +6,12 @@ cave-vm (Coding Agent Virtual Environment) is an open-source microVM runtime for
 
 Coding agents are most useful when you stop approving every command, and most risky at the same moment. With cave-vm the agent works inside a hardware-isolated VM instead of on your Mac, so a bad command damages a disposable machine, not your files.
 
+## Requirements
+
+- macOS 26 (Tahoe) or later
+- Apple Silicon Mac
+- Guests are ARM64 Linux (Debian by default, or optionally Ubuntu)
+
 ## Quickstart
 
 ```sh
@@ -69,12 +75,6 @@ A VM protects your Mac from a misbehaving or prompt-injected agent. It does not 
 cave-vm is a VMM written in Rust on top of Apple's Hypervisor.framework, in the spirit of [Firecracker](https://github.com/firecracker-microvm/firecracker): a minimal virtio device model, direct kernel boot with its own small kernel, and copy-on-write snapshots. One VMM process runs per VM, supervised by a daemon. The CLI, SDKs and MCP server all talk to that daemon, and a small guest agent inside the VM handles commands, shells, files and port forwarding over vsock.
 
 The full design is in [docs/design.md](docs/design.md).
-
-## Requirements
-
-- macOS 26 (Tahoe) or later
-- Apple Silicon Mac
-- Guests are ARM64 Linux (Debian by default, or optionally Ubuntu)
 
 ## Contributing
 
