@@ -17,6 +17,7 @@ pub mod pty;
 pub mod session;
 pub mod stream;
 pub mod sys;
+pub mod timezone;
 pub mod user;
 
 pub use session::{Config, serve};
