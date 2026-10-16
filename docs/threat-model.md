@@ -46,7 +46,7 @@ The guest has no service on the Mac to call. Everything it can send crosses one 
 | Agent protocol over vsock | The daemon parses length-prefixed JSON from the guest agent | Frames over 1 MiB are refused; guest vsock connections are capped at 1024 |
 | Outbound network through the NAT | The VMM opens the connection on the guest's behalf | Policy above; 1024 TCP connections and 1024 UDP flows |
 | DNS to the gateway | The VMM sends the query on to the Mac's DNS servers from `/etc/resolv.conf` | UDP port 53 only; those servers are reached even when they are on the LAN or the Mac |
-| Mirror sync | The daemon writes files under the project folder | Paths that are absolute or contain `..` are refused. Credential values are not redacted from the mirror. Files the VM changed, including `cave.toml`, `.claude/settings.json`, `.mcp.json` and `.gitignore`, are written as they are |
+| Mirror sync | The daemon writes files under the project folder | Paths that are absolute or contain `.` or `..` segments are refused, and nothing is written through a symbolic link in the project folder. `.git`, `.cave`, the top-level `.env`, `cave.toml`, `.mcp.json`, `.gitignore` and `.claude/` are never written, compared without case ([D59](../ROADMAP.md#decisions)). Credential values are not redacted from the mirror |
 | Folders read out (`cave cp` from the VM, `cave pull`) | A tar stream made in the VM is unpacked by the Mac's `/usr/bin/tar` | That tar refuses absolute paths, `..` and writing through symbolic links; links themselves are recreated and may point anywhere on the Mac |
 | Terminal output (`cave shell`, `cave exec`, `cave agent`) | Relayed to your terminal | Escape sequences pass through, except cave's own link marker |
 | Sign-in links during `cave agent` | Opened in the Mac's browser | Only `https://` on `claude.ai`, `claude.com`, `anthropic.com` or their subdomains, with no user name or port ([D56](../ROADMAP.md#decisions)) |
@@ -60,7 +60,7 @@ A credential is read from `.env` only when a command names it, injected into tha
 
 - **Guest escapes into the VMM** (a bug in a device model or in Hypervisor.framework): the attacker runs with the VMM's sandbox, which still allows the project's `.cave/` folder and outbound connections. The NAT policy runs in that same process, so from there the LAN and the Mac's own addresses are no longer denied. Other folders and the keychain stay out of reach.
 - **VMM sandbox escape:** the attacker runs as your user. This is why the VMM has no unsafe Rust outside `hvf` and the guest-memory and host modules, and why device models are tested against the mock backend.
-- **Agent on the Mac ignores the skill:** the deny rules in `.claude/settings.json` and, after a yes in `cave init`, `.claude/settings.local.json` still hold for Claude Code; other agents keep their shell ([safety](safety.md#the-agent-boundary)). In synced mode the VM can rewrite `.claude/settings.json` and `cave.toml` through the mirror, so check them before you run plain `claude` or `cave run` again.
+- **Agent on the Mac ignores the skill:** the deny rules in `.claude/settings.json` and, after a yes in `cave init`, `.claude/settings.local.json` still hold for Claude Code; other agents keep their shell ([safety](safety.md#the-agent-boundary)).
 
 ## Reviewing changes
 

@@ -68,6 +68,90 @@ fn a_sync_writes_vm_changes_and_never_writes_over_mac_edits() {
 }
 
 #[test]
+fn config_the_vm_changed_is_held_not_written_to_the_mac() {
+    let last = hashes(&[
+        ("cave.toml", "1"),
+        (".claude/settings.json", "1"),
+        ("src/a", "1"),
+    ]);
+    let mac = last.clone();
+    let vm = hashes(&[
+        ("cave.toml", "2"),
+        (".claude/settings.json", "2"),
+        (".claude/hooks/x.sh", "1"),
+        (".mcp.json", "1"),
+        (".gitignore", "1"),
+        ("src/a", "2"),
+        ("docs/cave.toml", "1"),
+    ]);
+    let sync = plan_sync(&last, &mac, &vm);
+    assert_eq!(names(&sync.write), ["docs/cave.toml", "src/a"]);
+    assert_eq!(
+        names(&sync.held),
+        [
+            ".claude/hooks/x.sh",
+            ".claude/settings.json",
+            ".gitignore",
+            ".mcp.json",
+            "cave.toml"
+        ]
+    );
+    // A delete in the VM is held too, and the Mac keeps its copy.
+    let vm = hashes(&[("src/a", "1")]);
+    let sync = plan_sync(&last, &mac, &vm);
+    assert!(sync.delete.is_empty(), "{:?}", sync.delete);
+    assert_eq!(names(&sync.held), [".claude/settings.json", "cave.toml"]);
+    // Pushes from the Mac are not held.
+    let mac = hashes(&[
+        ("cave.toml", "3"),
+        (".claude/settings.json", "1"),
+        ("src/a", "1"),
+    ]);
+    assert_eq!(
+        names(&plan_pull(&last, &mac, &last, false).unwrap().write),
+        ["cave.toml"]
+    );
+}
+
+#[test]
+fn held_and_excluded_names_ignore_case() {
+    for path in [
+        "CAVE.TOML",
+        ".Claude/x",
+        ".MCP.JSON",
+        ".mcp.j\u{17f}on",
+        ".GitIgnore",
+    ] {
+        assert!(held(path), "{path}");
+    }
+    for path in ["src/cave.toml", "claude/x", "web/.mcp.json"] {
+        assert!(!held(path), "{path}");
+    }
+    let x = Exclusions::new("");
+    for path in [
+        ".GIT/config",
+        "web/.Git/HEAD",
+        ".CAVE/sync.json",
+        ".ENV",
+        "Node_Modules/x",
+    ] {
+        assert!(x.excluded(path, false), "{path}");
+    }
+}
+
+#[test]
+fn only_plain_paths_from_the_vm_count() {
+    for path in ["src/a", ".env.example", "a b/c"] {
+        assert!(plain(path), "{path}");
+    }
+    for path in [
+        "", "./.env", "././.env", "a/./b", "a//b", "../x", "a/..", "a\nb", "/abs",
+    ] {
+        assert!(!plain(path), "{path}");
+    }
+}
+
+#[test]
 fn the_first_sync_has_no_last_state() {
     let last = Hashes::new();
     let mac = hashes(&[("same", "1"), ("differ", "1"), ("mac-only", "1")]);

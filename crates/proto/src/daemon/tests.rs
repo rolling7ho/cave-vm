@@ -246,12 +246,13 @@ fn replies_round_trip() {
         },
     );
     check(
-        json!({"type": "synced", "written": ["src/app.ts"], "pending": ["README.md"]}),
+        json!({"type": "synced", "written": ["src/app.ts"], "pending": ["README.md"], "held": ["cave.toml"]}),
         Reply::Synced {
             written: vec!["src/app.ts".into()],
             deleted: Vec::new(),
             conflicts: Vec::new(),
             pending: vec!["README.md".into()],
+            held: vec!["cave.toml".into()],
         },
     );
     check(

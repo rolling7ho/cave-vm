@@ -500,11 +500,12 @@ cave sync [--watch]
 
 Synced mode only. Updates the Mac mirror from the VM now; the daemon also does it after agent runs and on snapshot (design). If the VM is not running, the sync waits until it is, and the command says so: it blocks and prints "waiting for the VM" rather than returning.
 
-The VM is authoritative, so a file changed only in the VM is written to the mirror, and one deleted in the VM is deleted there. A file you changed on the Mac is never written over: it waits for `cave push`, and one changed on both sides is left alone and listed. The same files as `cave push` are excluded. The hashes both sides agreed on are kept in `.cave/sync.json`. Writes go through a temporary file, so an editor never sees half a file.
+The VM is authoritative, so a file changed only in the VM is written to the mirror, and one deleted in the VM is deleted there. A file you changed on the Mac is never written over: it waits for `cave push`, and one changed on both sides is left alone and listed. The same files as `cave push` are excluded, compared without case as the Mac's disk compares them, so `.GIT` in the VM is `.git`. The VM cannot change the files that set up the project on the Mac: a change it made to `cave.toml`, `.mcp.json` or `.gitignore`, or to anything in `.claude/`, is listed and not written, and you make it on the Mac yourself if you want it ([D59](../ROADMAP.md#decisions)). Nothing is written or deleted through a symbolic link in the project folder. The hashes both sides agreed on are kept in `.cave/sync.json`. Writes go through a temporary file, so an editor never sees half a file.
 
 ```
 Wrote 2 files to your Mac: src/app.ts, src/util.ts
 1 file you changed on your Mac waits for `cave push`: README.md
+Did not copy 1 file the VM changed, since the VM may not change it on your Mac: cave.toml. Look at the change with `cave exec cat <file>` and make it on your Mac yourself if you want it
 ```
 
 `--watch` is the live mode ([D41](../ROADMAP.md#decisions)): it says `Updating the Mac mirror from the VM every 2 seconds. Ctrl-C stops`, syncs every 2 seconds until Ctrl-C, and prints each pass's writes and deletions with the time. Files waiting for `cave push` or left alone are listed again only when that list changes, and `The Mac mirror is up to date` is said once, at the start. It is one-way, from the VM to the Mac, with the same rules as one `cave sync`; edits on the Mac still reach the VM only through `cave push`. Each pass compares every file, so on a large project it keeps the VM a little busy.
@@ -521,6 +522,7 @@ Errors:
 | Error | Fix |
 | --- | --- |
 | `this project is sealed, so it has no Mac mirror` | Set `mode = "synced"` under `[storage]` in cave.toml to keep a copy on your Mac |
+| `<folder> on your Mac is a symbolic link, so cave will not write <path> through it` | Replace the link with a folder, or delete it, then run cave sync again |
 
 ### cave push
 
