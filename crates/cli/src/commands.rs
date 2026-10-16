@@ -98,12 +98,22 @@ pub fn ensure_running(
     } else {
         let headline = format!("started in {}", policy::seconds(started.elapsed()));
         eprintln!("{}", policy::render(&policy, &headline, Paint::stderr()));
+        if let Some(reason) = &policy.fresh_boot {
+            eprintln!("{}", fresh_boot_line(reason));
+        }
         memory::warn_if_tight(policy.memory_bytes);
     }
     if first_boot && !was_running {
         eprintln!("{}", first_copy_line(policy.storage));
     }
     Ok(policy)
+}
+
+/// The line for a start that booted instead of resuming the suspension.
+fn fresh_boot_line(reason: &str) -> String {
+    format!(
+        "Booted from the disk instead of resuming, since {reason}: files are kept, processes running before `cave stop` are not"
+    )
 }
 
 /// The daemon's record of a project VM's first boot, in the project

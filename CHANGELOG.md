@@ -10,6 +10,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 - The docs match the code again after the rc.3 docs review: the threat model (DNS through the gateway, link-local ranges, the mirror carrying unredacted files and config the VM changed), `docs/cli.md`, `docs/protocol.md`, `docs/snapshots.md`, `SECURITY.md`, and the status of decision records and ROADMAP rows changed by later decisions.
 
 ### Fixed
+- A start that boots from the disk instead of resuming the suspension, because the network was turned on or off or `cave.toml` asks for another size, now says so, since processes running before `cave stop` are lost. The note `cave agent` gives the agent in the VM now says that `cave run --net lan` needs `cave stop` first, and to undo a run with the snapshot name `cave agent` printed.
 - After `cave stop`, a new `cpus`, `memory` or larger `disk` in `cave.toml` was ignored, because the next start resumed the suspension with the old size. It now boots from the disk with the new size; running processes stop.
 
 ### Security

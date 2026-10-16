@@ -100,6 +100,7 @@ fn policy(net: Option<NetMode>, ports: Vec<PortMap>) -> Policy {
         memory_bytes: 2 << 30,
         ttl_seconds: None,
         widened,
+        fresh_boot: None,
     }
 }
 

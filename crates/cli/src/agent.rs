@@ -54,9 +54,9 @@ const IN_VM_NOTE: &str = concat!(
     "- Out of disk space (\"No space left on device\"; check with `df -h /`): raise `disk` under `[storage]` in cave.toml, for example `disk = \"40G\"`.\n",
     "- Out of memory (processes killed, \"Out of memory\" in `dmesg`; check with `free -h`): raise `memory` under `[vm]` in cave.toml, for example `memory = \"4G\"`, or `cpus` for more CPUs.\n",
     "- After changing cave.toml: quit the agent, run `cave stop`, then start it again, such as `cave agent claude`. The VM boots from its disk with the new size; files stay, running processes stop.\n",
-    "- A host the network policy blocks: `[network] mode` in cave.toml, or `cave run --net lan` for the local network.\n",
+    "- A host the network policy blocks: `[network] mode` in cave.toml, then `cave stop` and start again; for the local network, `cave stop`, then `cave run --net lan`.\n",
     "- Copy the project out to a folder on the Mac: `cave pull`. Bring edits made on the Mac in: `cave push`.\n",
-    "- Save the VM's state: `cave snapshot`. Undo this run: `cave restore`.",
+    "- Save the VM's state: `cave snapshot`. Undo this run: `cave restore` with the snapshot name `cave agent` printed before you started.",
 );
 
 /// The arguments that keep the project's Mac-side setup away from agent

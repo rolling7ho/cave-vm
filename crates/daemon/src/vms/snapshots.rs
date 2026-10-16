@@ -439,11 +439,16 @@ impl Vms {
             let prepared = self.source.prepare(&vm.id, net, ports)?;
             return self.launch(vm, prepared);
         };
+        let fresh = |reason: &str, mut running: Running| {
+            running.policy.fresh_boot = Some(reason.to_string());
+            running
+        };
         let booted = match net {
             Some(net) if (net == NetMode::Off) != (manifest.net == NetMode::Off) => self
                 .source
                 .prepare(&vm.id, Some(net), ports)
-                .and_then(|prepared| self.launch(vm, prepared)),
+                .and_then(|prepared| self.launch(vm, prepared))
+                .map(|running| fresh("the network was turned on or off", running)),
             _ if self
                 .source
                 .resized(&vm.id, manifest.cpus, manifest.memory_bytes) =>
@@ -451,6 +456,7 @@ impl Vms {
                 self.source
                     .prepare(&vm.id, net, ports)
                     .and_then(|prepared| self.launch(vm, prepared))
+                    .map(|running| fresh("cave.toml asks for other cpus, memory or disk", running))
             }
             _ => {
                 manifest.net = net.unwrap_or(manifest.net);

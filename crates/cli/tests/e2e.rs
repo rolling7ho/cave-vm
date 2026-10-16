@@ -648,7 +648,15 @@ fn stop_suspends_and_the_next_command_resumes() {
     )
     .unwrap();
     assert!(rig.cave(&["stop"]).status.success());
-    assert!(rig.cave(&["run", "--net", "off"]).status.success());
+    let out = rig.cave(&["run", "--net", "off"]);
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(
+            "Booted from the disk instead of resuming, since cave.toml asks for other cpus, memory or disk"
+        ),
+        "{stderr}"
+    );
     let kib = rig.exec(
         &["sh", "-c", "awk '/MemTotal/ {print $2}' /proc/meminfo"],
         0,

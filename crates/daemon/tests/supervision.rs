@@ -238,6 +238,7 @@ impl VmSource for Source {
                 memory_bytes: 2 << 30,
                 ttl_seconds: *self.ttl_seconds.lock().unwrap(),
                 widened: Vec::new(),
+                fresh_boot: None,
             },
             idle_suspend: *self.idle_suspend.lock().unwrap(),
         })
@@ -1234,7 +1235,7 @@ fn stop_suspends_and_the_next_start_resumes() {
     assert_eq!(manifest(&project, "asleep")["has_memory"], true);
 
     // Starting resumes it and removes the suspension.
-    assert!(matches!(start(None), Reply::Policy(_)));
+    assert!(matches!(start(None), Reply::Policy(p) if p.fresh_boot.is_none()));
     let restored = fs::read_to_string(&marker).unwrap();
     assert!(restored.ends_with("/suspended 2"), "{restored}");
     assert!(!suspended.exists());
@@ -1242,14 +1243,22 @@ fn stop_suspends_and_the_next_start_resumes() {
 
     // A start that turns the network off cannot resume, so it boots.
     assert_eq!(r.request(Request::Stop { vm: id.clone() }), Reply::Ok);
-    assert!(matches!(start(Some(NetMode::Off)), Reply::Policy(p) if p.net == NetMode::Off));
+    assert!(matches!(
+        start(Some(NetMode::Off)),
+        Reply::Policy(p) if p.net == NetMode::Off && p.fresh_boot.is_some()
+    ));
     assert!(!marker.exists());
     assert!(!suspended.exists());
 
     // Nor can one after cave.toml asked for other resources.
     assert_eq!(r.request(Request::Stop { vm: id.clone() }), Reply::Ok);
     r.source.resized.store(true, Ordering::SeqCst);
-    assert!(matches!(start(None), Reply::Policy(_)));
+    assert!(matches!(
+        start(None),
+        Reply::Policy(p) if p.fresh_boot.as_deref() == Some("cave.toml asks for other cpus, memory or disk")
+    ));
+    // The reason belongs to that start's reply only.
+    assert!(matches!(start(None), Reply::Policy(p) if p.fresh_boot.is_none()));
     assert!(!marker.exists());
     assert!(!suspended.exists());
     r.source.resized.store(false, Ordering::SeqCst);

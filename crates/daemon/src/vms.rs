@@ -402,8 +402,10 @@ impl Vms {
         });
         let slot = vm.slot.lock().expect("vm lock");
         match result {
-            Ok(running) => {
+            Ok(mut running) => {
+                // The reason is for this reply only, not for later ones.
                 let policy = running.policy.clone();
+                running.policy.fresh_boot = None;
                 vm.set(slot, Slot::Running(running));
                 self.copy_if_pending(id)?;
                 Ok(policy)

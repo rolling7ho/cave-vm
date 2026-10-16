@@ -268,6 +268,7 @@ fn policy(
         memory_bytes: settings.memory_bytes,
         ttl_seconds: settings.ttl.map(|t| t.as_secs()),
         widened,
+        fresh_boot: None,
     }
 }
 
