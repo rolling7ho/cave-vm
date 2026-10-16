@@ -1,6 +1,6 @@
 # Safety model and its limits
 
-This page says what cave protects, what it does not, and where its guardrails stop. It follows the design's "Safety model" and "Agent integration" sections. When this page and `docs/design.md` disagree, the design is right.
+This page says what cave protects, what it does not, and where its guardrails stop. It follows the design's "Safety model" and "Agent integration" sections. [threat-model.md](threat-model.md) says who cave defends against and what crosses each boundary. When this page and `docs/design.md` disagree, the design is right.
 
 ## What the VM protects
 
@@ -76,6 +76,9 @@ These are known and accepted for v1:
 - **The Mac's addresses are read once.** The VM is denied every address the Mac has when the VM starts. If the Mac joins another network or gets a new address while the VM runs, the VM can reach that new address until it is stopped and started again.
 - **Turning off update checks is per project.** `[updates] check = false` in a project's `cave.toml` stops cave's own lookups only for commands run in that project. Commands run anywhere else still look for a newer cave.
 - **That setting is read by a small parser.** To stay fast before every command, cave reads `check` with a simple line reader, not a full TOML parser. It understands `check = false` on its own line under `[updates]`. Other ways of writing it, such as an inline table, are not seen, and checks stay on.
+- **Folders read out of the VM keep their symbolic links.** `cave cp` from the VM and `cave export` unpack a tar stream made in the VM with the Mac's `tar`, which refuses absolute paths, `..` and writing through links. A link in the VM's folder is recreated as a link, and can point anywhere on the Mac; following it later reaches that place.
+- **Terminal output is passed through.** `cave shell`, `cave exec` and `cave agent` relay the VM's output to your terminal with its escape sequences, apart from cave's own link marker. What a sequence can do depends on your terminal, such as setting the window title.
+- **The network policy runs in the VMM.** A guest that escaped into its VMM process would no longer be held to the LAN and Mac denials, though the VMM's sandbox still keeps it out of your folders.
 - **Downloads use the Mac's curl.** Update lookups and installs run `/usr/bin/curl`, which reads your `~/.curlrc`. Settings there, such as a proxy, apply to these requests as well.
 
 ## Reporting a problem
