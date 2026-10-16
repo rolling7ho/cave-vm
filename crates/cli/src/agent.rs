@@ -42,8 +42,22 @@ const INSTALL_CODEX_IN_VM: &str = "command -v codex >/dev/null || \
      sudo npm install -g @openai/codex; }";
 
 /// What an agent in the VM is told, since the project's skill and
-/// `AGENTS.md` line are written for agents on the Mac.
-const IN_VM_NOTE: &str = "You are running inside this project's cave VM, a disposable Linux machine, and /workspace is the project. Run commands and edit files directly with your own tools. Instructions that say to use `cave` commands or the cave MCP tools are for agents on the Mac; ignore them here, and do not look for .cave/AGENTS.md.";
+/// `AGENTS.md` line are written for agents on the Mac: where it is, and
+/// the few steps only the user can take on the Mac, so it can pass them
+/// on. The VM cannot change its own size or policy.
+const IN_VM_NOTE: &str = concat!(
+    "You are running inside this project's cave VM, a disposable Linux machine, and /workspace is the project. ",
+    "Run commands and edit files directly with your own tools. ",
+    "Instructions that say to use `cave` commands or the cave MCP tools are for agents on the Mac; ignore them here, and do not look for .cave/AGENTS.md.\n\n",
+    "`cave` runs only on the user's Mac, and nothing in the VM can change the VM's size, network or settings. ",
+    "When a task needs one of these, stop and tell the user the exact step, in the project folder on the Mac:\n",
+    "- Out of disk space (\"No space left on device\"; check with `df -h /`): raise `disk` under `[storage]` in cave.toml, for example `disk = \"40G\"`.\n",
+    "- Out of memory (processes killed, \"Out of memory\" in `dmesg`; check with `free -h`): raise `memory` under `[vm]` in cave.toml, for example `memory = \"4G\"`, or `cpus` for more CPUs.\n",
+    "- After changing cave.toml: quit the agent, run `cave stop`, then start it again, such as `cave agent claude`. The VM boots from its disk with the new size; files stay, running processes stop.\n",
+    "- A host the network policy blocks: `[network] mode` in cave.toml, or `cave run --net lan` for the local network.\n",
+    "- Copy the project out to a folder on the Mac: `cave pull`. Bring edits made on the Mac in: `cave push`.\n",
+    "- Save the VM's state: `cave snapshot`. Undo this run: `cave restore`.",
+);
 
 /// The arguments that keep the project's Mac-side setup away from agent
 /// `name` in the VM: Claude Code reads only its user settings, so the

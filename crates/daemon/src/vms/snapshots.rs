@@ -424,8 +424,9 @@ impl Vms {
 
     /// Starts a stopped VM: resumes its suspension if it has one, or boots
     /// it. A suspension is used once. A network mode that needs another
-    /// set of devices (`off` against `nat` or `lan`) cannot resume, so
-    /// the VM boots from its disk.
+    /// set of devices (`off` against `nat` or `lan`), or `cave.toml`
+    /// asking for other resources, cannot resume, so the VM boots from its
+    /// disk.
     pub(super) fn boot(
         &self,
         vm: &std::sync::Arc<Vm>,
@@ -443,6 +444,14 @@ impl Vms {
                 .source
                 .prepare(&vm.id, Some(net), ports)
                 .and_then(|prepared| self.launch(vm, prepared)),
+            _ if self
+                .source
+                .resized(&vm.id, manifest.cpus, manifest.memory_bytes) =>
+            {
+                self.source
+                    .prepare(&vm.id, net, ports)
+                    .and_then(|prepared| self.launch(vm, prepared))
+            }
             _ => {
                 manifest.net = net.unwrap_or(manifest.net);
                 self.boot_from(vm, &dir, &manifest, ports, None, None)

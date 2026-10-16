@@ -4,7 +4,11 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Fixed
+- After `cave stop`, a new `cpus`, `memory` or larger `disk` in `cave.toml` was ignored, because the next start resumed the suspension with the old size. It now boots from the disk with the new size; running processes stop.
+
 ### Changed
+- An agent started by `cave agent` in the VM is told the steps only you can take on the Mac, so it passes them on: more disk or memory in `cave.toml` then `cave stop`, the network policy, `cave pull` and `cave push`, and snapshots. Nothing in the VM can change its own size or policy.
 - `cave agent`'s help, `cave init`'s last line and the unknown-agent error say that any agent or command runs in the VM with `cave shell` or `cave exec`, not only Claude Code and Codex.
 - The docs match the code again after the rc.3 docs review: the threat model (DNS through the gateway, link-local ranges, the mirror carrying unredacted files and config the VM changed), `docs/cli.md`, `docs/protocol.md`, `docs/snapshots.md`, `SECURITY.md`, and the status of decision records and ROADMAP rows changed by later decisions.
 

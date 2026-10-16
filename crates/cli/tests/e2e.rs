@@ -613,8 +613,27 @@ fn stop_suspends_and_the_next_command_resumes() {
         0,
     );
 
-    // An unused VM suspends itself after `idle_suspend`.
+    // More memory in cave.toml cannot resume either: after `cave stop`
+    // the VM boots from its disk with the new size.
     let toml = rig.project().join("cave.toml");
+    let text = fs::read_to_string(&toml).unwrap();
+    assert!(text.contains("memory  = \"2G\""), "{text}");
+    fs::write(
+        &toml,
+        text.replacen("memory  = \"2G\"", "memory  = \"3G\"", 1),
+    )
+    .unwrap();
+    assert!(rig.cave(&["stop"]).status.success());
+    assert!(rig.cave(&["run", "--net", "off"]).status.success());
+    let kib = rig.exec(
+        &["sh", "-c", "awk '/MemTotal/ {print $2}' /proc/meminfo"],
+        0,
+    );
+    let kib: u64 = kib.trim().parse().unwrap();
+    assert!(kib > 5 << 19, "MemTotal {kib} KiB after asking for 3G");
+    assert!(!rig.project().join(".cave/suspended").exists());
+
+    // An unused VM suspends itself after `idle_suspend`.
     let text = fs::read_to_string(&toml).unwrap();
     fs::write(
         &toml,

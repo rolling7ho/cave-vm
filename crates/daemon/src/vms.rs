@@ -198,6 +198,14 @@ pub trait VmSource: Send + Sync {
         Ok(AutoSnapshots::default())
     }
 
+    /// Whether `vm`'s project now asks for other CPUs or memory than
+    /// `cpus` and `memory_bytes`, or for a larger disk. A suspension
+    /// cannot resume with other resources, so the VM boots instead.
+    fn resized(&self, vm: &VmId, cpus: u32, memory_bytes: u64) -> bool {
+        let _ = (vm, cpus, memory_bytes);
+        false
+    }
+
     /// The base images for `cave images`, with how many of `projects` use
     /// each.
     fn images(&self, projects: &[PathBuf]) -> Result<Vec<ImageInfo>, ErrorMessage> {

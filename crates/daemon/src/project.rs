@@ -335,6 +335,20 @@ impl VmSource for ProjectSource {
         Ok(policy(vm, &settings, image, None, &[]))
     }
 
+    fn resized(&self, vm: &VmId, cpus: u32, memory_bytes: u64) -> bool {
+        let project = Path::new(&vm.project);
+        let Ok(settings) = config::load(project) else {
+            return false;
+        };
+        let state = match &vm.fork {
+            None => project.join(STATE_DIR),
+            Some(name) => snapshot::fork_dir(&project.join(STATE_DIR), name),
+        };
+        let disk_grows =
+            fs::metadata(disk::path(&state)).is_ok_and(|meta| meta.len() < settings.disk_bytes);
+        settings.cpus != cpus || settings.memory_bytes != memory_bytes || disk_grows
+    }
+
     fn auto_snapshots(&self, vm: &VmId) -> Result<AutoSnapshots, ErrorMessage> {
         let settings = config::load(Path::new(&vm.project)).map_err(config_error)?;
         Ok(AutoSnapshots {

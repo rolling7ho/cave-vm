@@ -8,7 +8,7 @@ use std::os::fd::AsFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -210,6 +210,7 @@ struct Source {
     idle_suspend: Mutex<Option<Duration>>,
     auto_snapshots: Mutex<AutoSnapshots>,
     ttl_seconds: Mutex<Option<u64>>,
+    resized: AtomicBool,
 }
 
 impl VmSource for Source {
@@ -251,6 +252,10 @@ impl VmSource for Source {
 
     fn auto_snapshots(&self, _vm: &VmId) -> Result<AutoSnapshots, ErrorMessage> {
         Ok(*self.auto_snapshots.lock().unwrap())
+    }
+
+    fn resized(&self, _vm: &VmId, _cpus: u32, _memory_bytes: u64) -> bool {
+        self.resized.load(Ordering::SeqCst)
     }
 }
 
@@ -1240,6 +1245,14 @@ fn stop_suspends_and_the_next_start_resumes() {
     assert!(matches!(start(Some(NetMode::Off)), Reply::Policy(p) if p.net == NetMode::Off));
     assert!(!marker.exists());
     assert!(!suspended.exists());
+
+    // Nor can one after cave.toml asked for other resources.
+    assert_eq!(r.request(Request::Stop { vm: id.clone() }), Reply::Ok);
+    r.source.resized.store(true, Ordering::SeqCst);
+    assert!(matches!(start(None), Reply::Policy(_)));
+    assert!(!marker.exists());
+    assert!(!suspended.exists());
+    r.source.resized.store(false, Ordering::SeqCst);
 
     // Restoring a snapshot drops a suspension.
     assert_eq!(r.request(Request::Stop { vm: id.clone() }), Reply::Ok);
