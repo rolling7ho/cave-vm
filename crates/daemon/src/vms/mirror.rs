@@ -53,6 +53,9 @@ pub struct Synced {
     pub conflicts: Vec<String>,
     /// Changed only on the Mac, waiting for `pull`.
     pub pending: Vec<String>,
+    /// Changed only in the VM, but the VM may not change them on the Mac
+    /// (D59).
+    pub held: Vec<String>,
 }
 
 /// What a pull did.
@@ -140,6 +143,7 @@ impl Vms {
             deleted: plan.delete,
             conflicts: plan.conflicts,
             pending,
+            held: plan.held,
         })
     }
 
@@ -273,7 +277,7 @@ impl Vms {
         }
         Ok(parse_hashes(&String::from_utf8_lossy(&out))
             .into_iter()
-            .filter(|(path, _)| !exclusions.excluded(path, false))
+            .filter(|(path, _)| sync::plain(path) && !exclusions.excluded(path, false))
             .collect())
     }
 
@@ -411,16 +415,38 @@ fn walk(dir: &Path, prefix: &str, x: &Exclusions, files: &mut Vec<String>) -> io
     Ok(())
 }
 
-/// Checks that `path` stays inside the project.
+/// Checks that `path` stays inside the project and is one the VM may
+/// change there: a plain relative path, not excluded or held, with no
+/// symbolic link among its folders, so a write cannot leave the project.
 fn inside(project: &Path, path: &str) -> Result<PathBuf, ErrorMessage> {
-    if path.is_empty()
-        || path.starts_with('/')
-        || path.split('/').any(|s| s == ".." || s.is_empty())
-    {
-        return Err(error(
-            ErrorCode::BadRequest,
-            format!("the VM listed a file outside the project: {path}"),
+    let refused = |why: &str| {
+        error(ErrorCode::BadRequest, format!("{why}: {path}"))
+            .with_fix("Nothing was written there. Check the file in the VM with `cave exec ls -la`, then run cave sync again")
+    };
+    if !sync::plain(path) || path.starts_with('/') {
+        return Err(refused("the VM listed a file outside the project"));
+    }
+    if exclusions(project).excluded(path, false) || sync::held(path) {
+        return Err(refused(
+            "the VM listed a file it may not change on your Mac",
         ));
+    }
+    let mut dir = project.to_path_buf();
+    let segments: Vec<&str> = path.split('/').collect();
+    for segment in &segments[..segments.len() - 1] {
+        dir.push(segment);
+        match fs::symlink_metadata(&dir) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(error(
+                    ErrorCode::BadRequest,
+                    format!("{} on your Mac is a symbolic link, so cave will not write {path} through it", dir.display()),
+                )
+                .with_fix("Replace the link with a folder, or delete it, then run cave sync again"));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => break,
+            Err(e) => return Err(io_error(&format!("check {}", dir.display()), e)),
+        }
     }
     Ok(project.join(path))
 }
@@ -447,7 +473,16 @@ fn write_atomic(path: &Path, data: &[u8], mode: u32) -> io::Result<()> {
     fs::create_dir_all(dir)?;
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let temp = dir.join(format!(".{name}.cave-sync"));
-    let mut file = fs::File::create(&temp)?;
+    // A link left at the temporary name is removed, never followed:
+    // `create_new` (O_EXCL) does not follow one either.
+    match fs::remove_file(&temp) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)?;
     file.write_all(data)?;
     file.set_permissions(fs::Permissions::from_mode(mode))?;
     file.sync_all()?;
@@ -495,9 +530,51 @@ mod tests {
     fn paths_from_the_vm_stay_inside_the_project() {
         let p = Path::new("/p");
         assert_eq!(inside(p, "src/a").unwrap(), Path::new("/p/src/a"));
-        for bad in ["", "/etc/passwd", "../x", "a/../../x", "a//b"] {
+        for bad in [
+            "",
+            "/etc/passwd",
+            "../x",
+            "a/../../x",
+            "a//b",
+            "././.env",
+            "./a",
+            ".GIT/config",
+            "src/.Git/hooks/pre-commit",
+            ".ENV",
+            ".Cave/sync.json",
+            "Cave.toml",
+            ".claude/settings.json",
+            ".CLAUDE/settings.local.json",
+            ".mcp.j\u{17f}on",
+            ".gitignore",
+            "a\nb",
+        ] {
             assert!(inside(p, bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_mirror_is_never_written_through_a_link() {
+        let dir = std::env::temp_dir().join(format!("cave-mirror-link-{}", std::process::id()));
+        let outside = dir.with_extension("outside");
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&outside);
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("out")).unwrap();
+        let err = write_mac_file(&dir, "out/x.plist", b"x", 0o644).unwrap_err();
+        assert!(err.message.contains("symbolic link"), "{err:?}");
+        assert!(!outside.join("x.plist").exists());
+        assert!(remove_mac_file(&dir, "out/x.plist").is_err());
+
+        // A link at the temporary name is replaced, not written through.
+        fs::create_dir_all(dir.join("src")).unwrap();
+        std::os::unix::fs::symlink(outside.join("t"), dir.join("src/.a.cave-sync")).unwrap();
+        write_mac_file(&dir, "src/a", b"y", 0o644).unwrap();
+        assert_eq!(fs::read(dir.join("src/a")).unwrap(), b"y");
+        assert!(!outside.join("t").exists());
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&outside);
     }
 
     #[test]

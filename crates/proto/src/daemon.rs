@@ -290,6 +290,10 @@ pub enum Reply {
         /// Files changed only on the Mac, waiting for `pull`.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pending: Vec<String>,
+        /// Files changed only in the VM that it may not change on the Mac,
+        /// such as `cave.toml` and `.claude/` (D59), left alone.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        held: Vec<String>,
     },
     /// The reply to `pull`. Paths are relative to the project.
     Pulled {

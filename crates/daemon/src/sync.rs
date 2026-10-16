@@ -16,7 +16,12 @@
 //!
 //! Dependency and build folders are excluded: `node_modules`, `target` and
 //! the paths `.gitignore` names, plus `.git`, `.cave` and `.env`, which
-//! never sync.
+//! never sync. Names are compared as the Mac's file system compares them,
+//! without case, so `.GIT` is `.git`.
+//!
+//! The files that set up the project on the Mac (`cave.toml`, `.claude/`,
+//! `.mcp.json` and `.gitignore`) are held: a change the VM makes to one is
+//! listed and never written to the Mac (D59).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -29,6 +34,51 @@ const ALWAYS_EXCLUDED: [&str; 4] = ["node_modules", "target", ".git", ".cave"];
 /// Files that never sync at the project's top level. `.env` holds the
 /// credentials and stays on the Mac (D33).
 const EXCLUDED_AT_TOP: [&str; 1] = [".env"];
+
+/// Files at the project's top that the VM may not change on the Mac, and
+/// the folder whose files it may not change. They set up the project and
+/// the agents on the Mac (D59).
+const HELD_AT_TOP: [&str; 3] = ["cave.toml", ".mcp.json", ".gitignore"];
+const HELD_FOLDER: &str = ".claude";
+
+/// `name` as the Mac's case-insensitive file system sees it, for comparing
+/// with the ASCII names above: lowercase, with the two letters that fold
+/// to ASCII ones (`ſ` to `s`, the Kelvin sign to `k`) folded too.
+fn folded(name: &str) -> String {
+    name.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            '\u{17f}' => 's',
+            '\u{212a}' => 'k',
+            c => c,
+        })
+        .collect()
+}
+
+fn is(name: &str, fixed: &str) -> bool {
+    folded(name) == fixed
+}
+
+/// Whether `path` from the VM's file list is a plain relative path: no
+/// empty, `.` or `..` segments, no leading `/`, no control characters.
+/// Anything else is dropped before it is compared or written.
+pub fn plain(path: &str) -> bool {
+    !path.is_empty()
+        && !path.chars().any(char::is_control)
+        && path
+            .split('/')
+            .all(|segment| !matches!(segment, "" | "." | ".."))
+}
+
+/// Whether the VM may not change `path` on the Mac (D59).
+pub fn held(path: &str) -> bool {
+    let segments: Vec<&str> = path.split('/').collect();
+    match segments.as_slice() {
+        [name] => HELD_AT_TOP.iter().any(|h| is(name, h)) || is(name, HELD_FOLDER),
+        [first, ..] => is(first, HELD_FOLDER),
+        [] => false,
+    }
+}
 
 /// What a pull does, if it goes ahead.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -48,6 +98,9 @@ pub struct Sync {
     pub delete: Vec<String>,
     /// Files changed on both sides, left alone.
     pub conflicts: Vec<String>,
+    /// Files only the VM changed that it may not change on the Mac, left
+    /// alone ([`held`]).
+    pub held: Vec<String>,
 }
 
 fn changed(path: &str, side: &Hashes, last: &Hashes) -> bool {
@@ -98,6 +151,7 @@ pub fn plan_sync(last: &Hashes, mac: &Hashes, vm: &Hashes) -> Sync {
         let on_mac = changed(path, mac, last);
         let in_vm = changed(path, vm, last);
         match (on_mac, in_vm) {
+            (false, true) if held(path) => sync.held.push(path.clone()),
             (false, true) => match vm.get(path) {
                 Some(_) => sync.write.push(path.clone()),
                 None => sync.delete.push(path.clone()),
@@ -189,7 +243,7 @@ impl Exclusions {
         let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         if segments
             .first()
-            .is_some_and(|s| EXCLUDED_AT_TOP.contains(s))
+            .is_some_and(|s| EXCLUDED_AT_TOP.iter().any(|x| is(s, x)))
             && segments.len() == 1
             && !is_dir
         {
@@ -203,7 +257,10 @@ impl Exclusions {
     }
 
     fn excludes(&self, segments: &[&str], is_dir: bool) -> bool {
-        if segments.last().is_some_and(|s| ALWAYS_EXCLUDED.contains(s)) {
+        if segments
+            .last()
+            .is_some_and(|s| ALWAYS_EXCLUDED.iter().any(|x| is(s, x)))
+        {
             return true;
         }
         let mut excluded = false;

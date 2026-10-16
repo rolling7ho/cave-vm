@@ -946,6 +946,31 @@ fn synced_mode_mirrors_the_vm_and_pulls_mac_edits() {
     assert_eq!(fs::read_to_string(mac.join("src/app.ts")).unwrap(), "two\n");
     assert!(!mac.join(".env").exists() && !mac.join("node_modules").exists());
 
+    // The VM cannot change cave.toml or .claude/ on the Mac, nor reach
+    // .git through another case (D59).
+    let toml = fs::read_to_string(mac.join("cave.toml")).unwrap();
+    rig.exec(
+        &[
+            "sh",
+            "-c",
+            "echo '# vm' >> cave.toml && mkdir -p .claude .GIT && echo '{}' > .claude/settings.json && \
+             echo x > .GIT/config",
+        ],
+        0,
+    );
+    let out = sync(&rig);
+    assert!(
+        out.contains("Did not copy 2 files the VM changed, since the VM may not change them on your Mac: .claude/settings.json, cave.toml"),
+        "{out}"
+    );
+    assert_eq!(fs::read_to_string(mac.join("cave.toml")).unwrap(), toml);
+    assert!(
+        !fs::read_to_string(mac.join(".claude/settings.json"))
+            .unwrap()
+            .starts_with("{}")
+    );
+    assert!(!mac.join(".git/config").exists());
+
     // A Mac edit is never written over by a sync, and a pull brings it in
     // after a snapshot.
     fs::write(mac.join("src/app.ts"), "mac\n").unwrap();

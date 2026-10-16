@@ -21,7 +21,7 @@ Every VM's policy is printed by `cave run` and shown at any time by `cave inspec
 | Lifetime | no TTL | `ttl` in `cave.toml` |
 | Ports exposed to the Mac | none | `-p 3000` |
 
-Widening always takes an explicit flag or config change, and `cave run` echoes it back. In synced mode the mirror can carry a `cave.toml` the agent changed in the VM, so read the echoed policy.
+Widening always takes an explicit flag or config change, and `cave run` echoes it back. In synced mode the VM cannot change `cave.toml` or `.claude/` on the Mac: `cave sync` lists such changes instead of writing them (D59).
 
 ## The agent boundary
 
