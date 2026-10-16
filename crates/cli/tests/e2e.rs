@@ -794,6 +794,26 @@ fn the_mirror_never_holds_a_credential_the_vm_was_given() {
         .unwrap();
     assert!(mcp.wait_with_output().unwrap().status.success());
 
+    // A folder copied out that holds the value is refused, not unpacked
+    // from an archive the redaction changed; one file comes out redacted.
+    rig.exec(&["sh", "-c", "mkdir -p held && cp leak.txt held/"], 0);
+    let out_dir = rig.root.join("copied");
+    let out = rig.cave(&["cp", ":held", out_dir.to_str().unwrap()]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("holds the value of a credential the VM was given"),
+        "{stderr}"
+    );
+    let one = rig.root.join("one.txt");
+    assert!(
+        rig.cave(&["cp", ":held/leak.txt", one.to_str().unwrap()])
+            .status
+            .success()
+    );
+    assert_eq!(fs::read_to_string(&one).unwrap(), "key=[API_KEY]\n");
+    rig.exec(&["rm", "-r", "held"], 0);
+
     let out = rig.cave(&["sync"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(

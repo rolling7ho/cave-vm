@@ -217,6 +217,10 @@ pub enum Reply {
         code: Option<i32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         signal: Option<String>,
+        /// Whether the output had credential values replaced by their
+        /// names, so it is not byte for byte what the command wrote.
+        #[serde(default, skip_serializing_if = "is_false")]
+        redacted: bool,
     },
     PtyData {
         data: Data,
@@ -561,7 +565,7 @@ impl frame::Message for Reply {
 
     fn validate(&self) -> Result<(), String> {
         match self {
-            Reply::Exit { code, signal } if code.is_some() == signal.is_some() => {
+            Reply::Exit { code, signal, .. } if code.is_some() == signal.is_some() => {
                 Err("needs exactly one of \"code\" and \"signal\"".into())
             }
             _ => Ok(()),

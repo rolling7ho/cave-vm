@@ -192,7 +192,7 @@ This object is written `vm` below.
 | `start` | `vm`, `net` (optional: `"off"`, `"nat"` or `"lan"`, from `--net`; the mode in `cave.toml` when left out), `ports` (list of `{mac, vm}`) | `policy`. On a running VM, `ports` are added, and a `net` other than the one it booted with is refused with `bad_request` |
 | `stop` | `vm` | `ok` once the VM is suspended, its memory saved |
 | `stop_all` | none | `stopped_all`. Every running VM on the Mac stops at once without being saved, for `cave stop --force` ([D43](../ROADMAP.md#decisions)): each VMM gets SIGTERM, and SIGKILL 5 seconds later if it is still running |
-| `exec` | `vm`, the agent's `exec` fields, `credentials` (list of names) | the agent's stream, ending in `exit` |
+| `exec` | `vm`, the agent's `exec` fields, `credentials` (list of names) | the agent's stream, ending in `exit`, which has `"redacted": true` when credential values in the output were replaced with their names |
 | `shell` | `vm`, the agent's `pty_open` fields | the agent's pty stream, ending in `exit` |
 | `ssh` | `vm` | `ok` once the agent has connected to sshd, port 22 in the guest, with `port_forward`. From then on the connection carries raw bytes, for remote editing. A `not_found` error means sshd is not listening yet |
 | `file_read` / `file_write` | `vm`, the agent's fields | as on the agent link |

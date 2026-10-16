@@ -147,6 +147,7 @@ fn exec_starts_the_vm_and_collects_the_output() {
             Reply::Exit {
                 code: Some(3),
                 signal: None,
+                redacted: false,
             },
         ],
         _ => Vec::new(),
@@ -187,6 +188,7 @@ fn a_command_names_its_credentials() {
         Request::Exec { .. } => vec![Reply::Exit {
             code: Some(0),
             signal: None,
+            redacted: false,
         }],
         _ => Vec::new(),
     });
@@ -224,6 +226,7 @@ fn a_command_sends_its_stdin_cwd_and_env() {
                 Reply::Exit {
                     code: Some(0),
                     signal: None,
+                    redacted: false,
                 },
             ]
         }
@@ -261,6 +264,7 @@ fn a_signal_ends_the_output_without_a_code() {
         Request::Exec { .. } => vec![Reply::Exit {
             code: None,
             signal: Some("KILL".into()),
+            redacted: false,
         }],
         _ => Vec::new(),
     });
@@ -365,6 +369,7 @@ fn a_fork_runs_commands_in_itself() {
         Request::Exec { .. } => vec![Reply::Exit {
             code: Some(0),
             signal: None,
+            redacted: false,
         }],
         _ => Vec::new(),
     });

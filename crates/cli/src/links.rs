@@ -179,7 +179,7 @@ fn in_vm(vm: &VmId, port: u16, target: &str) -> Option<(String, String)> {
         &url,
     ];
     match exec_in_vm(vm, &argv, None, &mut out) {
-        Ok((0, _)) => {
+        Ok((0, _, _)) => {
             let out = String::from_utf8_lossy(&out).into_owned();
             let (code, location) = out.split_once(' ').unwrap_or((&out, ""));
             Some((code.to_string(), location.trim().to_string()))

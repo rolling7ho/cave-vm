@@ -78,7 +78,7 @@ pub fn run(fork: Option<String>, argv: Vec<String>) -> Result<u8> {
                     return Ok(EXIT_CAVE_FAILED_RUNNING);
                 }
             }
-            Reply::Exit { code, signal } => return Ok(exit_code(code, signal.as_deref())),
+            Reply::Exit { code, signal, .. } => return Ok(exit_code(code, signal.as_deref())),
             Reply::Progress { message, .. } => eprintln!("{message}"),
             Reply::Error(e) => return Err(failed(e.into())),
             other => {
