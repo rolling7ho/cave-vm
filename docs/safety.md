@@ -21,7 +21,7 @@ Every VM's policy is printed by `cave run` and shown at any time by `cave inspec
 | Lifetime | no TTL | `ttl` in `cave.toml` |
 | Ports exposed to the Mac | none | `-p 3000` |
 
-Widening always takes an explicit flag or config change, and `cave run` echoes it back.
+Widening always takes an explicit flag or config change, and `cave run` echoes it back. In synced mode the mirror can carry a `cave.toml` the agent changed in the VM, so read the echoed policy.
 
 ## The agent boundary
 
@@ -41,7 +41,7 @@ The limit, stated plainly: **a confused or prompt-injected agent that still has 
 - Approving a tool when Claude Code asks removes the guardrail for that tool.
 - If you answered yes to `cave init`'s question about skipping prompts, plain `claude` in the project runs without them in Claude Code's `dontAsk` mode: the `cave` tools are allowed, `.claude/settings.local.json` also denies Read, Glob, Grep and WebFetch, and any other tool is turned away without asking, so its own tools reach nothing on the Mac ([D55](../ROADMAP.md#decisions)). MCP servers and plugins from your own Claude Code settings run on the Mac only where your own settings allow them.
 
-Inside the VM, by default, the agent has a full shell, but only in the VM. Its model API key and sign-in live in the VM too, so they are frozen into memory snapshots and forks taken afterwards, and a confused or prompt-injected agent can read them and send them out over the VM's network. The VM protects the Mac, not what you put in the VM. While `cave agent` runs, the VM can ask `cave` to open a link in the Mac's browser, which is how the agent signs in; only `https://` links on `claude.ai`, `claude.com` or `anthropic.com` are opened, and `cave` says afterwards how many it opened ([D56](../ROADMAP.md#decisions)). When such a link returns to `localhost`, `cave` listens on that port on the Mac's loopback until the browser comes back, for at most 10 minutes, and passes that one request into the VM. Use `--on-mac` to keep the key on the Mac. Credentials in `.env` are not affected: they stay on the Mac either way.
+Inside the VM, by default, the agent has a full shell, but only in the VM. Its model API key and sign-in live in the VM too, so they are frozen into memory snapshots and forks taken afterwards, and a confused or prompt-injected agent can read them and send them out over the VM's network. The VM protects the Mac, not what you put in the VM. While `cave agent` runs, the VM can ask `cave` to open a link in the Mac's browser, which is how the agent signs in; only `https://` links on `claude.ai`, `claude.com` or `anthropic.com`, or a subdomain of one, with no user name or port, are opened, and `cave` says afterwards how many it opened ([D56](../ROADMAP.md#decisions)). When such a link returns to `localhost`, `cave` listens on that port on the Mac's loopback until the browser comes back, for at most 10 minutes, and passes that one request into the VM. Use `--on-mac` to keep the key on the Mac. Credentials in `.env` are not affected: they stay on the Mac either way.
 
 ## Credentials
 

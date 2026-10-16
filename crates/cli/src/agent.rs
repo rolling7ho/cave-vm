@@ -122,8 +122,10 @@ pub fn run(
     };
     if !AGENTS.contains(&name) {
         return Err(failed(
-            CliError::new(format!("unknown agent \"{name}\""))
-                .fix(format!("Supported agents: {}", AGENTS.join(", "))),
+            CliError::new(format!("unknown agent \"{name}\"")).fix(format!(
+                "Supported agents: {}. Run any other agent in the VM with cave shell or cave exec",
+                AGENTS.join(", ")
+            )),
         ));
     }
     // Checked first, so nothing boots for an agent that cannot start.

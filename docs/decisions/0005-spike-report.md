@@ -1,6 +1,6 @@
 # 0005: Phase 2 spike report and gate 4 targets
 
-Date: 2026-10-12 · Decided by: Ivan · Status: accepted
+Date: 2026-10-12 · Decided by: Ivan · Status: accepted; the booted memory target changed to 200 MB by [decision 0012](0012-booted-memory-target.md) (D30)
 
 ## Context
 

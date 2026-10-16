@@ -1,6 +1,6 @@
 # 0011: Gate 4 misses are fixed, not re-targeted (D29)
 
-Date: 2026-10-14 · Decided by: Ivan · Status: accepted
+Date: 2026-10-14 · Decided by: Ivan · Status: accepted; the booted memory target changed by [decision 0012](0012-booted-memory-target.md) (D30)
 
 ## Context
 

@@ -1,6 +1,6 @@
 # 0027: Sign-in links from an agent in the VM open on the Mac, D56
 
-Date: 2026-10-15 · Decided by: Ivan (choice), with defaults picked while building (marked) · Status: accepted
+Date: 2026-10-15 · Decided by: Ivan (choice), with defaults picked while building (marked) · Status: accepted, amended on 2026-10-15 (see below)
 
 ## Context
 
@@ -9,7 +9,7 @@ Since D53, `cave agent claude` runs Claude Code inside the VM, where you sign in
 ## Decision
 
 - **D56.** During `cave agent`, a sign-in link the agent in the VM tries to open is opened in the Mac's default browser (Ivan).
-- **How** (*default*): `cave agent` installs a small helper at `~/.local/bin/cave-open` in the VM and starts the agent with `BROWSER` pointing at it. Claude Code opens links through `BROWSER` (checked in Claude Code 2.1.300). The helper writes the link to its terminal inside a private escape sequence, `ESC ] 7733 ; cave-open ; <link> BEL`. The `cave` process on the Mac relaying that terminal removes the sequence from the output and opens the link with `open`. Nothing new listens on the Mac, and nothing reaches it while no `cave agent` session is open.
+- **How** (*default*): `cave agent` installs a small helper at `~/.local/bin/cave-open` in the VM and starts the agent with `BROWSER` pointing at it. Claude Code opens links through `BROWSER` (checked in Claude Code 2.1.300). The helper writes the link to its terminal inside a private escape sequence, `ESC ] 7733 ; cave-open ; <link> BEL`. The `cave` process on the Mac relaying that terminal removes the sequence from the output and opens the link with `open`. Nothing reaches the Mac while no `cave agent` session is open. Since the amendment below, a loopback port listens during a sign-in.
 - **Which links** (*default*): only `https://` links whose host is `claude.ai`, `claude.com` or `anthropic.com`, or a subdomain of one, with no user name or port. Anything else is ignored and stays in the output as text. Any program in the VM can write the sequence while the session is open, so the list keeps a confused or prompt-injected agent from opening arbitrary pages on the Mac.
 - **Codex** (*default*): its browser sign-in returns to `localhost` on the machine with the browser, which is the Mac, not the VM, so it cannot finish there. Inside the VM, Codex signs in with `codex login --device-auth`, and the docs say so.
 

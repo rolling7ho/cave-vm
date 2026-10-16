@@ -4,6 +4,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Changed
+- `cave agent`'s help, `cave init`'s last line and the unknown-agent error say that any agent or command runs in the VM with `cave shell` or `cave exec`, not only Claude Code and Codex.
+- The docs match the code again after the rc.3 docs review: the threat model (DNS through the gateway, link-local ranges, the mirror carrying unredacted files and config the VM changed), `docs/cli.md`, `docs/protocol.md`, `docs/snapshots.md`, `SECURITY.md`, and the status of decision records and ROADMAP rows changed by later decisions.
+
 ## [1.0.0-rc.3] - 2026-10-16
 
 The third release candidate for 1.0.0: plain `claude` in a project really skips its prompts after a yes in `cave init`, the VM keeps the Mac's time and timezone, `cave pull` and `cave push` copy the project out and in, in both modes, and a threat model.
@@ -29,31 +33,30 @@ The second release candidate for 1.0.0: signing in to Claude Code inside the VM 
 
 The first release candidate for 1.0.0: `cave agent` runs the agent inside the VM without permission prompts, `cave init` can let plain `claude` skip them, and sign-in links from the VM open in the Mac's browser.
 
-### Fixed
-- `cave agent claude` in the VM refused to work: it read the project's `.claude/settings.json` and `.mcp.json`, written for the Mac, which deny its shell and point at a `cave` that is not in the VM. It now reads only your user settings there, uses no project MCP servers, and is told it is already inside the VM; Codex gets the same note.
-- A guest can no longer exhaust the Mac by opening connections: outbound TCP connections and guest vsock connections to the host are capped at 1024 each, a guest cannot claim more vsock credit than the device offers, and resets it provokes stop queueing once 4096 packets wait.
-- Credentials given to an earlier command, or held in a restored snapshot or fork, are now redacted from every later command's output and from files read out of the VM, not only from the command that named them.
-- `cave run --net off` or `--net lan` on a VM already running with another network mode was ignored, so the VM kept its network. It is now an error that says to `cave stop` first.
-
-### Removed- `scripts/spike/`, the spike's probe scripts. The spike reports link to them in the git history.
-
-- The repository's own `.claude/settings.json`; `.claude/` is now in `.gitignore` (D50, decision 0023).
-- `CODE_OF_CONDUCT.md` (D48, decision 0021).
-
 ### Changed
 - During `cave agent`, Claude Code's sign-in link in the VM opens in the Mac's default browser, through a `BROWSER` helper and the terminal `cave` relays. Only `https://` links on `claude.ai`, `claude.com` or `anthropic.com` are opened (D56, decision 0027).
-- Decision 0027 (D56): during `cave agent`, sign-in links the agent in the VM opens will open in the Mac's browser. The code follows in a later change.
 - `cave init` asks, next to the mirror question, whether plain `claude` may skip its permission prompts in the project. A yes writes `.claude/settings.local.json` with `bypassPermissions` and Read, Glob, Grep and WebFetch denied, and adds it to `.gitignore`. `.claude/settings.json` and `cave agent claude --on-mac` now also deny Edit, Write and NotebookEdit (D55, decision 0026).
 - `cave agent claude` and `cave agent codex` run the agent inside the VM with its permission prompts skipped, and print `Permissions skipped. The VM is the sandbox.` `--safe` keeps the prompts, and `--on-mac` runs it on the Mac through `cave mcp` as before, never skipping prompts there. `--in-vm` is still accepted and changes nothing. With the VM's network off, `cave agent` stops and says how to fix it (D53, D54, decision 0026).
 - More errors say how to fix the problem: file errors in the CLI (permissions, a full disk, a missing path), an unexpected reply from an older daemon, failed snapshots and syncs, `cave export` of a path that is not a folder, `-p` ports that cannot be bound, `.env` that cannot be read, and `cave ssh` key setup.
 - `docs/safety.md` lists the known limits accepted for v1: the Mac's addresses are read once per VM start, `check = false` is per project and read by a simple line reader, and downloads honour `~/.curlrc`.
-- The design and decision 0026 (D53 to D55) move `cave agent` into the VM with permission prompts skipped, `--safe` and `--on-mac` as the ways back, Claude Code and Codex for v1, and an opt-in for plain `claude`. Decision 0002 is replaced. The code follows in later changes.
+- The design and decision 0026 (D53 to D55) move `cave agent` into the VM with permission prompts skipped, `--safe` and `--on-mac` as the ways back, Claude Code and Codex for v1, and an opt-in for plain `claude`. Decision 0002 is replaced.
 - `cave export` runs even on a copy of cave 2 or more releases behind, after asking, so the work can always be copied out (D52).
 - A copy of cave 2 or more stable releases behind asks to update every time it runs in a terminal, says only the 3 newest releases get security fixes, and stops the command on a no. Without a terminal it warns. `SECURITY.md` names the 3 newest stable releases as supported, and release `images.json` lists every stable release (D52, decision 0025).
 - The snapshots before each `cave agent` run and each `cave push` are automatic and count towards `[snapshots] keep`, so they no longer pile up (D51, decision 0024). `cave restore` with no name still goes back to the snapshot before the last agent run.
 - `CONTRIBUTING.md` no longer says unsigned commits fail a DCO check, since none runs; reviewers ask for the sign-off.
 - The pull request template and `CONTRIBUTING.md` no longer ask contributors to mark AI assistance (D49, decision 0022).
 - The docs match the code again: stale error messages and prompts in `docs/cli.md`, `[snapshots]`, `cpus` and `disk` in `docs/config.md`, the daemon requests in `docs/protocol.md`, and smaller fixes across the safety, snapshot, contributor and SDK docs. `cave init`'s skill now lists `cave exec --fork` and `cave rm <fork>`.
+
+### Removed
+- `scripts/spike/`, the spike's probe scripts. The spike reports link to them in the git history.
+- The repository's own `.claude/settings.json`; `.claude/` is now in `.gitignore` (D50, decision 0023).
+- `CODE_OF_CONDUCT.md` (D48, decision 0021).
+
+### Fixed
+- `cave agent claude` in the VM refused to work: it read the project's `.claude/settings.json` and `.mcp.json`, written for the Mac, which deny its shell and point at a `cave` that is not in the VM. It now reads only your user settings there, uses no project MCP servers, and is told it is already inside the VM; Codex gets the same note.
+- A guest can no longer exhaust the Mac by opening connections: outbound TCP connections and guest vsock connections to the host are capped at 1024 each, a guest cannot claim more vsock credit than the device offers, and resets it provokes stop queueing once 4096 packets wait.
+- Credentials given to an earlier command, or held in a restored snapshot or fork, are now redacted from every later command's output and from files read out of the VM, not only from the command that named them.
+- `cave run --net off` or `--net lan` on a VM already running with another network mode was ignored, so the VM kept its network. It is now an error that says to `cave stop` first.
 
 ## [0.1.2-rc.2] - 2026-10-15
 

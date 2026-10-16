@@ -52,7 +52,7 @@ This project runs in a disposable Linux VM made by cave. The project folder iden
 | `cave restore [name]` | Go back to a snapshot |
 | `cave fork [name]` | Make a copy of the VM to try something |
 | `cave exec --fork <name> -- <command>` | Run a command in a fork |
-| `cave rm <fork>` | Remove a fork |
+| `cave rm --yes <fork>` | Remove a fork |
 | `cave cp <from> <to>` | Copy files in or out; VM paths start with `:` |
 | `cave inspect` | Show the policy, resources and what the VM did |
 | `cave ls` | List this project's VM, forks and snapshots |

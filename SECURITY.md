@@ -26,14 +26,14 @@ cave-vm is a small open-source project, so these are targets, not guarantees.
 
 ## Supported versions
 
-The three newest stable releases, and `main`, get security fixes. Release candidates, betas and older releases get none. cave asks to update when a newer release is out, and a copy two or more releases behind does not run in a terminal until it is updated (D52). Update with `brew upgrade cave-vm` or by running the install script again.
+The three newest stable releases, and `main`, get security fixes. Release candidates, betas and older releases get none. cave asks to update when a newer release is out, and a copy two or more releases behind does not run in a terminal until it is updated, except `cave pull`, so work can always be copied out (D52). Update with `brew upgrade cave-vm` or by running the install script again.
 
 ## What counts as a vulnerability
 
 The things cave-vm promises to protect, and so the reports we most want:
 
 - **Guest to host escape:** code in a VM gets code execution on the Mac, or reads or writes host files outside what the VM's policy allows. Bugs in the VMM's device models (virtio block, net, vsock, balloon, serial) are the most likely source.
-- **Policy bypass:** a VM reaches something its policy denies, such as the local network when private ranges are denied, or a host path that is not mounted.
+- **Policy bypass:** a VM reaches something its policy denies, such as the local network when private ranges are denied, or a Mac file outside what the VM's policy reaches.
 - **Credential leaks:** a credential is exposed to the agent, written to a log, or stored somewhere it should not be. Credentials are meant to be injected into a command and never returned to the agent, and logs record names, not values.
 - **Daemon and socket access:** another user or process can talk to the daemon's socket, or a VM can reach the daemon beyond its intended interface.
 - **Snapshot and image integrity:** a tampered snapshot, image, kernel or update response is accepted without detection.
@@ -43,7 +43,7 @@ The things cave-vm promises to protect, and so the reports we most want:
 ## What is not a vulnerability
 
 - Anything an agent does **inside** a VM within the VM's policy, such as deleting files in the VM, installing packages, or using the network when the policy allows it. The VM exists so that this is contained.
-- Secrets that a user chooses to place inside a VM. A snapshot of a VM that has held a credential can contain it, and cave-vm warns when you fork, restore or export one.
+- Secrets that a user chooses to place inside a VM. A snapshot of a VM that has held a credential can contain it, and cave-vm warns when you fork, restore or pull one.
 - Access that the user opts into with a flag, such as `--net lan`.
 - Attacks that need an attacker who already has code execution as your macOS user on the host, or physical access to the Mac.
 - Vulnerabilities in Apple's Hypervisor.framework or macOS itself. Please report those to Apple.

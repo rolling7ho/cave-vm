@@ -24,7 +24,7 @@ Why these numbers: 4 bytes is the usual width and leaves room; 1 MiB bounds the 
 
 ## Connections and the handshake
 
-**One operation per connection.** A client opens a connection, does the handshake, sends one request, and the connection carries that operation's messages until it ends. Concurrent operations use separate connections. This avoids multiplexing and flow control in the protocol, because vsock and Unix sockets already apply backpressure per connection. The one long-lived connection is the agent's control connection.
+**One operation per connection.** A client opens a connection, does the handshake, sends one request, and the connection carries that operation's messages until it ends. Concurrent operations use separate connections. This avoids multiplexing and flow control in the protocol, because vsock and Unix sockets already apply backpressure per connection. The agent's control connection follows the same rule: the host opens a new one for each control operation.
 
 The client's first frame is `hello`, and the server answers with `hello` or an `error`:
 
@@ -151,12 +151,12 @@ The agent connects to `127.0.0.1:<port>` in the guest and answers `{"type": "por
 
 ### Control connection
 
-The daemon, through the VMM, keeps one connection to the agent open while the VM runs and sends it `control` after the handshake. It carries:
+The VMM opens a control connection to the agent for each control operation: at boot, before a snapshot, and each time it sends the clock. It sends `control` after the handshake. At boot it sends `ping`, then `restored`, and reports `booted` only after both are answered. A control connection carries:
 
 | Message | Direction | Meaning |
 | --- | --- | --- |
 | `{"type": "control"}` | host to agent | Opens the control connection |
-| `{"type": "ping"}` / `{"type": "pong"}` | either way | Liveness |
+| `{"type": "ping"}` / `{"type": "pong"}` | host to agent / agent to host | Liveness |
 | `{"type": "snapshot_prepare"}` | host to agent | A snapshot is about to be taken. The agent flushes file systems (`sync`) and answers `snapshot_ready` |
 | `{"type": "snapshot_ready"}` | agent to host | Safe to pause the VM |
 | `{"type": "restored", "time_unix_ns": 1791800569000000000, "timezone": {"name": "Asia/Manila", "tzif": "VFppZjI..."}}` | host to agent | Sent after a boot and after a restore, since the VM has no clock of its own, and again whenever the Mac's clock jumps, its timezone changes, or 10 minutes pass ([D57](../ROADMAP.md#decisions)). The agent sets the guest clock to the host's time and, when `timezone` is there, the guest's timezone: `name` is the zone's name and `tzif` the Mac's compiled zone file, in base64, used when the guest has no file for that zone. It answers `ok`; a timezone it cannot set is skipped |
@@ -201,14 +201,14 @@ This object is written `vm` below.
 | `fork` | `vm`, `name` (optional; `fork-1`, `fork-2` and so on otherwise), `from` (optional snapshot; the VM's current state otherwise) | `forked` once the fork is running. It is then addressed as a `vm` with `fork` set |
 | `list` | `project` (optional; all known projects if absent) | `list` with VMs, forks and snapshots |
 | `remove` | `vm`, `name` (optional: the snapshot or fork to delete; without it the VM, its forks and its `.cave/` state are removed) | `ok`, or `not_found` for an unknown name |
-| `inspect` | `vm`, `log_limit` | `policy`, `resources` and `audit` entries |
+| `inspect` | `vm`, `log_limit` (optional) | `policy`, `resources` and `audit` entries |
 | `sync` | `vm` (a synced project's own VM) | `synced`. If the VM is not running, a `progress` with `waiting for the VM` comes first and the reply waits until it runs. A sealed project or a fork is refused at once with `bad_request` |
-| `pull` | `vm` (a synced project's own, running VM) | `pulled`, or an `error` with code `conflict` and a `files` list, in which case nothing was applied |
-
-`snapshot`, `restore` and `fork` act on a project's own VM only; with `fork` set in `vm` they are refused with `bad_request`.
+| `pull` | `vm` (a project's own, running VM, sealed or synced), `force` (optional boolean) | `pulled`, or an `error` with code `conflict` and a `files` list, in which case nothing was applied. `force` overwrites the VM's copies of files changed on both sides. A sealed project without a record of its first copy is refused with `conflict` unless `force` is set. A fork is refused with `bad_request` |
 | `gc` | `apply` (boolean) | `usage`, and what was reclaimed when `apply` is true |
 | `images` | none | `images` |
 | `doctor` | none | `checks`, each with `name`, `ok` and `fix` |
+
+`snapshot`, `restore` and `fork` act on a project's own VM only; with `fork` set in `vm` they are refused with `bad_request`.
 
 Because a request and its reply can share a type (`snapshot`), the `proto` crate decodes each direction with its own message set. The daemon's stream messages are the agent's, relayed: the client sends `input`, `input_end`, `signal`, `pty_data`, `pty_resize`, `file_data` and `file_end`, and the daemon sends `output`, `exit`, `pty_data`, `file_info`, `file_data`, `file_end` and `file_written`.
 

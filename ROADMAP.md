@@ -137,7 +137,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | P4.7 | Lifecycle: the suspended state, auto-suspend after the configured idle time, suspend on Mac sleep [A10], restore from the last snapshot after a reboot, and states shown in `cave ls`. | Daemon tests with a fake clock and fake power events. |
 | P4.8 | Automatic snapshots and automatic deletion, both configured in `cave.toml` (key names from P1.2). | Retention tests. |
 | P4.9 | `cave gc`: show disk usage and reclaim it. Shared APFS clone blocks are reported honestly rather than double-counted [A9]. | Tests on cloned temp files. |
-| P4.10 | `cave export`: move a project or snapshot out as files. | E2E round trip. |
+| P4.10 | `cave export`: move a project or snapshot out as files (now `cave pull`, D58). | E2E round trip. |
 | P4.11 | Benchmark harness for boot, restore and fork time and idle memory, run on the self-hosted Mac. | Results compared against the P2.11 targets. |
 | P4.12 | Meet the gate 4 targets (D29): snapshots write only the pages changed since the last one (P4.12a), faster restore and fork (P4.12b), free page reporting (P4.12c), then booted memory under the 200 MB of D30 (P4.12d). | `scripts/bench/gate4.py` meets every target. |
 
@@ -162,9 +162,9 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 | P5.5 | `cave inspect`: policy, resources and audit log. Optional TTL for disposable VMs. | CLI tests. |
 | P5.6 | One skill source in the repo, used both by `cave init` and as the bootstrap skill on the website. | Test that `cave init` writes exactly that text. |
 | P5.7 | `cave init` writes the `AGENTS.md` section, a `.claude/skills/` entry, and, where the agent supports it, a permissions config that denies host Bash. | Tests on a temp project; existing `AGENTS.md` content is preserved. |
-| P5.8 | `cave agent <name>`: start the agent on the Mac, connected to this VM through the MCP server, with host Bash denied where the agent supports it. `--in-vm` runs the agent inside the VM instead, which needs the VM's network ([decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md)). | E2E with Claude Code on a real Mac, both modes. |
+| P5.8 | `cave agent <name>`: start the agent on the Mac, connected to this VM through the MCP server, with host Bash denied where the agent supports it. `--in-vm` runs the agent inside the VM instead, which needs the VM's network ([decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md)). Replaced by D53: the agent now runs in the VM by default, `--on-mac` on the Mac. | E2E with Claude Code on a real Mac, both modes. |
 | P5.9 | Remote editing: sshd in the VM reached over vsock through a `cave` proxy command, with keys generated automatically, so VS Code Remote and Zed work. | E2E connection test. |
-| P5.10 | Synced mode: `cave sync` and `cave pull` with the per-file SHA-256 rules, an automatic snapshot before a pull, and dependency and build folders excluded. | Tests for each rule: Mac-only change applied, VM-only change left, both-sides change stops the pull and is listed; exclusions. |
+| P5.10 | Synced mode: `cave sync` and `cave push` (then named `cave pull`, D42) with the per-file SHA-256 rules, an automatic snapshot before a push, and dependency and build folders excluded. | Tests for each rule: Mac-only change applied, VM-only change left, both-sides change stops the push and is listed; exclusions. |
 | P5.11 | Docs: the agent boundary limit (an agent with a host shell can step outside the VM), the threat model, and that the mirror backs up source only. | Reviewed against the design's wording. |
 | P5.12 | The first-boot copy [D13, D33]: on a project VM's first boot, the folder's files except `.cave/` and the top-level `.env` go into `/workspace` once, and `cave` says what that means for the Mac files. D13 was decided without a task; found while building P5.10. | E2E: files, modes and owner arrive, `.env` does not, and a restart does not copy again. |
 
@@ -206,7 +206,7 @@ The phases and gates are drawn in `docs/design.md` under "Milestones and plannin
 
 ## Assumptions to verify
 
-None of these are established. Each is checked in the task listed, and the result is written down before anything depends on it.
+Each was checked in the task listed. The results are in [decision 0005](docs/decisions/0005-spike-report.md) and `docs/spike/`.
 
 | ID | Assumption | Checked in |
 | --- | --- | --- |
@@ -224,12 +224,12 @@ None of these are established. Each is checked in the task listed, and the resul
 
 ## Decisions
 
-Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md), D23 in [decision 0006](docs/decisions/0006-phase-3-dependencies.md), D24 and D25 in [decision 0007](docs/decisions/0007-unsafe-host-calls-and-pr-flow.md), D26 in [decision 0008](docs/decisions/0008-vsock-without-socket-files.md), D27 in [decision 0009](docs/decisions/0009-toml-edit.md), D28 in [decision 0010](docs/decisions/0010-image-manifest.md), D29 in [decision 0011](docs/decisions/0011-gate-4-misses.md), D30 in [decision 0012](docs/decisions/0012-booted-memory-target.md), D31 and D32 in [decision 0013](docs/decisions/0013-mcp-server-by-hand.md), D33 in [decision 0014](docs/decisions/0014-env-stays-on-the-mac.md), D34 in [decision 0015](docs/decisions/0015-ssh-config-include-line.md), and D35 to D44 in [decision 0017](docs/decisions/0017-cli-feedback-after-v0-1-0.md).
+Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-roadmap-phases-and-gates.md) and [decision 0002](docs/decisions/0002-cave-agent-runs-on-the-mac.md), D4 to D12 in [decision 0003](docs/decisions/0003-roadmap-open-items.md), D13 to D22 in [decision 0004](docs/decisions/0004-cli-and-config-open-items.md), D23 in [decision 0006](docs/decisions/0006-phase-3-dependencies.md), D24 and D25 in [decision 0007](docs/decisions/0007-unsafe-host-calls-and-pr-flow.md), D26 in [decision 0008](docs/decisions/0008-vsock-without-socket-files.md), D27 in [decision 0009](docs/decisions/0009-toml-edit.md), D28 in [decision 0010](docs/decisions/0010-image-manifest.md), D29 in [decision 0011](docs/decisions/0011-gate-4-misses.md), D30 in [decision 0012](docs/decisions/0012-booted-memory-target.md), D31 and D32 in [decision 0013](docs/decisions/0013-mcp-server-by-hand.md), D33 in [decision 0014](docs/decisions/0014-env-stays-on-the-mac.md), D34 in [decision 0015](docs/decisions/0015-ssh-config-include-line.md), D35 to D44 in [decision 0017](docs/decisions/0017-cli-feedback-after-v0-1-0.md), and D45 onwards in the record each row names.
 
 | ID | Question | Decision |
 | --- | --- | --- |
 | D1 | Phases and gates, since the design's roadmap diagram was lost in the export. | Redrawn in `docs/design.md`; gate N closes phase N for phases 1 to 5, and phase 6 ends at the v1 release. |
-| D2 | What `cave agent claude` does. | Runs the agent on the Mac through the MCP server; `--in-vm` runs it inside the VM. |
+| D2 | What `cave agent claude` does. | Runs the agent on the Mac through the MCP server; `--in-vm` runs it inside the VM. Replaced by D53. |
 | D3 | Phases for decided items the README phases did not place. | Sandbox profile in phase 3; Rust SDK, remote editing and synced mode in phase 5; Python and TypeScript SDKs and the Ubuntu image in phase 6. |
 | D4 | Dependencies this plan expects to ask for. Each still needs its own request with a reason. | Ask per phase, not per crate: phase 2 `vm-fdt` (device tree) and `serde`/`serde_json`; phase 3 `vm-memory` and `virtio-queue` (rust-vmm, used by Firecracker-style VMMs), `smoltcp` (userspace TCP/IP for the NAT), `clap`, `sha2`; phase 5 an MCP server library or a small hand-written one. Prefer writing small pieces ourselves over pulling in large frameworks. |
 | D5 | Where the guest-memory code lives. `unsafe` is allowed "in the guest-memory code" but the crate map has no memory crate. | A single `memory` module inside `vmm`, the only module in that crate allowed to use `unsafe`, rather than a new crate (the layout is decided). |
@@ -246,7 +246,7 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D16 | Whether `cave` looks for `cave.toml` in parent folders, like git. | Yes, up to the home folder. |
 | D17 | `cave ls` lists "project VMs", but the design has no registry. | The daemon keeps a list of project folders it has run, used only for listing and pruned when a folder is gone. |
 | D18 | What `cave fork [name]` names, and how a fork is used. The SDK example `Sandbox.fork("base")` reads as naming the source snapshot. | `name` is the new fork; the source is a fresh snapshot of the current state, or `--from <snapshot>`. Other commands take `--fork <name>`. The SDK follows the CLI. |
-| D19 | What `cave export` produces: the project's files, or the whole VM. | The project's files, copied out of the VM or a snapshot into a Mac folder. Whole-VM export and import waits until after v1. |
+| D19 | What `cave export` produces: the project's files, or the whole VM. | The project's files, copied out of the VM or a snapshot into a Mac folder. Whole-VM export and import waits until after v1. The command is `cave pull` since D58. |
 | D20 | There is no command to suspend a VM now, which `--net` changes and freeing memory need. | Add `cave stop`, which suspends to a snapshot. |
 | D21 | What happens when a TTL runs out. | Off by default. When set and it runs out, the VM is stopped and removed like `cave rm --yes`, and startup prints when that happens. |
 | D22 | Where the base-image digest pin is stored. The design says `cave.toml` plus the pin rebuilds the environment anywhere, but `.cave/` is gitignored. | On first run, the digest is written into `cave.toml` as `image = "base@sha256:..."`. |
@@ -256,7 +256,7 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D26 | How the host reaches guest vsock ports, after socket paths in `.cave/` hit macOS's 104-byte limit in deep projects. | No socket files: the device hands out socket pairs, and the VMM passes connections to the daemon as file descriptors over its control socket. |
 | D27 | Which crate reads `cave.toml` and writes the image pin into it (D22). | Add `toml_edit`, which keeps the user's comments and layout when the pin is written. |
 | D28 | Where base images and the kernel come from, and how `image = "base"` becomes a digest. | An `images.json` manifest on each GitHub release lists every published image version with its disk and kernel; the pin is the disk digest, and `CAVE_IMAGE_DIR` points at a local build instead. |
-| D29 | Gate 4 missed five of six targets (Q1). | Fix them; the targets in decision 0005 stay. Gate 4 stays open until the benchmark meets all of them (P4.12). |
+| D29 | Gate 4 missed five of six targets (Q1). | Fix them; the targets in decision 0005 stay. Gate 4 stays open until the benchmark meets all of them (P4.12). D30 later set booted memory to 200 MB. |
 | D30 | Booted memory missed its 128 MB target after the other gate 4 fixes: the Debian guest holds about 285 MB after boot. | The booted target is under 200 MB for the Debian guest, met by dropping the boot-time file cache once; every other target stands (decision 0012). |
 | D31 | Phase 5's MCP server: a library or written by hand (D4). | Written by hand: newline-delimited JSON-RPC on stdio over `serde_json` and the Rust SDK, with no MCP library (decision 0013). |
 | D32 | Whether the MCP server's `destroy` tool can remove the project's own VM, or only forks. | Forks only: `destroy` requires `fork` and never removes the project's VM, its disk or its snapshots (decision 0013). |
@@ -265,13 +265,13 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D35 | Ivan asked for `cave exec <cmd>` without `--`. | `--` is optional for `cave exec` and `cave agent`; cave's flags come before the command (decision 0017). |
 | D36 | Where the audit log goes when it grows large. | Newest entries in `.cave/audit-latest.log`; past 10 MB it moves to `audit-<date>-<time>.log` and a new one starts (decision 0017). |
 | D37 | Ivan asked for the agent text to live in `.cave/AGENTS.md`. | The text goes in `.cave/AGENTS.md`; the root `AGENTS.md` gets a one-line pointer, created if missing (decision 0017). |
-| D38 | Ivan asked for `cave export [folder]`. | `cave export [folder] [--from <snapshot>]`; a missing folder is created after a question (decision 0017). |
+| D38 | Ivan asked for `cave export [folder]`. | `cave export [folder] [--from <snapshot>]`; a missing folder is created after a question (decision 0017). Renamed `cave pull` by D58. |
 | D39 | Ivan asked for a way to watch what happens in the VM. | `cave view` follows the audit log live (decision 0017). `cave mirror` was removed by D46. |
 | D40 | Ivan asked for more than one VM per project and a way to pick one. | The other VMs are named forks picked with `--fork`; `cave run` on a running VM offers to fork it (decision 0017). |
 | D41 | Ivan asked for a live sync mode. | `cave sync --watch`, one-way from the VM, every 2 seconds; two-way stays a non-goal (decision 0017). |
-| D42 | Ivan asked for `cave push`. | `cave pull` is renamed `cave push`; `pull` stays as a hidden alias until the next minor release (decision 0017). |
+| D42 | Ivan asked for `cave push`. | `cave pull` is renamed `cave push`; `pull` stays as a hidden alias until 1.0.0, when D58 dropped it (decision 0017). |
 | D43 | Ivan asked for an emergency stop. | `cave stop --force` asks, then stops every VM with SIGTERM and SIGKILL 5 seconds later, saving nothing (decision 0017). |
-| D44 | Ivan asked for Codex in v1. | `cave agent codex`: Codex on the Mac with `cave mcp` and its shell tools turned off (decision 0017). |
+| D44 | Ivan asked for Codex in v1. | `cave agent codex`: Codex on the Mac with `cave mcp` and its shell tools turned off (decision 0017). Since D53 this is `cave agent codex --on-mac`. |
 | D45 | Ivan asked for copies of cave to update themselves. | cave installs a newer release the way it was installed (asked first since D47); `[updates] check = false` turns it off. Images still never update by themselves (decision 0018). |
 | D46 | Ivan found `cave mirror` only repeats the agent's own screen. | `cave mirror` and the agent terminal recording are removed; `cave view` stays (decision 0019). |
 | D47 | Ivan asked for cave to ask before updating, and to look when it opens rather than daily. | In a terminal, cave looks up the newest stable release in the background and asks `Update now? [Y/n]` when one is newer; no background installs (decision 0020). |
@@ -283,6 +283,6 @@ Answered by Ivan. D1 to D3 are recorded in [decision 0001](docs/decisions/0001-r
 | D53 | Ivan's proposal asked for agents without permission prompts, safe only where their tools reach just the VM. | `cave agent <name>` runs the agent in the VM with prompts skipped and says so; `--safe` keeps them; `--on-mac` runs it on the Mac through MCP, always with prompts (decision 0026, replacing decision 0002). |
 | D54 | Which agents ship in v1. | Claude Code and Codex, both with D53's default (decision 0026). |
 | D55 | Whether plain `claude` in a project may skip its prompts. | `cave init` denies Claude Code's shell and Mac edits, and asks next to the mirror question whether to skip prompts; a yes goes to `.claude/settings.local.json` as `dontAsk` with the `cave` tools allowed, since Claude Code ignores `bypassPermissions` there, and also denies Read, Glob, Grep and WebFetch; the question ships once the deny rules are shown to hold with prompts skipped (decision 0026). |
-| D56 | Ivan asked for sign-in links from an agent in the VM to open on the Mac. | During `cave agent`, a helper set as `BROWSER` in the VM passes the link through the terminal, and `cave` opens it with `open` if it is `https://` on `claude.ai`, `claude.com` or `anthropic.com` (decision 0027). |
+| D56 | Ivan asked for sign-in links from an agent in the VM to open on the Mac. | During `cave agent`, a helper set as `BROWSER` in the VM passes the link through the terminal, and `cave` opens it with `open` if it is `https://` on `claude.ai`, `claude.com` or `anthropic.com`; a sign-in that returns to `localhost` is passed into the VM through a loopback port on the Mac for at most 10 minutes (decision 0027). |
 | D57 | Ivan asked for the VM's clock to match the Mac's. | The VM's time and timezone follow the Mac's at every boot, restore and resume, and again whenever the Mac's clock jumps or its timezone changes, and every 10 minutes (decision 0028). |
 | D58 | Ivan asked for `cave pull` and `cave push` for both modes. | `cave export` is renamed `cave pull`, with `export` as a hidden alias, and the old `pull` alias of `push` is dropped; `cave push` works in sealed mode too, against a record of the first copy, never deletes there, and `--force` applies the Mac's version of files changed on both sides (decision 0029). |

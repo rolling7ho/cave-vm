@@ -250,7 +250,7 @@ fn init_writes_the_config_and_ignores_the_state_folder() {
          Set up Claude Code to use cave mcp, with host Bash, Mac edits and reading .env denied (.mcp.json, .claude/settings.json)\n\
          Added an Include line to ~/.ssh/config for cave's SSH hosts\n\
          Edit in the VM: connect VS Code Remote-SSH or Zed to proj.cave\n\
-         Next: cave shell, or cave agent claude\n"
+         Next: cave agent claude or cave agent codex; any other agent or command runs in the VM with cave shell or cave exec\n"
     );
     let entry = fs::read_to_string(s.data().join("ssh/hosts/proj.cave.conf")).unwrap();
     assert!(entry.contains("ssh-proxy"), "{entry}");

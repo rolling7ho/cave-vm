@@ -7,7 +7,7 @@ A snapshot is a folder in the project's `.cave/snapshots/<name>/`. This page is 
 | File | Written by | What it holds |
 |------|-----------|---------------|
 | `snapshot.json` | daemon, last | The manifest, below. A folder without one is an unfinished snapshot and is ignored. |
-| `disk.img` | daemon | The project disk, as an APFS clone of `.cave/disk.img`. |
+| `disk.img` | VMM while the VM runs, daemon when it is stopped | The project disk, as an APFS clone of `.cave/disk.img`. |
 | `memory` | VMM | Guest RAM. Missing for a snapshot of a stopped VM. |
 | `state` | VMM | vCPU, interrupt-controller, timer, UART and virtio state, and the guest's open TCP connections. Missing with `memory`. |
 
@@ -44,7 +44,8 @@ A start that changes the network between `off` and `nat` or `lan` cannot resume,
   "vm": { "cpus": 2, "memory_bytes": 2147483648, "net": "nat" },
   "credentials": ["API_KEY"],
   "has_memory": true,
-  "auto": false
+  "auto": false,
+  "undo": false
 }
 ```
 
@@ -53,7 +54,8 @@ A start that changes the network between `off` and `nat` or `lan` cannot resume,
 - `image`: the pinned image the disk started from.
 - `credentials`: names of credentials injected into the VM before the snapshot, never their values. A fork or restore shows them so you know what the VM may still hold.
 - `has_memory`: whether `memory` and `state` exist.
-- `auto`: taken automatically, such as the one a restore takes first so it can be undone. A restore with no name passes over these. Missing means `false`.
+- `auto`: taken automatically, such as the one a restore takes first so it can be undone. Missing means `false`.
+- `undo`: the state a restore saved first, so the restore can be undone. A restore with no name passes over these. Missing means `false`.
 
 Readers ignore keys they do not know, so a later `cave` can add keys without a new version.
 

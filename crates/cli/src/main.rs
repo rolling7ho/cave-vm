@@ -106,9 +106,9 @@ enum Cmd {
         #[arg(long)]
         fork: Option<String>,
     },
-    /// Start a coding agent against this project's VM.
+    /// Start Claude Code or Codex in this project's VM.
     Agent {
-        /// The agent: claude or codex.
+        /// The agent: claude or codex. Run any other agent with cave shell or cave exec.
         name: String,
         /// Keep the agent's permission prompts.
         #[arg(long)]
@@ -153,7 +153,7 @@ enum Cmd {
         /// The folder, created after asking if it does not exist;
         /// ./<project>-export-<date> when left out.
         folder: Option<std::path::PathBuf>,
-        /// Export this snapshot, from `cave ls`, instead of the VM.
+        /// Copy this snapshot, from `cave ls`, instead of the VM.
         #[arg(long, value_name = "SNAPSHOT")]
         from: Option<String>,
     },
