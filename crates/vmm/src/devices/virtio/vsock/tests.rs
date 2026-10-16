@@ -443,6 +443,32 @@ fn guest_overrunning_the_credit_is_reset() {
 }
 
 #[test]
+fn empty_packets_from_the_guest_are_dropped() {
+    let mut r = rig();
+    let (mut host, port) = r.host_connect();
+    for _ in 0..8 {
+        r.guest_send(r.guest_header(AGENT_PORT, port, op::RW), &[]);
+    }
+    r.guest_send(r.guest_header(AGENT_PORT, port, op::RW), b"after");
+    assert_eq!(read_exactly(&mut host, 5), b"after");
+}
+
+#[test]
+fn a_host_connection_the_guest_never_answers_is_reset_at_the_next() {
+    let mut r = rig();
+    r.dev.shared.lock().connect_timeout = Duration::ZERO;
+    let mut first = with_timeout(r.dev.connector().connect(AGENT_PORT).unwrap());
+    let (req, _) = r.next_packet();
+    assert_eq!(req.op, op::REQUEST);
+    let _second = r.dev.connector().connect(AGENT_PORT).unwrap();
+    let (rst, _) = r.next_packet();
+    assert_eq!((rst.op, rst.src_port), (op::RST, req.src_port));
+    let mut rest = Vec::new();
+    assert_eq!(first.read_to_end(&mut rest).unwrap(), 0);
+    assert_eq!(r.dev.shared.lock().conns.len(), 1);
+}
+
+#[test]
 fn device_reset_closes_host_connections() {
     let mut r = rig();
     let (mut host, _) = r.host_connect();

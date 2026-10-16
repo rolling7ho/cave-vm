@@ -1,7 +1,7 @@
 //! Starting VMM processes.
 
 use std::ffi::OsString;
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
@@ -59,9 +59,27 @@ impl ProcessLauncher {
 /// The file the VMM's standard output and error go to.
 pub const LOG_FILE: &str = "vmm.log";
 
+/// Where [`LOG_FILE`] is moved once it passes [`LOG_KEEP`], replacing the
+/// one moved before.
+pub const OLD_LOG_FILE: &str = "vmm.log.old";
+
+/// The size past which [`LOG_FILE`] is moved aside when a VMM starts, so
+/// it does not grow without end over many runs.
+const LOG_KEEP: u64 = 16 << 20;
+
+/// Moves the log in `vm_dir` aside if it has passed [`LOG_KEEP`].
+fn rotate_log(vm_dir: &Path) -> io::Result<()> {
+    let log = vm_dir.join(LOG_FILE);
+    match fs::metadata(&log) {
+        Ok(meta) if meta.len() > LOG_KEEP => fs::rename(&log, vm_dir.join(OLD_LOG_FILE)),
+        _ => Ok(()),
+    }
+}
+
 impl Launcher for ProcessLauncher {
     fn launch(&self, vm_dir: &Path, config: &VmmConfig) -> io::Result<Launched> {
         let (control, vmm_end) = UnixStream::pair()?;
+        rotate_log(vm_dir)?;
         let log = OpenOptions::new()
             .create(true)
             .append(true)
@@ -112,5 +130,30 @@ impl ProcessLauncher {
         }
         command.arg(&self.program);
         Ok(command)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_large_log_is_moved_aside() {
+        let dir = std::env::temp_dir().join(format!("cave-log-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(LOG_FILE), b"small").unwrap();
+        rotate_log(&dir).unwrap();
+        assert!(dir.join(LOG_FILE).exists());
+        let big = fs::File::create(dir.join(LOG_FILE)).unwrap();
+        big.set_len(LOG_KEEP + 1).unwrap();
+        rotate_log(&dir).unwrap();
+        assert!(!dir.join(LOG_FILE).exists());
+        assert_eq!(
+            fs::metadata(dir.join(OLD_LOG_FILE)).unwrap().len(),
+            LOG_KEEP + 1
+        );
+        // Nothing there yet is not an error.
+        rotate_log(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -40,6 +40,15 @@ type Redacted = std::collections::BTreeMap<String, (String, String)>;
 /// Files per `shasum` run on the Mac.
 const HASH_BATCH: usize = 200;
 
+/// Largest file the sync copies from the VM, held in memory while it is
+/// redacted and written.
+const MAX_SYNC_FILE: usize = 256 << 20;
+
+/// Most stdout the daemon keeps from a command it runs in the VM, such as
+/// the file listing, and most stderr, so a VM cannot fill its memory.
+const MAX_RUN_STDOUT: usize = 256 << 20;
+const MAX_RUN_STDERR: usize = 64 << 10;
+
 /// Lists every file in the VM's `/workspace` with its SHA-256, without
 /// descending into the folders that never sync.
 const VM_HASHES: &str = "cd /workspace && find . \\( -name node_modules -o -name target -o -name .git \
@@ -284,8 +293,17 @@ impl Vms {
         loop {
             match relay::read_agent(&mut agent)? {
                 Message::Output { stream, data } => match stream {
+                    Stream::Stdout if out.len() + data.0.len() > MAX_RUN_STDOUT => {
+                        return Err(io_error(
+                            "run a command in the VM",
+                            format!("it printed more than {} MiB", MAX_RUN_STDOUT >> 20),
+                        ));
+                    }
                     Stream::Stdout => out.extend(data.0),
-                    Stream::Stderr => err.extend(data.0),
+                    Stream::Stderr => {
+                        let room = MAX_RUN_STDERR.saturating_sub(err.len());
+                        err.extend(data.0.into_iter().take(room));
+                    }
                 },
                 Message::Exit { code, .. } => return Ok((code, out, err)),
                 Message::Error(e) => return Err(e),
@@ -330,16 +348,7 @@ impl Vms {
             path: format!("{WORKSPACE}/{path}"),
         };
         let mut agent = self.agent_request(id, &request)?;
-        let (mut data, mut mode) = (Vec::new(), 0o644);
-        loop {
-            match relay::read_agent(&mut agent)? {
-                Message::FileInfo { mode: m, .. } => mode = m & 0o777,
-                Message::FileData { data: chunk } => data.extend(chunk.0),
-                Message::FileEnd { .. } => return Ok((data, mode)),
-                Message::Error(e) => return Err(e),
-                other => return Err(io_error(&format!("read {path}"), format!("{other:?}"))),
-            }
-        }
+        file_reply(&mut agent, path, MAX_SYNC_FILE)
     }
 
     fn write_vm_file(
@@ -383,6 +392,41 @@ pub(super) fn record_first_copy(project: &Path) -> Result<(), ErrorMessage> {
 
 fn exclusions(project: &Path) -> Exclusions {
     Exclusions::new(&fs::read_to_string(project.join(".gitignore")).unwrap_or_default())
+}
+
+/// The contents and mode of a file the agent on `agent` is sending, up to
+/// `limit` bytes.
+fn file_reply(
+    agent: &mut UnixStream,
+    path: &str,
+    limit: usize,
+) -> Result<(Vec<u8>, u32), ErrorMessage> {
+    let (mut data, mut mode) = (Vec::new(), 0o644);
+    let too_large = || {
+        error(
+            ErrorCode::Io,
+            format!(
+                "{path} in the VM is larger than {} MiB, so cave sync does not copy it",
+                limit >> 20
+            ),
+        )
+        .with_fix("Add it to .gitignore so the sync leaves it out, or copy it with `cave cp`")
+    };
+    loop {
+        match relay::read_agent(agent)? {
+            Message::FileInfo { size, .. } if size > limit as u64 => {
+                return Err(too_large());
+            }
+            Message::FileInfo { mode: m, .. } => mode = m & 0o777,
+            Message::FileData { data: chunk } if data.len() + chunk.0.len() > limit => {
+                return Err(too_large());
+            }
+            Message::FileData { data: chunk } => data.extend(chunk.0),
+            Message::FileEnd { .. } => return Ok((data, mode)),
+            Message::Error(e) => return Err(e),
+            other => return Err(io_error(&format!("read {path}"), format!("{other:?}"))),
+        }
+    }
 }
 
 /// `data` with each of `known`'s values replaced by its name.
@@ -601,6 +645,35 @@ fn sha256_hex(data: &[u8]) -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_past_the_limit_is_not_read_into_memory() {
+        use cave_vm_proto::frame::write_frame;
+        const LIMIT: usize = 1000;
+        let reply = |messages: Vec<Message>| {
+            let (mut daemon, mut agent) = UnixStream::pair().unwrap();
+            for message in &messages {
+                write_frame(&mut agent, message).unwrap();
+            }
+            file_reply(&mut daemon, "big.bin", LIMIT)
+        };
+        let info = |size| Message::FileInfo { size, mode: 0o640 };
+        let data = |n| Message::FileData {
+            data: vec![b'x'; n].into(),
+        };
+        let end = || Message::FileEnd {
+            sha256: String::new(),
+        };
+        let e = reply(vec![info(LIMIT as u64 + 1)]).unwrap_err();
+        assert!(e.message.contains("big.bin in the VM is larger than"));
+        // A VM that understates the size is stopped at the limit too.
+        let e = reply(vec![info(1), data(600), data(600)]).unwrap_err();
+        assert!(e.message.contains("big.bin in the VM is larger than"));
+        assert_eq!(
+            reply(vec![info(LIMIT as u64), data(LIMIT), end()]).unwrap(),
+            (vec![b'x'; LIMIT], 0o640)
+        );
+    }
 
     #[test]
     fn hash_lines_from_both_tools_are_read() {

@@ -59,6 +59,11 @@ const MAX_PAYLOAD: usize = 64 * 1024;
 /// request past it is reset.
 const MAX_GUEST_CONNS: usize = 1024;
 
+/// How long a host connection may wait for the guest to accept it. One
+/// still waiting is reset at the next host connection, so a guest that
+/// never answers cannot make them pile up.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Most packets waiting for the guest before resets and credit updates
 /// the guest provoked are dropped instead of queued. Data is bounded by
 /// credit, and is never dropped.
@@ -153,6 +158,8 @@ enum ConnState {
 
 struct Conn {
     state: ConnState,
+    /// When it was opened, for [`CONNECT_TIMEOUT`].
+    opened: Instant,
     stream: UnixStream,
     /// Data for the writer thread. Dropped to stop it.
     writer: Option<Sender<Vec<u8>>>,
@@ -202,6 +209,8 @@ struct State {
     guest_conns: usize,
     /// [`MAX_GUEST_CONNS`], lowered by tests.
     max_guest_conns: usize,
+    /// [`CONNECT_TIMEOUT`], lowered by tests.
+    connect_timeout: Duration,
     next_host_port: u32,
     /// Bumped on every reset, so threads of an older driver session stop.
     generation: u64,
@@ -361,6 +370,7 @@ impl Vsock {
                 conns: HashMap::new(),
                 guest_conns: 0,
                 max_guest_conns: MAX_GUEST_CONNS,
+                connect_timeout: CONNECT_TIMEOUT,
                 next_host_port: FIRST_HOST_PORT,
                 generation: 0,
                 paused: false,
@@ -490,6 +500,17 @@ impl Connector {
                 "the guest's vsock driver is not running",
             ));
         }
+        let unanswered: Vec<Key> = state
+            .conns
+            .iter()
+            .filter(|(_, c)| {
+                c.state == ConnState::Connecting && c.opened.elapsed() >= state.connect_timeout
+            })
+            .map(|(key, _)| *key)
+            .collect();
+        for key in unanswered {
+            shared.reset_conn(&mut state, key);
+        }
         let key = loop {
             let host_port = state.next_host_port;
             state.next_host_port = state
@@ -571,6 +592,9 @@ fn handle(shared: &Arc<Shared>, header: Header, data: Vec<u8>) {
             conn.state = ConnState::Connected;
             start_threads(shared, key, generation, &mut state);
         }
+        // An empty packet carries nothing, and queueing it would cost
+        // memory that no credit bounds.
+        op::RW if data.is_empty() => {}
         op::RW if conn.state == ConnState::Connected && !conn.guest_done_sending => {
             let len = data.len() as u32;
             let in_flight = conn.rx_cnt.wrapping_add(len).wrapping_sub(conn.fwd_cnt);
@@ -648,6 +672,7 @@ fn connect_to_host(shared: &Arc<Shared>, key: Key, request: Header) {
 fn new_conn(stream: UnixStream, state: ConnState) -> Conn {
     Conn {
         state,
+        opened: Instant::now(),
         stream,
         writer: None,
         peer_buf_alloc: 0,
