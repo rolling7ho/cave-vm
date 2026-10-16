@@ -87,7 +87,7 @@ When `cave` runs in a terminal, it looks up the newest stable release in the bac
 update: cave v0.1.3 is out; you have v0.1.2 RC 2. Update now? [Y/n]
 ```
 
-Yes installs it the way this copy was installed, with Homebrew or the install script, then exits so you run the command again. No skips that version for a day. A copy built from source is never offered an update. It never asks without a terminal, nor for `cave mcp` and `cave ssh-proxy`, and `check = false` under `[updates]` in `cave.toml` turns it off ([config](config.md#updates)). Pre-releases are never offered. A copy 2 or more stable releases behind is asked every time, with a note that only the 3 newest releases get security fixes, and a no stops the command, except `cave export`, so the work can always be copied out; without a terminal it only warns, and a copy cave cannot update only warns ([D52](../ROADMAP.md#decisions)).
+Yes installs it the way this copy was installed, with Homebrew or the install script, then exits so you run the command again. No skips that version for a day. A copy built from source is never offered an update. It never asks without a terminal, nor for `cave mcp` and `cave ssh-proxy`, and `check = false` under `[updates]` in `cave.toml` turns it off ([config](config.md#updates)). Pre-releases are never offered. A copy 2 or more stable releases behind is asked every time, with a note that only the 3 newest releases get security fixes, and a no stops the command, except `cave pull`, so the work can always be copied out; without a terminal it only warns, and a copy cave cannot update only warns ([D52](../ROADMAP.md#decisions)).
 
 ### The daemon and the data directory
 
@@ -135,9 +135,9 @@ The design's verb set, in its order, plus `cave stop` (D20) and `cave mcp`, adde
 | [`cave inspect`](#cave-inspect) | Show the policy, resources and audit log |
 | [`cave view`](#cave-view) | Follow what happens in the VM live |
 | [`cave sync`](#cave-sync) | Update the Mac mirror (synced mode) |
-| [`cave push`](#cave-push) | Bring Mac edits in (synced mode) |
+| [`cave push`](#cave-push) | Copy your Mac edits into the VM |
 | [`cave cp`](#cave-cp) | Copy files in and out |
-| [`cave export`](#cave-export) | Copy the project's files out of the VM |
+| [`cave pull`](#cave-pull) | Copy the project's files out of the VM |
 | [`cave agent <name>`](#cave-agent) | Start an agent inside this VM, without permission prompts |
 | [`cave images`](#cave-images) | List base images |
 | [`cave doctor`](#cave-doctor) | Check entitlements, macOS version, disk space and image state |
@@ -522,16 +522,19 @@ Errors:
 ### cave push
 
 ```
-cave push
+cave push [--force]
 ```
 
-Synced mode only. Sends Mac edits to the VM, following the design's rules exactly. It was called `cave pull` before [D42](../ROADMAP.md#decisions); that name still works, hidden from help and with a note, until the next minor release. The daemon's request is still `pull`:
+Copies the files you changed on the Mac into the VM, following the design's rules exactly. It was called `cave pull` before [D42](../ROADMAP.md#decisions); since 1.0.0 that name is [`cave pull`](#cave-pull), which copies the other way ([D58](../ROADMAP.md#decisions)). Neither has anything to do with `git push` or `git pull`. The daemon's request is still `pull`:
 
 - It compares the SHA-256 of each file in the Mac mirror against the VM's.
 - A file that changed only on the Mac is applied. One that changed only in the VM is left alone.
 - A file that changed on both sides since the last sync stops the push before anything is applied, and is listed.
 - A snapshot is taken automatically before anything is applied.
 - Dependency and build folders (`node_modules`, `target`, and paths in `.gitignore`) are excluded.
+- `--force` applies the Mac's version of the files changed on both sides instead of stopping, after the same snapshot.
+
+In a sealed project ([D58](../ROADMAP.md#decisions)), the Mac files are compared against what the first boot copied in, recorded in `.cave/sync.json`, and from then on against what the last push left. A file deleted on the Mac is not deleted in the VM, since the Mac's files are not kept up to date there. A sealed project set up before 1.0.0 has no such record, so `cave push` stops with `cave has no record of the files it first copied into this VM, so it cannot tell your edits from the VM's` and says to run `cave push --force`, which copies every file that differs.
 
 ```
 Saved snapshot my-project-2026-10-12-debian-3 before pushing
@@ -544,12 +547,12 @@ On a conflict, exit code 1:
 error: 2 files changed both on your Mac and in the VM since the last sync, so nothing was pushed
   src/app.ts
   package.json
-  fix: keep one version of each file (copy it with cave cp, or undo the edit on your Mac), then run cave push again
+  fix: keep one version of each file (copy it with cave cp, or undo the edit on your Mac) and run cave push again, or run cave push --force to overwrite the VM's version
 ```
 
 When nothing changed on the Mac, no snapshot is taken and it prints `Nothing to push: the VM has every edit from your Mac`. The VM must be running.
 
-Errors: the same sealed-mode error as `cave sync`, and `forks have no Mac mirror` for a fork.
+In a sealed project the message ends `since the last push`. Errors: `forks have no Mac copy to push` for a fork.
 
 ### cave cp
 
@@ -571,17 +574,17 @@ Errors:
 | `one side of cave cp must be in the VM` | Prefix the VM path with `:`, for example `:src/app.ts` |
 | `no such file in the VM: <path>` | Check the path with `cave exec -- ls <dir>` |
 
-### cave export
+### cave pull
 
 ```
-cave export [folder] [--from <snapshot>]
+cave pull [folder] [--from <snapshot>]
 ```
 
-Decided by [D19](../ROADMAP.md#decisions), with the arguments from [D38](../ROADMAP.md#decisions). The design lists `cave export` with `cave cp` as the way to "move files in and out" and as an escape hatch for code in sealed mode. `cave export` copies the project directory out of the VM, or out of a snapshot's disk, into a folder on the Mac. `--from <snapshot>` exports that snapshot instead of the VM. Without a folder, it is `./<ProjectFolder>-export-<YYYY-MM-DD>`. A folder you name that does not exist is created after asking `<folder> does not exist. Create it? [Y/n]`, where Enter means yes; without a terminal it is created, and cave says so. It copies everything, including `.git`, and leaves out nothing, so it is a full copy of the work. Exporting from a snapshot that recorded injected credentials shows the same warning as `cave fork`, ending in `the exported files may contain it`.
+Decided by [D19](../ROADMAP.md#decisions), with the arguments from [D38](../ROADMAP.md#decisions). It was called `cave export` before 1.0.0, and that name still works, hidden from help ([D58](../ROADMAP.md#decisions)). It has nothing to do with `git pull`. The design lists it with `cave cp` as the way to "move files in and out" and as an escape hatch for code in sealed mode. `cave pull` copies the project directory out of the VM, or out of a snapshot's disk, into a folder on the Mac. `--from <snapshot>` copies that snapshot instead of the VM. Without a folder, it is `./<ProjectFolder>-export-<YYYY-MM-DD>`. A folder you name that does not exist is created after asking `<folder> does not exist. Create it? [Y/n]`, where Enter means yes; without a terminal it is created, and cave says so. It copies everything, including `.git`, and leaves out nothing, so it is a full copy of the work. Copying from a snapshot that recorded injected credentials shows the same warning as `cave fork`, ending in `the copied files may contain it`.
 
-Output: `Exported 1,204 files (38 MB) to ./my-project-export-2026-10-12`.
+Output: `Copied 1,204 files (38 MB) to ./my-project-export-2026-10-12`.
 
-The copy goes through `tar` in the VM, as `cave cp` copies folders. Without a snapshot it boots or resumes the VM if needed. A snapshot is read through a temporary fork named `export-<number>`, started from it and removed when the export ends. A folder that already has files in it is refused rather than written over, and a failed export removes the folder it created.
+The copy goes through `tar` in the VM, as `cave cp` copies folders. Without a snapshot it boots or resumes the VM if needed. A snapshot is read through a temporary fork named `export-<number>`, started from it and removed when the copy ends. A folder that already has files in it is refused rather than written over, and a failed copy removes the folder it created.
 
 ### cave agent
 
@@ -718,9 +721,9 @@ sshd runs in the VM and is reached over vsock, so an editor that expects SSH, su
 
 A command run through the MCP server's `exec` tool, or the SDK's `Command::credential`, can name credentials, such as `API_KEY` (design, "Credentials"). The daemon reads each value from `.env` in the project folder and gives it to that command only, as an environment variable. The agent never gets the value:
 
-- Output that prints it has the exact value replaced with the name in brackets, so `API_KEY: snednao_#m34nr` comes back as `API_KEY: [API_KEY]`, even when the value is split across two writes [D9]. Every credential the VM's memory may hold is redacted this way, from the output of later commands that do not name it and from files read out of the VM (the MCP server's `read_file`, `cave cp`), using the value `.env` has now. This is best effort: a command can still leak the value through the network, a file changed since, or `cave sync` and `cave export`, which copy files as they are.
+- Output that prints it has the exact value replaced with the name in brackets, so `API_KEY: snednao_#m34nr` comes back as `API_KEY: [API_KEY]`, even when the value is split across two writes [D9]. Every credential the VM's memory may hold is redacted this way, from the output of later commands that do not name it and from files read out of the VM (the MCP server's `read_file`, `cave cp`), using the value `.env` has now. This is best effort: a command can still leak the value through the network, a file changed since, or `cave sync` and `cave pull`, which copy files as they are.
 - The audit log records the name, never the value.
-- A snapshot taken afterwards records the names, since the VM's memory may still hold the values, and `cave restore`, `cave fork` and `cave export` of it warn.
+- A snapshot taken afterwards records the names, since the VM's memory may still hold the values, and `cave restore`, `cave fork` and `cave pull` of it warn.
 
 `.env` is never copied into the VM ([D33](../ROADMAP.md#decisions)), so the agent cannot read it there. `.env` has one `NAME=value` per line, optionally after `export `. Lines starting with `#` are comments. A value in single quotes is taken as written, one in double quotes may use `\n`, `\"` and `\\`, and an unquoted value ends at ` #`. A name that is not in `.env` is an error, and the command does not run:
 

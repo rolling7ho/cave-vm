@@ -146,8 +146,10 @@ enum Cmd {
         )]
         argv: Vec<String>,
     },
-    /// Copy the project out of the VM, or a snapshot, into a folder.
-    Export {
+    /// Copy the project out of the VM, or a snapshot, into a folder on
+    /// the Mac. Not git pull: no repository is involved.
+    #[command(alias = "export")]
+    Pull {
         /// The folder, created after asking if it does not exist;
         /// ./<project>-export-<date> when left out.
         folder: Option<std::path::PathBuf>,
@@ -198,11 +200,13 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Send Mac edits to the VM (synced mode).
-    Push,
-    /// The old name of `cave push`, until the next minor release (D42).
-    #[command(hide = true)]
-    Pull,
+    /// Copy the files you changed on the Mac into the VM, after a
+    /// snapshot. Not git push: no repository is involved.
+    Push {
+        /// Also overwrite files the VM changed since the last push.
+        #[arg(long)]
+        force: bool,
+    },
     /// Update the Mac mirror from the VM (synced mode).
     Sync {
         /// Keep updating it every 2 seconds until Ctrl-C.
@@ -349,7 +353,7 @@ fn main() -> ExitCode {
     // Not for commands other programs talk to over stdin and stdout.
     if !matches!(cli.command, Cmd::Mcp { .. } | Cmd::SshProxy { .. }) {
         // An outdated copy may still copy the work out (D52).
-        update::offer_update(!matches!(cli.command, Cmd::Export { .. }));
+        update::offer_update(!matches!(cli.command, Cmd::Pull { .. }));
     }
     let result = match cli.command {
         Cmd::Init {
@@ -384,7 +388,6 @@ fn main() -> ExitCode {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
-        Cmd::Export { folder, from } => export::run(folder, from),
         Cmd::Fork { name, from } => snapshot::fork(name, from),
         Cmd::Gc { yes, json } => gc::run(yes, json),
         Cmd::Images { json } => commands::images(json),
@@ -394,11 +397,8 @@ fn main() -> ExitCode {
             cave_vm_mcp::serve(std::io::stdin().lock(), std::io::stdout().lock(), &tools)
                 .map_err(Into::into)
         }),
-        Cmd::Pull => {
-            eprintln!("cave pull is now cave push; the old name goes in a later release");
-            mirror::push()
-        }
-        Cmd::Push => mirror::push(),
+        Cmd::Pull { folder, from } => export::run(folder, from),
+        Cmd::Push { force } => mirror::push(force),
         Cmd::Restore { name, fork } => snapshot::restore(name, fork),
         Cmd::Rm { name, yes } => remove::run(name, yes),
         Cmd::Shell { fork } => match shell::run(fork) {

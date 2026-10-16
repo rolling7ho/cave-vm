@@ -93,9 +93,9 @@ The code lives inside the VM, and the VM is always authoritative. The Mac copy, 
 
 1. The VM is authoritative. The agent only ever works inside it.
 2. Sync is one-directional by default: the host-side daemon writes the Mac mirror after agent runs, on snapshot, or on `cave sync`. The mirror is never written by the agent.
-3. Mac edits are detected by file hash: `cave push` compares the SHA-256 of each file in the Mac copy against the VM's and applies the files that changed on the Mac. A file that changed only on the Mac is applied, one that changed only in the VM is left alone, and one that changed on both sides since the last sync stops the pull and is listed. A snapshot is taken automatically before the pull applies anything, and dependency and build folders (node\_modules, target, and paths in .gitignore) are excluded. The mirror is editable by design, and \`cave push\` is the only path by which Mac edits reach the VM.
+3. Mac edits are detected by file hash: `cave push` compares the SHA-256 of each file in the Mac copy against the VM's and applies the files that changed on the Mac. A file that changed only on the Mac is applied, one that changed only in the VM is left alone, and one that changed on both sides since the last sync stops the pull and is listed. A snapshot is taken automatically before the pull applies anything, and dependency and build folders (node\_modules, target, and paths in .gitignore) are excluded. The mirror is editable by design, and \`cave push\` is the only path by which Mac edits reach the VM. In `sealed` mode the Mac files left after the first copy can be pushed the same way, compared against what was first copied or last pushed; files deleted on the Mac are not deleted in the VM there, and `--force` applies the Mac's version of files changed on both sides (D58).
 4. The mirror backs up source only. It lacks `node_modules`, build output and running processes, so VM snapshots remain the real safety net, and the docs should say that plainly.
-5. Escape hatches: `cave cp`, `cave export` and `git push` from inside the VM.
+5. Escape hatches: `cave cp`, `cave pull` (once `cave export`, D58) and `git push` from inside the VM.
 
 Two copies cost little: with a shared base image and clones, the extra space is the source tree itself, which is usually small next to dependencies and build output that live only in the VM either way. The honest framing is "two copies lets you use your normal editor", not "costs a lot of space".
 
@@ -174,8 +174,8 @@ The first run fetches the kernel and base image and does all setup. The CLI is a
 | `cave fork [name]` | create a new VM from a snapshot, copy-on-write |
 | `cave ls` / `cave rm` / `cave gc` | list project VMs, remove one, show and reclaim disk |
 | `cave inspect` | show the policy, resources and audit log |
-| `cave sync` / `cave push` | update the Mac mirror / bring Mac edits in (synced mode) |
-| `cave cp` / `cave export` | move files in and out |
+| `cave sync` / `cave push` | update the Mac mirror (synced mode) / bring Mac edits in |
+| `cave cp` / `cave pull` | move files in and out |
 | `cave agent <name>` | start an agent inside this VM without permission prompts; `--safe` keeps them, `--on-mac` runs it on the Mac through MCP |
 | `cave images` | list base images |
 | `cave doctor` | check entitlements, macOS version, disk space and image state |
@@ -326,7 +326,7 @@ cave-vm/
 | Hypervisor.framework gives less than KVM | The interrupt controller is the notable gap, and saving and restoring its state is fiddly; this threatens snapshots, the headline feature | Spike early; study libkrun's HVF code; keep the backend behind a trait |
 | Existing tools cover part of the space | Apple's `container` project and Virtualization.framework-based tools already boot fast | Compete on snapshot and fork speed, density, per-project model and agent ergonomics, not raw boot time |
 | Ease of use hides the unglamorous work | Guest agent, networking and image handling take real time | Budget for them explicitly in milestones |
-| Sealed storage puts work only in `.cave/` | Corruption or an accidental delete loses work | Automatic snapshots, confirmation on `cave rm`, `cave export`, `synced` mode, and the habit of `git push` |
+| Sealed storage puts work only in `.cave/` | Corruption or an accidental delete loses work | Automatic snapshots, confirmation on `cave rm`, `cave pull`, `synced` mode, and the habit of `git push` |
 | ARM64 Linux guests only | Anything needing x86 or macOS tooling will not run inside | State it up front; x86 emulation is a non-goal |
 | Agent boundary is guidance unless enforced | An agent with a host shell can ignore the skill | MCP server with no host shell, plus a permissions config; document the limit |
 | Name collision | `CAVE` is already taken on crates.io, npm and Homebrew | Package and repo names use cave-vm; check it on GitHub, crates.io, npm and Homebrew before committing |

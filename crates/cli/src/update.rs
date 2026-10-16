@@ -349,7 +349,7 @@ fn refuse(behind: usize, command: Option<&str>) -> ! {
 /// asked and never look anything up; when an earlier lookup found this
 /// copy [`URGENT_BEHIND`] or more releases behind, they get a warning.
 /// In a terminal such a copy is asked every time and stops on a no (D52),
-/// unless `may_block` is false, as for `cave export`, which gets the work
+/// unless `may_block` is false, as for `cave pull`, which gets the work
 /// out of the VM whatever the version.
 pub fn offer_update(may_block: bool) {
     if updates_off() {

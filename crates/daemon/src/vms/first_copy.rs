@@ -65,6 +65,14 @@ impl Vms {
         if !names.is_empty() {
             self.copy_in(id, project, &names)?;
         }
+        // Best effort: without it, `cave push` in a sealed project asks
+        // for --force.
+        if let Err(e) = super::mirror::record_first_copy(project) {
+            eprintln!(
+                "cave-daemon: cannot record the first copy for cave push: {}",
+                e.message
+            );
+        }
         fs::remove_file(&marker).map_err(failed)?;
         Ok(true)
     }

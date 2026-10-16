@@ -1,4 +1,4 @@
-//! `cave sync` and `cave push`: synced mode's Mac mirror (docs/cli.md,
+//! `cave sync` and `cave push`: the Mac mirror, and Mac edits into the VM (docs/cli.md,
 //! "cave sync" and "cave push"). `cave sync --watch` keeps syncing (D41). The daemon does the work; this prints
 //! what it did.
 
@@ -53,14 +53,14 @@ pub fn sync_vm(vm: &VmId) -> Result<Reply> {
     }
 }
 
-/// `cave push`, called `cave pull` before D42.
-pub fn push() -> Result<()> {
+/// `cave push [--force]`.
+pub fn push(force: bool) -> Result<()> {
     let vm = vm_id(&project::require()?, None);
     let Reply::Pulled {
         snapshot,
         applied,
         deleted,
-    } = Connection::call(&Request::Pull { vm })?
+    } = Connection::call(&Request::Pull { vm, force })?
     else {
         return Err(CliError::unexpected("pull"));
     };

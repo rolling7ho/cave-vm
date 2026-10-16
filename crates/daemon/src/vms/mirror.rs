@@ -1,5 +1,5 @@
-//! `sync` and `pull` for synced mode (docs/cli.md, "cave sync" and "cave
-//! pull"; P5.10): the I/O around the rules in [`crate::sync`]. The Mac
+//! `sync` for synced mode and `pull` (`cave push`) for both modes
+//! (docs/cli.md, "cave sync" and "cave push"; P5.10): the I/O around the rules in [`crate::sync`]. The Mac
 //! mirror is the project folder itself (D14) and the VM's copy is
 //! `/workspace`. The hashes both sides agreed on at the last sync are kept
 //! in `.cave/sync.json`.
@@ -143,27 +143,49 @@ impl Vms {
         })
     }
 
-    /// Brings Mac edits into the running VM, after a snapshot.
-    pub fn pull(&self, id: &VmId) -> Result<Pulled, ErrorMessage> {
-        let project = self.mirrored(id)?;
+    /// Brings Mac edits into the running VM, after a snapshot. In a
+    /// sealed project, files deleted on the Mac are left in the VM, since
+    /// the Mac's copy is not kept up to date there. With `force`, files
+    /// changed on both sides take the Mac's version.
+    pub fn pull(&self, id: &VmId, force: bool) -> Result<Pulled, ErrorMessage> {
+        if id.fork.is_some() {
+            return Err(
+                error(ErrorCode::BadRequest, "forks have no Mac copy to push")
+                    .with_fix("Push to the project's own VM, without --fork"),
+            );
+        }
+        let project = PathBuf::from(&id.project);
+        let sealed = self.source.policy(id)?.storage == Storage::Sealed;
         let _one_at_a_time = MIRROR.lock().unwrap_or_else(|e| e.into_inner());
         let exclusions = exclusions(&project);
+        let state = project.join(STATE_DIR).join(STATE_FILE);
+        if sealed && !force && !state.exists() {
+            return Err(error(
+                ErrorCode::Conflict,
+                "cave has no record of the files it first copied into this VM, so it cannot tell your edits from the VM's",
+            )
+            .with_fix("Run cave push --force to copy every file that differs from your Mac into the VM, after a snapshot"));
+        }
         let last = read_state(&project);
         let mac = mac_hashes(&project, &exclusions)?;
         let vm = self.vm_hashes(id, &exclusions)?;
-        let plan = sync::plan_pull(&last, &mac, &vm).map_err(|files| {
+        let mut plan = sync::plan_pull(&last, &mac, &vm, force).map_err(|files| {
             let mut e = error(
                 ErrorCode::Conflict,
                 format!(
-                    "{} {} changed both on your Mac and in the VM since the last sync, so nothing was pushed",
+                    "{} {} changed both on your Mac and in the VM since the last {}, so nothing was pushed",
                     files.len(),
-                    if files.len() == 1 { "file" } else { "files" }
+                    if files.len() == 1 { "file" } else { "files" },
+                    if sealed { "push" } else { "sync" }
                 ),
             )
-            .with_fix("keep one version of each file (copy it with cave cp, or undo the edit on your Mac), then run cave push again");
+            .with_fix("keep one version of each file (copy it with cave cp, or undo the edit on your Mac) and run cave push again, or run cave push --force to overwrite the VM's version");
             e.files = Some(files);
             e
         })?;
+        if sealed {
+            plan.delete.clear();
+        }
         if plan.write.is_empty() && plan.delete.is_empty() {
             write_state(&project, &sync::agreed(&last, &mac, &vm))?;
             return Ok(Pulled::default());
@@ -304,6 +326,14 @@ impl Vms {
 }
 
 /// The project's exclusions, with its root `.gitignore`.
+/// Records the project folder's files as the VM's starting point, right
+/// after the first-boot copy, so `cave push` can tell edits on the Mac
+/// from edits in the VM.
+pub(super) fn record_first_copy(project: &Path) -> Result<(), ErrorMessage> {
+    let hashes = mac_hashes(project, &exclusions(project))?;
+    write_state(project, &hashes)
+}
+
 fn exclusions(project: &Path) -> Exclusions {
     Exclusions::new(&fs::read_to_string(project.join(".gitignore")).unwrap_or_default())
 }

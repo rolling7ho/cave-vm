@@ -9,6 +9,7 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ### Changed
 - The VM's clock and timezone follow the Mac's. The time was set only at boot, restore and resume; it is now sent again whenever the Mac's clock jumps, such as after the Mac slept with the VM running, when its timezone changes, and every 10 minutes. The guest takes the Mac's timezone instead of UTC once its image has the new guest agent (D57, decision 0028).
+- `cave export` is now `cave pull`; `export` still works, hidden from help. The hidden `cave pull` alias of `cave push` is gone, since that name now copies the other way. `cave push` works in sealed projects too, compared against what the first boot copied in, and never deletes files there. `--force` applies the Mac's version of files changed on both sides, after the usual snapshot. Help says neither is git (D58, decision 0029).
 
 ### Fixed
 - Plain `claude` still asked for permission after a yes to `cave init`'s question about skipping prompts: Claude Code ignores `bypassPermissions` in `.claude/settings.local.json`, since a repository can write that file, and fell back to asking. A yes now writes `dontAsk` with the `cave` tools allowed and the same tools denied, so Claude Code never prompts and turns away anything else. `cave init` also asks the question in an existing project, and moves an earlier yes to `dontAsk` (D55, decision 0026).

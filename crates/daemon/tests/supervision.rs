@@ -1579,19 +1579,30 @@ fn doctor_reports_the_image_cache() {
 }
 
 #[test]
-fn sync_and_pull_need_a_synced_project_and_not_a_fork() {
+fn sync_needs_a_synced_project_and_pull_a_record_or_force() {
     let r = rig("mirror", NORMAL);
     // Refused at once, even though the VM is not running.
-    for request in [Request::Sync { vm: vm() }, Request::Pull { vm: vm() }] {
-        let e = error_of(r.request(request));
-        assert_eq!(e.code, ErrorCode::BadRequest);
-        assert_eq!(e.message, "this project is sealed, so it has no Mac mirror");
-        assert!(e.fix.unwrap().contains("mode = \"synced\""));
-    }
+    let e = error_of(r.request(Request::Sync { vm: vm() }));
+    assert_eq!(e.code, ErrorCode::BadRequest);
+    assert_eq!(e.message, "this project is sealed, so it has no Mac mirror");
+    assert!(e.fix.unwrap().contains("mode = \"synced\""));
+    // A sealed project pushes too, but not without a record of the first
+    // copy unless forced.
+    let e = error_of(r.request(Request::Pull {
+        vm: vm(),
+        force: false,
+    }));
+    assert_eq!(e.code, ErrorCode::Conflict);
+    assert!(e.fix.unwrap().contains("cave push --force"));
     let fork = VmId {
         fork: Some("f".into()),
         ..vm()
     };
-    let e = error_of(r.request(Request::Sync { vm: fork }));
+    let e = error_of(r.request(Request::Sync { vm: fork.clone() }));
     assert_eq!(e.message, "forks have no Mac mirror");
+    let e = error_of(r.request(Request::Pull {
+        vm: fork,
+        force: true,
+    }));
+    assert_eq!(e.message, "forks have no Mac copy to push");
 }

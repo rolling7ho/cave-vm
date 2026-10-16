@@ -513,7 +513,7 @@ fn export_copies_the_project_out_of_the_vm_and_a_snapshot() {
     rig.exec(&["sh", "-c", "echo two > src/app.txt"], 0);
 
     // The running VM, into the default folder.
-    let out = rig.cave(&["export"]);
+    let out = rig.cave(&["pull"]);
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(
         out.status.success(),
@@ -522,7 +522,7 @@ fn export_copies_the_project_out_of_the_vm_and_a_snapshot() {
     );
     // The three above, and the six `cave init` wrote, which the first boot
     // copied in.
-    assert!(stdout.starts_with("Exported 9 files ("), "{stdout}");
+    assert!(stdout.starts_with("Copied 9 files ("), "{stdout}");
     let dir = rig
         .project()
         .join(stdout.trim().rsplit(" to ").next().unwrap());
@@ -539,12 +539,12 @@ fn export_copies_the_project_out_of_the_vm_and_a_snapshot() {
     assert_eq!(fs::read_to_string(dir.join(".git/HEAD")).unwrap(), "ref\n");
     assert_eq!(fs::read(dir.join("data.bin")).unwrap(), [0, 255]);
     // It does not write over a folder with files in it.
-    let out = rig.cave(&["export"]);
+    let out = rig.cave(&["pull"]);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("already exists"));
 
     // A snapshot, through a fork that is gone afterwards.
-    let out = rig.cave(&["export", "old", "--from", "first"]);
+    let out = rig.cave(&["pull", "old", "--from", "first"]);
     assert!(
         out.status.success(),
         "{}",
@@ -961,6 +961,13 @@ fn synced_mode_mirrors_the_vm_and_pulls_mac_edits() {
         "{stderr}"
     );
     assert_eq!(rig.exec(&["cat", "both.txt"], 0), "vm\n");
+    let out = rig.cave(&["push", "--force"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(rig.exec(&["cat", "both.txt"], 0), "mac\n");
 
     // A snapshot syncs too, once the client has its answer.
     rig.exec(&["sh", "-c", "echo snap > snap.txt"], 0);
@@ -970,6 +977,74 @@ fn synced_mode_mirrors_the_vm_and_pulls_mac_edits() {
         std::thread::sleep(Duration::from_millis(100));
     }
     assert_eq!(fs::read_to_string(mac.join("snap.txt")).unwrap(), "snap\n");
+}
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn a_sealed_project_pushes_mac_edits_and_keeps_vm_edits() {
+    let rig = Rig::new();
+    let mac = rig.project();
+    fs::write(mac.join("app.ts"), "one\n").unwrap();
+    fs::write(mac.join("both.txt"), "base\n").unwrap();
+    fs::write(mac.join("gone.txt"), "kept\n").unwrap();
+    assert!(rig.cave(&["init", "--sealed"]).status.success());
+    rig.exec(&["true"], 0);
+    let push = |rig: &Rig, args: &[&str]| {
+        let out = rig.cave(&[&["push"], args].concat());
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    let (code, stdout, _) = push(&rig, &[]);
+    assert_eq!(code, Some(0));
+    assert_eq!(
+        stdout,
+        "Nothing to push: the VM has every edit from your Mac\n"
+    );
+
+    // A Mac edit is applied after a snapshot; a file deleted on the Mac
+    // stays in the VM, and a VM edit is left alone.
+    fs::write(mac.join("app.ts"), "mac\n").unwrap();
+    fs::remove_file(mac.join("gone.txt")).unwrap();
+    rig.exec(&["sh", "-c", "echo vm > vm.txt"], 0);
+    let (code, stdout, stderr) = push(&rig, &[]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert!(stdout.contains(" before pushing"), "{stdout}");
+    assert!(
+        stdout.contains("Applied 1 file from your Mac: app.ts"),
+        "{stdout}"
+    );
+    assert_eq!(rig.exec(&["cat", "app.ts"], 0), "mac\n");
+    assert_eq!(rig.exec(&["cat", "gone.txt"], 0), "kept\n");
+    assert_eq!(rig.exec(&["cat", "vm.txt"], 0), "vm\n");
+
+    // Changed on both sides: refused, then overwritten with --force.
+    fs::write(mac.join("both.txt"), "mac\n").unwrap();
+    rig.exec(&["sh", "-c", "echo vm > both.txt"], 0);
+    let (code, _, stderr) = push(&rig, &[]);
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(
+        stderr.contains("1 file changed both on your Mac and in the VM since the last push, so nothing was pushed\n  both.txt\n  fix: "),
+        "{stderr}"
+    );
+    assert!(stderr.contains("cave push --force"), "{stderr}");
+    assert_eq!(rig.exec(&["cat", "both.txt"], 0), "vm\n");
+    let (code, _, stderr) = push(&rig, &["--force"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(rig.exec(&["cat", "both.txt"], 0), "mac\n");
+
+    // Without the record of the first copy, only --force goes ahead.
+    fs::remove_file(mac.join(".cave/sync.json")).unwrap();
+    let (code, _, stderr) = push(&rig, &[]);
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(
+        stderr.contains("cave has no record of the files"),
+        "{stderr}"
+    );
+    let (code, _, stderr) = push(&rig, &["--force"]);
+    assert_eq!(code, Some(0), "{stderr}");
 }
 
 #[test]

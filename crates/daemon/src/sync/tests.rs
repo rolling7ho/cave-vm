@@ -16,7 +16,7 @@ fn a_file_changed_only_on_the_mac_is_pulled() {
     let last = hashes(&[("a", "1"), ("gone", "1")]);
     let mac = hashes(&[("a", "2"), ("new", "1")]);
     let vm = hashes(&[("a", "1"), ("gone", "1")]);
-    let pull = plan_pull(&last, &mac, &vm).unwrap();
+    let pull = plan_pull(&last, &mac, &vm, false).unwrap();
     assert_eq!(names(&pull.write), ["a", "new"]);
     assert_eq!(names(&pull.delete), ["gone"]);
 }
@@ -26,7 +26,7 @@ fn a_file_changed_only_in_the_vm_is_left_alone_by_a_pull() {
     let last = hashes(&[("a", "1"), ("b", "1")]);
     let mac = hashes(&[("a", "1"), ("b", "1")]);
     let vm = hashes(&[("a", "2"), ("c", "1")]);
-    assert_eq!(plan_pull(&last, &mac, &vm).unwrap(), Pull::default());
+    assert_eq!(plan_pull(&last, &mac, &vm, false).unwrap(), Pull::default());
 }
 
 #[test]
@@ -35,12 +35,25 @@ fn a_file_changed_on_both_sides_stops_the_pull_and_is_listed() {
     let mac = hashes(&[("app.ts", "2"), ("package.json", "2"), ("ok", "2")]);
     let vm = hashes(&[("app.ts", "3"), ("ok", "1")]);
     assert_eq!(
-        plan_pull(&last, &mac, &vm).unwrap_err(),
+        plan_pull(&last, &mac, &vm, false).unwrap_err(),
         ["app.ts", "package.json"]
     );
     // Both sides made the same change: nothing to do, and no conflict.
     let vm = hashes(&[("app.ts", "2"), ("package.json", "2"), ("ok", "1")]);
-    assert_eq!(names(&plan_pull(&last, &mac, &vm).unwrap().write), ["ok"]);
+    assert_eq!(
+        names(&plan_pull(&last, &mac, &vm, false).unwrap().write),
+        ["ok"]
+    );
+}
+
+#[test]
+fn force_applies_the_macs_version_of_files_changed_on_both_sides() {
+    let last = hashes(&[("app.ts", "1"), ("gone", "1"), ("vm-only", "1")]);
+    let mac = hashes(&[("app.ts", "2"), ("vm-only", "1")]);
+    let vm = hashes(&[("app.ts", "3"), ("gone", "3"), ("vm-only", "2")]);
+    let pull = plan_pull(&last, &mac, &vm, true).unwrap();
+    assert_eq!(names(&pull.write), ["app.ts"]);
+    assert_eq!(names(&pull.delete), ["gone"]);
 }
 
 #[test]
@@ -62,7 +75,7 @@ fn the_first_sync_has_no_last_state() {
     let sync = plan_sync(&last, &mac, &vm);
     assert_eq!(names(&sync.write), ["vm-only"]);
     assert_eq!(names(&sync.conflicts), ["differ"]);
-    assert_eq!(plan_pull(&last, &mac, &vm).unwrap_err(), ["differ"]);
+    assert_eq!(plan_pull(&last, &mac, &vm, false).unwrap_err(), ["differ"]);
 }
 
 #[test]

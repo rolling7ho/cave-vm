@@ -174,7 +174,7 @@ fn to_vm_one(vm: &VmId, src: &Path, dest: &str, into: bool) -> Result<()> {
 }
 
 /// Copies the contents of folder `src` in the VM into `dest` on the Mac,
-/// creating it, for `cave export`.
+/// creating it, for `cave pull`.
 pub fn from_vm_folder(vm: &VmId, src: &str, dest: &Path) -> Result<()> {
     if !is_vm_dir(vm, src)? {
         return Err(CliError::new(format!("{src} is not a folder in the VM"))
