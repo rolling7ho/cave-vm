@@ -98,6 +98,7 @@ fn watch_lines(reply: &Reply, waiting: &mut Vec<String>, first: bool) -> Vec<Str
         conflicts,
         pending,
         held,
+        redacted,
     } = reply
     else {
         return Vec::new();
@@ -108,6 +109,7 @@ fn watch_lines(reply: &Reply, waiting: &mut Vec<String>, first: bool) -> Vec<Str
         conflicts: Vec::new(),
         pending: Vec::new(),
         held: Vec::new(),
+        redacted: redacted.clone(),
     };
     let mut lines: Vec<String> = sync_lines(&events)
         .into_iter()
@@ -119,6 +121,7 @@ fn watch_lines(reply: &Reply, waiting: &mut Vec<String>, first: bool) -> Vec<Str
         conflicts: conflicts.clone(),
         pending: pending.clone(),
         held: held.clone(),
+        redacted: Vec::new(),
     };
     let now: Vec<String> = sync_lines(&state)
         .into_iter()
@@ -149,6 +152,7 @@ pub fn sync_lines(reply: &Reply) -> Vec<String> {
         conflicts,
         pending,
         held,
+        redacted,
     } = reply
     else {
         return Vec::new();
@@ -169,6 +173,13 @@ pub fn sync_lines(reply: &Reply) -> Vec<String> {
             "Deleted {} on your Mac to match the VM: {}",
             files(deleted),
             list(deleted)
+        ));
+    }
+    if !redacted.is_empty() {
+        lines.push(format!(
+            "Replaced credential values with their names in {} written to your Mac: {}",
+            files(redacted),
+            list(redacted)
         ));
     }
     if !pending.is_empty() {
@@ -242,12 +253,14 @@ mod tests {
             conflicts: paths(&["package.json"]),
             pending: paths(&["notes.md"]),
             held: paths(&["cave.toml"]),
+            redacted: paths(&["config.json"]),
         };
         assert_eq!(
             sync_lines(&reply),
             [
                 "Wrote 2 files to your Mac: src/app.ts, README.md",
                 "Deleted 1 file on your Mac to match the VM: old.ts",
+                "Replaced credential values with their names in 1 file written to your Mac: config.json",
                 "1 file you changed on your Mac waits for `cave push`: notes.md",
                 "Left alone 1 file changed both on your Mac and in the VM: package.json",
                 "Did not copy 1 file the VM changed, since the VM may not change it on your Mac: cave.toml. Look at the change with `cave exec cat <file>` and make it on your Mac yourself if you want it",
@@ -259,6 +272,7 @@ mod tests {
             conflicts: vec![],
             pending: vec![],
             held: vec![],
+            redacted: vec![],
         };
         assert_eq!(sync_lines(&quiet), ["The Mac mirror is up to date"]);
     }
@@ -271,6 +285,7 @@ mod tests {
             conflicts: vec![],
             pending: paths(pending),
             held: vec![],
+            redacted: vec![],
         };
         let mut waiting = Vec::new();
         assert_eq!(

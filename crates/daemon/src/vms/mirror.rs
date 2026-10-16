@@ -19,6 +19,7 @@ use cave_vm_proto::{ErrorCode, ErrorMessage, MAX_CHUNK, write_frame};
 
 use super::{Slot, Vms, error};
 use crate::audit;
+use crate::credentials::{self, Redactor};
 use crate::project::STATE_DIR;
 use crate::relay;
 use crate::sync::{self, Exclusions, Hashes};
@@ -28,6 +29,13 @@ const WORKSPACE: &str = "/workspace";
 
 /// The file in `.cave/` with the hashes of the last sync.
 pub const STATE_FILE: &str = "sync.json";
+
+/// The file in `.cave/` listing the files the sync redacted on the Mac,
+/// each with its SHA-256 on the Mac, as redacted, and in the VM.
+pub const REDACTED_FILE: &str = "sync-redacted.json";
+
+/// Files the sync redacted: path, then the Mac's and the VM's SHA-256.
+type Redacted = std::collections::BTreeMap<String, (String, String)>;
 
 /// Files per `shasum` run on the Mac.
 const HASH_BATCH: usize = 200;
@@ -56,6 +64,8 @@ pub struct Synced {
     /// Changed only in the VM, but the VM may not change them on the Mac
     /// (D59).
     pub held: Vec<String>,
+    /// Written with credential values replaced by their names.
+    pub redacted: Vec<String>,
 }
 
 /// What a pull did.
@@ -116,9 +126,12 @@ impl Vms {
         let _one_at_a_time = MIRROR.lock().unwrap_or_else(|e| e.into_inner());
         let exclusions = exclusions(&project);
         let last = read_state(&project);
-        let mac = mac_hashes(&project, &exclusions)?;
+        let mut redacted = read_redacted(&project);
+        let mac = as_synced(mac_hashes(&project, &exclusions)?, &redacted);
         let vm = self.vm_hashes(id, &exclusions)?;
         let plan = sync::plan_sync(&last, &mac, &vm);
+        let known = self.held_values(id, &project)?;
+        let mut redacted_now = Vec::new();
         let pending = mac
             .keys()
             .chain(last.keys())
@@ -129,14 +142,25 @@ impl Vms {
             .collect();
         let mut after = mac.clone();
         for path in &plan.write {
-            let data = self.read_vm_file(id, path)?;
-            write_mac_file(&project, path, &data.0, data.1)?;
+            let (data, mode) = self.read_vm_file(id, path)?;
+            // Credentials the VM was given never reach the Mac's copy.
+            let clean = redact(&known, &data);
+            write_mac_file(&project, path, &clean, mode)?;
+            if clean == data {
+                redacted.remove(path);
+            } else {
+                let on_mac = sha256_hex(&clean).map_err(|e| io_error("hash a redacted file", e))?;
+                redacted.insert(path.clone(), (on_mac, vm[path].clone()));
+                redacted_now.push(path.clone());
+            }
             after.insert(path.clone(), vm[path].clone());
         }
         for path in &plan.delete {
             remove_mac_file(&project, path)?;
+            redacted.remove(path);
             after.remove(path);
         }
+        write_redacted(&project, &redacted)?;
         write_state(&project, &sync::agreed(&last, &after, &vm))?;
         Ok(Synced {
             written: plan.write,
@@ -144,6 +168,7 @@ impl Vms {
             conflicts: plan.conflicts,
             pending,
             held: plan.held,
+            redacted: redacted_now,
         })
     }
 
@@ -171,7 +196,8 @@ impl Vms {
             .with_fix("Run cave push --force to copy every file that differs from your Mac into the VM, after a snapshot"));
         }
         let last = read_state(&project);
-        let mac = mac_hashes(&project, &exclusions)?;
+        let mut redacted = read_redacted(&project);
+        let mac = as_synced(mac_hashes(&project, &exclusions)?, &redacted);
         let vm = self.vm_hashes(id, &exclusions)?;
         let mut plan = sync::plan_pull(&last, &mac, &vm, force).map_err(|files| {
             let mut e = error(
@@ -213,7 +239,9 @@ impl Vms {
                 },
             });
             after.insert(path.clone(), mac[path].clone());
+            redacted.remove(path);
         }
+        write_redacted(&project, &redacted)?;
         audit::record_all(id, &written);
         if !plan.delete.is_empty() {
             let mut argv = vec!["rm".to_string(), "-f".into(), "--".into()];
@@ -281,6 +309,21 @@ impl Vms {
             .collect())
     }
 
+    /// The names and values of the credentials the running VM was given,
+    /// to redact from what the sync writes to the Mac.
+    fn held_values(
+        &self,
+        id: &VmId,
+        project: &Path,
+    ) -> Result<Vec<(String, String)>, ErrorMessage> {
+        let vm = self.vm(id)?;
+        let held: Vec<String> = match &*vm.slot.lock().expect("vm lock") {
+            Slot::Running(running) => running.credentials.iter().cloned().collect(),
+            _ => Vec::new(),
+        };
+        Ok(credentials::values_of(project, &held))
+    }
+
     /// A file in `/workspace` and its mode.
     fn read_vm_file(&self, id: &VmId, path: &str) -> Result<(Vec<u8>, u32), ErrorMessage> {
         let request = Message::FileRead {
@@ -340,6 +383,49 @@ pub(super) fn record_first_copy(project: &Path) -> Result<(), ErrorMessage> {
 
 fn exclusions(project: &Path) -> Exclusions {
     Exclusions::new(&fs::read_to_string(project.join(".gitignore")).unwrap_or_default())
+}
+
+/// `data` with each of `known`'s values replaced by its name.
+fn redact(known: &[(String, String)], data: &[u8]) -> Vec<u8> {
+    if known.is_empty() {
+        return data.to_vec();
+    }
+    let mut redactor = Redactor::new(known);
+    let mut out = redactor.push(data);
+    out.extend(redactor.finish());
+    out
+}
+
+/// `mac` with each file the sync redacted, unchanged since, at the VM's
+/// hash, so the redaction is not taken for an edit made on the Mac.
+fn as_synced(mut mac: Hashes, redacted: &Redacted) -> Hashes {
+    for (path, (on_mac, in_vm)) in redacted {
+        if mac.get(path) == Some(on_mac) {
+            mac.insert(path.clone(), in_vm.clone());
+        }
+    }
+    mac
+}
+
+fn read_redacted(project: &Path) -> Redacted {
+    fs::read_to_string(project.join(STATE_DIR).join(REDACTED_FILE))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn write_redacted(project: &Path, redacted: &Redacted) -> Result<(), ErrorMessage> {
+    let file = project.join(STATE_DIR).join(REDACTED_FILE);
+    if redacted.is_empty() {
+        return match fs::remove_file(&file) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => {
+                Err(io_error("save the sync state", e))
+            }
+            _ => Ok(()),
+        };
+    }
+    let text = serde_json::to_string_pretty(redacted).expect("JSON");
+    write_atomic(&file, text.as_bytes(), 0o644).map_err(|e| io_error("save the sync state", e))
 }
 
 fn read_state(project: &Path) -> Hashes {
@@ -551,6 +637,22 @@ mod tests {
         ] {
             assert!(inside(p, bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_redacted_file_is_not_taken_for_a_mac_edit() {
+        let known = [("API_KEY".to_string(), "s3cret".to_string())];
+        assert_eq!(redact(&known, b"key=s3cret\n"), b"key=[API_KEY]\n");
+        assert_eq!(redact(&[], b"key=s3cret"), b"key=s3cret");
+        let redacted = Redacted::from([("a".to_string(), ("r".to_string(), "v".to_string()))]);
+        let mac = Hashes::from([
+            ("a".to_string(), "r".to_string()),
+            ("b".to_string(), "x".to_string()),
+        ]);
+        assert_eq!(as_synced(mac.clone(), &redacted)["a"], "v");
+        // Edited on the Mac since: its own hash counts.
+        let edited = Hashes::from([("a".to_string(), "e".to_string())]);
+        assert_eq!(as_synced(edited, &redacted)["a"], "e");
     }
 
     #[test]

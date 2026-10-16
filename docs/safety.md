@@ -45,7 +45,7 @@ Inside the VM, by default, the agent has a full shell, but only in the VM. Its m
 
 ## Credentials
 
-A credential named in an `exec` call is read from `.env` on the Mac and injected into that one command's environment. Its value is replaced with `[NAME]` in the output returned to the agent, then and in every later command and file read while the VM's memory may still hold it, and the audit log records the name only. `.env` is never copied into the VM or synced ([D33](../ROADMAP.md#decisions)).
+A credential named in an `exec` call is read from `.env` on the Mac and injected into that one command's environment. Its value is replaced with `[NAME]` in the output returned to the agent, then and in every later command, file read and file the sync writes to the Mac mirror while the VM's memory may still hold it, and the audit log records the name only. `.env` is never copied into the VM or synced ([D33](../ROADMAP.md#decisions)).
 
 What this does not cover:
 

@@ -294,6 +294,10 @@ pub enum Reply {
         /// such as `cave.toml` and `.claude/` (D59), left alone.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         held: Vec<String>,
+        /// Files written to the Mac with credential values the VM was
+        /// given replaced by their names.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        redacted: Vec<String>,
     },
     /// The reply to `pull`. Paths are relative to the project.
     Pulled {

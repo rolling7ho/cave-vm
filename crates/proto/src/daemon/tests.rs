@@ -253,6 +253,7 @@ fn replies_round_trip() {
             conflicts: Vec::new(),
             pending: vec!["README.md".into()],
             held: vec!["cave.toml".into()],
+            redacted: Vec::new(),
         },
     );
     check(
