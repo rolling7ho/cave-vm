@@ -264,6 +264,7 @@ pub fn handle(mut stream: UnixStream, vms: &Vms) -> io::Result<()> {
                 conflicts: synced.conflicts,
                 pending: synced.pending,
                 held: synced.held,
+                redacted: synced.redacted,
             })
         }
         Request::List { project } => Ok(Reply::List {

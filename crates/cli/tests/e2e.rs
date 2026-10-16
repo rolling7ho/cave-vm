@@ -741,6 +741,67 @@ fn forks_run_on_their_own() {
 
 #[test]
 #[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
+fn the_mirror_never_holds_a_credential_the_vm_was_given() {
+    const VALUE: &str = "mirror-e2e-credential";
+    let rig = Rig::new();
+    let mac = rig.project();
+    assert!(rig.cave(&["init", "--synced"]).status.success());
+    fs::write(mac.join(".env"), format!("API_KEY={VALUE}\n")).unwrap();
+    rig.exec(&["true"], 0);
+    let calls = [
+        serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "e2e", "version": "1"}}}),
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+            "name": "exec", "arguments": {
+                "command": "echo \"key=$API_KEY\" > leak.txt", "credentials": ["API_KEY"]}}}),
+    ];
+    let input: String = calls.iter().map(|c| format!("{c}\n")).collect();
+    let mut mcp = rig
+        .command(&["mcp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    mcp.stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    assert!(mcp.wait_with_output().unwrap().status.success());
+
+    let out = rig.cave(&["sync"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains(
+            "Replaced credential values with their names in 1 file written to your Mac: leak.txt"
+        ),
+        "{stdout}"
+    );
+    assert_eq!(
+        fs::read_to_string(mac.join("leak.txt")).unwrap(),
+        "key=[API_KEY]\n"
+    );
+    // The redaction is not an edit on the Mac: nothing waits for a push.
+    let out = rig.cave(&["sync"]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "The Mac mirror is up to date\n"
+    );
+    let out = rig.cave(&["push"]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "Nothing to push: the VM has every edit from your Mac\n"
+    );
+}
+
+#[test]
+#[ignore = "needs a Mac with the hypervisor entitlement and a built image"]
 fn credentials_reach_the_command_but_not_the_agent() {
     const VALUE: &str = "snednao_#m34nr";
     let rig = Rig::new();
