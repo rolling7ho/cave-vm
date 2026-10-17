@@ -1,6 +1,6 @@
 {
   "name": "cave-vm",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0-rc.4",
   "description": "TypeScript and JavaScript client for cave-vm, disposable Linux VMs for coding agents on macOS",
   "license": "Apache-2.0",
   "type": "module",

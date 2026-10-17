@@ -4,6 +4,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [1.0.0-rc.4] - 2026-10-17
+
+The fourth release candidate for 1.0.0, with the fixes from the 1.0.0 code review: the VM can no longer change the project's setup files or write credentials through the Mac mirror, `cave cp` stays inside the folder it copies, `cave agent --on-mac` refuses more flags that skip prompts, `destroy` never removes a snapshot, a VM can no longer make the Mac hold memory or disk without end, and a new size in `cave.toml` applies after `cave stop`.
+
 ### Changed
 - An agent started by `cave agent` in the VM is told the steps only you can take on the Mac, so it passes them on: more disk or memory in `cave.toml` then `cave stop`, the network policy, `cave pull` and `cave push`, and snapshots. Nothing in the VM can change its own size or policy.
 - `cave agent`'s help, `cave init`'s last line and the unknown-agent error say that any agent or command runs in the VM with `cave shell` or `cave exec`, not only Claude Code and Codex.
