@@ -4,7 +4,7 @@
 
 cave-vm (Coding Agent Virtual Environment) is an open-source microVM runtime for Macs with Apple Silicon (M-series) chips. It gives each project directory its own Linux VM that starts quickly, can be snapshotted, rolled back and forked, and shows you exactly what it can reach.
 
-Coding agents are most useful when you stop approving every command, and most risky at the same moment. With cave-vm, the agent works inside a hardware-isolated VM instead of on your Mac, so a bad command damages a disposable machine, not your own files.
+Coding agents are most useful when you stop approving every command. The real risk then is not one bad command but a wrecked environment: a broken toolchain, a botched migration, a change you didn't ask for. With cave-vm, the agent works inside a hardware-isolated VM instead of on your Mac, and you can snapshot, roll back or fork that whole running machine, processes included, in milliseconds. Undo a bad hour in one command, or let several agents try different approaches from the same starting point and keep the best one.
 
 ## Requirements
 
