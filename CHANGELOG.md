@@ -4,6 +4,10 @@ All notable changes to cave-vm are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-17
+
+The first stable release: 1.0.0-rc.4 unchanged, with the VM images that keep the Mac's time and timezone.
+
 ## [1.0.0-rc.4] - 2026-10-17
 
 The fourth release candidate for 1.0.0, with the fixes from the 1.0.0 code review: the VM can no longer change the project's setup files or write credentials through the Mac mirror, `cave cp` stays inside the folder it copies, `cave agent --on-mac` refuses more flags that skip prompts, `destroy` never removes a snapshot, a VM can no longer make the Mac hold memory or disk without end, and a new size in `cave.toml` applies after `cave stop`.
