@@ -64,13 +64,12 @@ The last section, "Maintainer agents", is how Ivan's own agents work in this rep
 - `cargo fmt`, `cargo clippy -D warnings` and the tests pass.
 - Docs and the changelog are updated.
 - Any new `unsafe` has its safety comment.
-- PRs that include AI-assisted work say so.
 
 ## Maintainer agents
 
 These rules are for the agents working for Ivan, on top of everything above. They do not touch signing, release or CI secrets or branch protection, and do not publish images or releases.
 
-1. Request a review from @rolling7ho on every PR (`gh pr edit <n> --add-reviewer rolling7ho`).
+1. Request a review from @rolling7ho on every PR (`gh pr edit <n> --add-reviewer rolling7ho`), and say in its description that it includes AI-assisted work. Outside contributors need not, as CONTRIBUTING.md says.
 2. Watch main while PRs are open. After every merge:
    - Update each open PR branch from main and resolve its conflicts, then run the lint and the tests before pushing.
    - Open a PR for every waiting branch whose dependencies have now merged. Open as many as D25 allows.

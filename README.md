@@ -60,7 +60,7 @@ The full command reference, with every flag and error, is in [docs/cli.md](docs/
 - **Code lives inside the VM.** The agent can't touch host files because nothing from the host is mounted. A synced mode is also optionally available if you prefer it.
 - **Snapshot, roll back, fork.** Snapshot before a risky run and restore after. Fork a project into parallel copies to try several approaches at once.
 - **Safety you can see.** Every VM has an inspectable policy: what is reachable, how much CPU and memory it gets, and a log of what the agent did.
-- **Agent-first.** An MCP server and a skill let Claude Code and Codex use the VM as their sandbox with no host shell.
+- **Agent-first.** `cave agent claude` and `cave agent codex` start the agent inside the VM, and any other agent or tool runs there with `cave shell` or `cave exec`. For an agent kept on the Mac, an MCP server and a skill give it the VM as its sandbox.
 - **Easy to set up.** One install, and the first run fetches everything else and fixes what it can.
   
 ## Safety defaults
